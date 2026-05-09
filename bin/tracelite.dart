@@ -116,7 +116,7 @@ Future<void> _compare(List<String> args) async {
             peer: peer,
             repetition: repetition,
             trace: trace,
-            elapsedNs: _readScenarioElapsedNs(metricsPath),
+            metrics: _readPeerMetrics(metricsPath),
             childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
           ),
         );
@@ -257,7 +257,7 @@ Future<void> _calibrate(List<String> args) async {
   _printCalibrationReport(artifact);
 }
 
-Future<void> _runPeer(List<String> args) {
+Future<void> _runPeer(List<String> args) async {
   final options = _parseOptions(args);
   final peer = options['peer'];
   final scenario = options['scenario'] ?? narrowBatchInsertScenario;
@@ -269,22 +269,26 @@ Future<void> _runPeer(List<String> args) {
     exit(64);
   }
   final stopwatch = Stopwatch()..start();
-  return runPeerScenario(
-    peerName: peer,
-    scenarioName: scenario,
-    databasePath: database,
-    rows: rows,
-  ).whenComplete(() {
+  PeerScenarioResult? result;
+  try {
+    result = await runPeerScenario(
+      peerName: peer,
+      scenarioName: scenario,
+      databasePath: database,
+      rows: rows,
+    );
+  } finally {
     stopwatch.stop();
     if (metrics != null && metrics.isNotEmpty) {
       File(metrics).writeAsStringSync(
         jsonEncode({
           'schema': 'tracelite.peer_metrics.v1',
           'scenario_elapsed_ns': stopwatch.elapsedMicroseconds * 1000,
+          if (result != null) ...result.toJson(),
         }),
       );
     }
-  });
+  }
 }
 
 Map<String, String> _parseOptions(List<String> args) {
@@ -327,6 +331,7 @@ Map<String, Object?> _compareArtifact({
     'generated_at': DateTime.now().toUtc().toIso8601String(),
     'scenario': scenario,
     'rows': rows,
+    'workload': peerScenarioParameters(scenario, rows: rows),
     'repetitions': repetitions,
     'peers': [
       for (final entry in peers.entries)
@@ -347,6 +352,11 @@ Map<String, Object?> _peerArtifact({
   final eventCounts = successful.map((result) => result.trace!.events.length);
   final spanCounts = successful.map((result) => result.trace!.spans.length);
   final elapsedNs = successful.map((result) => result.elapsedNs);
+  final setupElapsedNs = successful.map((result) => result.setupElapsedNs);
+  final warmupElapsedNs = successful.map((result) => result.warmupElapsedNs);
+  final measuredElapsedNs = successful.map(
+    (result) => result.measuredElapsedNs,
+  );
   final childElapsedNs = successful.map((result) => result.childElapsedNs);
   final traceDurations = successful.map(_traceDurationNs);
   final totalSpanNs = successful.map(
@@ -381,6 +391,9 @@ Map<String, Object?> _peerArtifact({
     'failed_repetitions': failed,
     'summary': {
       'elapsed_ns': _IntStats.fromValues(elapsedNs).toJson(),
+      'setup_elapsed_ns': _IntStats.fromValues(setupElapsedNs).toJson(),
+      'warmup_elapsed_ns': _IntStats.fromValues(warmupElapsedNs).toJson(),
+      'measured_elapsed_ns': _IntStats.fromValues(measuredElapsedNs).toJson(),
       'child_elapsed_ns': _IntStats.fromValues(childElapsedNs).toJson(),
       'trace_duration_ns': _IntStats.fromValues(traceDurations).toJson(),
       'trace_span_total_ns': _IntStats.fromValues(totalSpanNs).toJson(),
@@ -404,6 +417,9 @@ Map<String, Object?> _sampleArtifact(_PeerTraceResult result) {
       'repetition': result.repetition,
       'status': 'failed',
       'elapsed_ns': result.elapsedNs,
+      'setup_elapsed_ns': result.setupElapsedNs,
+      'warmup_elapsed_ns': result.warmupElapsedNs,
+      'measured_elapsed_ns': result.measuredElapsedNs,
       'child_elapsed_ns': result.childElapsedNs,
       'stdout': result.stdout,
       'stderr': result.stderr,
@@ -413,6 +429,9 @@ Map<String, Object?> _sampleArtifact(_PeerTraceResult result) {
     'repetition': result.repetition,
     'status': trace.events.isEmpty ? 'no_trace' : 'ok',
     'elapsed_ns': result.elapsedNs,
+    'setup_elapsed_ns': result.setupElapsedNs,
+    'warmup_elapsed_ns': result.warmupElapsedNs,
+    'measured_elapsed_ns': result.measuredElapsedNs,
     'child_elapsed_ns': result.childElapsedNs,
     'events': trace.events.length,
     'spans': trace.spans.length,
@@ -710,13 +729,12 @@ Map<String, Object?> _readJsonMap(String path) {
   return decoded;
 }
 
-int _readScenarioElapsedNs(String path) {
+_PeerRunMetrics _readPeerMetrics(String path) {
   final file = File(path);
-  if (!file.existsSync()) return 0;
+  if (!file.existsSync()) return const _PeerRunMetrics();
   final decoded = jsonDecode(file.readAsStringSync());
-  if (decoded is! Map<String, Object?>) return 0;
-  final value = decoded['scenario_elapsed_ns'];
-  return value is int ? value : 0;
+  if (decoded is! Map<String, Object?>) return const _PeerRunMetrics();
+  return _PeerRunMetrics.fromJson(decoded);
 }
 
 Map<String, Map<String, Object?>> _peersByName(Map<String, Object?> artifact) {
@@ -843,7 +861,7 @@ class _PeerTraceResult {
     required this.peer,
     required this.repetition,
     required this.trace,
-    required this.elapsedNs,
+    required this.metrics,
     required this.childElapsedNs,
   })  : stdout = '',
         stderr = '';
@@ -851,19 +869,53 @@ class _PeerTraceResult {
   _PeerTraceResult.failed({
     required this.peer,
     required this.repetition,
-    required this.elapsedNs,
+    required int elapsedNs,
     required this.childElapsedNs,
     required this.stdout,
     required this.stderr,
-  }) : trace = null;
+  })  : trace = null,
+        metrics = _PeerRunMetrics(scenarioElapsedNs: elapsedNs);
 
   final String peer;
   final int repetition;
   final Trace? trace;
-  final int elapsedNs;
+  final _PeerRunMetrics metrics;
   final int childElapsedNs;
   final String stdout;
   final String stderr;
+
+  int get elapsedNs => metrics.scenarioElapsedNs;
+  int get setupElapsedNs => metrics.setupElapsedNs;
+  int get warmupElapsedNs => metrics.warmupElapsedNs;
+  int get measuredElapsedNs => metrics.measuredElapsedNs;
+}
+
+class _PeerRunMetrics {
+  const _PeerRunMetrics({
+    this.scenarioElapsedNs = 0,
+    this.setupElapsedNs = 0,
+    this.warmupElapsedNs = 0,
+    this.measuredElapsedNs = 0,
+  });
+
+  factory _PeerRunMetrics.fromJson(Map<String, Object?> json) {
+    int readInt(String key) {
+      final value = json[key];
+      return value is int ? value : 0;
+    }
+
+    return _PeerRunMetrics(
+      scenarioElapsedNs: readInt('scenario_elapsed_ns'),
+      setupElapsedNs: readInt('setup_elapsed_ns'),
+      warmupElapsedNs: readInt('warmup_elapsed_ns'),
+      measuredElapsedNs: readInt('measured_elapsed_ns'),
+    );
+  }
+
+  final int scenarioElapsedNs;
+  final int setupElapsedNs;
+  final int warmupElapsedNs;
+  final int measuredElapsedNs;
 }
 
 class _LoopTiming {
@@ -968,7 +1020,7 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('usage:');
   stderr.writeln('  dart run bin/tracelite.dart report <region-path>');
   stderr.writeln('  dart run bin/tracelite.dart compare '
-      '--scenario=narrow-batch-insert '
+      '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
       '[--repetitions=5] [--out-json=compare.json]');
   stderr.writeln('  dart run bin/tracelite.dart diff '

@@ -1,6 +1,6 @@
 # tracelite
 
-> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, and peer harness are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for the peer scenario.
+> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, and peer harness are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for baseline plus initial resqlite-derived feed-paging and sync-burst scenarios.
 
 Cross-library SQLite profiling and tracing for the Dart ecosystem. Point it at any Dart program that uses SQLite — Resqlite, drift, sqlite_async, the raw `sqlite3` package, anything — and see the full call timeline: into FFI, through SQLite's C internals, and back. On a single shared clock, with no instrumentation in the libraries being measured.
 

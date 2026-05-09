@@ -10,7 +10,7 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — add statistical gates, port the resqlite workload matrix, prove semantic parity against the existing profile runner, then finish packaging and Linux/Windows shim validation.
+**Next bottleneck:** production benchmark replacement hardening — finish the resqlite workload matrix, add statistical gates, prove semantic parity against the existing profile runner, then finish packaging and Linux/Windows shim validation.
 
 ---
 
@@ -372,12 +372,16 @@ Implemented:
 - `SqliteInterface` and row/result types from `peer-interface-contract.md`.
 - Scenario lifecycle runner with explicit fresh/shared DB state machines.
 - `narrow-batch-insert` and `point-select` baseline scenarios.
+- `feed-paging` and `sync-burst` resqlite-derived workload ports over the
+  shared SQL interface.
 - Adapters for:
   - `sqlite3`
   - `drift`
   - `sqlite_async`
   - `resqlite`
-- Per-run status capture: peer name, scenario parameters, event count, span count, `sqlite3_step` span count, total traced time, and trace-gap notes.
+- Per-run status capture: peer name, scenario parameters, setup/warmup/measured
+  phase timing, event count, span count, `sqlite3_step` span count, total traced
+  time, and trace-gap notes.
 
 The harness command shape:
 
@@ -467,17 +471,22 @@ Acceptance gates:
 - Removing `Timeline.startSync` markers and `ProfiledDatabase` wall-time
   wrappers becomes a behavior-preserving cleanup, not a loss of evidence.
 
-### Phase 10: Workload matrix and peer fairness hardening
+### Phase 10: Workload matrix and peer fairness hardening (in progress)
 
 **Goal:** make tracelite's benchmark harness broad enough to replace resqlite's
 profile workflow for real experiment decisions.
 
 Work:
 
+- Done in tracelite core: compare artifacts now include deterministic workload
+  parameters plus setup, warmup, and measured phase timings from the child
+  process.
+- Done in the peer harness: initial `feed-paging` and `sync-burst` workload
+  ports run across `sqlite3`, `drift`, `sqlite_async`, and `resqlite`.
 - Port the useful resqlite workload shapes:
   - chat simulation;
-  - feed paging;
-  - sync burst;
+  - feed paging; ✓ initial shared-SQL port
+  - sync burst; ✓ initial shared-SQL port
   - large working set;
   - keyed primary-key subscriptions;
   - high-cardinality fan-out;

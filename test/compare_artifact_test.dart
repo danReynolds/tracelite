@@ -39,6 +39,7 @@ void main() {
     final artifact = jsonDecode(File(artifactPath).readAsStringSync())
         as Map<String, Object?>;
     expect(artifact['schema'], 'tracelite.compare.v1');
+    expect(artifact['workload'], isA<Map<String, Object?>>());
     expect(artifact['repetitions'], 2);
     final peers = artifact['peers'] as List<Object?>;
     expect(peers, hasLength(1));
@@ -50,6 +51,8 @@ void main() {
     for (final sample in samples.cast<Map<String, Object?>>()) {
       expect(sample['status'], 'ok');
       expect(sample['elapsed_ns'] as int, greaterThan(0));
+      expect(sample['setup_elapsed_ns'] as int, greaterThan(0));
+      expect(sample['measured_elapsed_ns'] as int, greaterThan(0));
       expect(sample['child_elapsed_ns'] as int, greaterThan(0));
       expect(sample['span_groups'] as List<Object?>, isNotEmpty);
     }

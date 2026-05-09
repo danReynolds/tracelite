@@ -29,6 +29,10 @@ vocabulary.
   repetition artifacts by a chosen summary metric.
 - `tracelite calibrate` measures Dart recorder overhead with body-only,
   disabled-recorder, and active-recorder loops.
+- Compare artifacts now include deterministic workload parameters and
+  child-process setup, warmup, and measured phase timings.
+- The peer harness now includes initial shared-SQL ports of resqlite's
+  `feed-paging` and `sync-burst` workload shapes.
 
 ## Evidence from this pass
 
@@ -105,6 +109,28 @@ The resqlite runs above use the current local `../resqlite` override. The
 fuller Dart-level resqlite span/counter vocabulary depends on the PR that adds
 the tracelite logical-track bridge.
 
+### Four-peer resqlite-derived workload smoke
+
+Commands:
+
+```bash
+dart run bin/tracelite.dart compare \
+  --scenario=feed-paging \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --rows=8
+
+dart run bin/tracelite.dart compare \
+  --scenario=sync-burst \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --rows=8
+```
+
+Result: both workload shapes completed on all four peers with non-empty SQLite
+traces and `0/0/0` max dropped/unmatched diagnostics. The small row count is a
+smoke validation of scenario semantics and tracing coverage; production-scale
+numbers still need repetition counts, larger parameter sets, and statistical
+decisioning.
+
 ## What this can replace first
 
 Ready to migrate first:
@@ -131,12 +157,12 @@ can return `too_noisy` when either side exceeds the configured coefficient of
 variation gate. A production replacement still needs confidence intervals or a
 non-parametric test over repetitions.
 
-### 2. Workload coverage is too small
+### 2. Workload coverage is still incomplete
 
-Only `narrow-batch-insert` and `point-select` are implemented in tracelite's
-peer harness. Production replacement requires porting the resqlite workload
-matrix: chat sim, feed paging, sync burst, large working set, keyed PK
-subscriptions, fan-out, and many-stream writer throughput.
+`narrow-batch-insert`, `point-select`, `feed-paging`, and `sync-burst` are now
+implemented in tracelite's peer harness. Production replacement still requires
+the rest of the resqlite workload matrix: chat sim, large working set, keyed PK
+subscriptions, fan-out, many-stream writer throughput, and SQLite diagnostics.
 
 ### 3. Runner startup is separated, not eliminated
 
@@ -163,8 +189,7 @@ be called production-quality across Dart targets.
 ## Recommended next iteration
 
 1. Add statistical gates to `tracelite diff`.
-2. Port the smallest useful subset of resqlite profile workloads into
-   tracelite's peer harness.
+2. Port the remaining resqlite profile workloads into tracelite's peer harness.
 3. Add diagnostic snapshot import as trace metadata/gauges.
 4. Run old resqlite profile artifacts and tracelite artifacts side by side for
    the same workloads.
