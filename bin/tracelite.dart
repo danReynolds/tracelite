@@ -136,6 +136,9 @@ Future<void> _compare(List<String> args) async {
         ..writeAsStringSync('${encoder.convert(artifact)}\n');
     }
     _printCompareReport(artifact);
+    if (_hasCompareFailure(artifact)) {
+      exitCode = 65;
+    }
   } finally {
     try {
       tempRoot.deleteSync(recursive: true);
@@ -332,11 +335,21 @@ Map<String, Object?> _compareArtifact({
     'scenario': scenario,
     'rows': rows,
     'workload': peerScenarioParameters(scenario, rows: rows),
+    'environment': _environmentArtifact(),
     'repetitions': repetitions,
     'peers': [
       for (final entry in peers.entries)
         _peerArtifact(peer: entry.key, results: entry.value),
     ],
+  };
+}
+
+Map<String, Object?> _environmentArtifact() {
+  return {
+    'dart_version': Platform.version,
+    'operating_system': Platform.operatingSystem,
+    'operating_system_version': Platform.operatingSystemVersion,
+    'number_of_processors': Platform.numberOfProcessors,
   };
 }
 
@@ -862,8 +875,25 @@ String _peerStatus(List<_PeerTraceResult> results) {
   if (successful.any((result) => result.trace!.events.isEmpty)) {
     return 'no_trace';
   }
+  if (successful.any((result) => _hasTraceDiagnostics(result.trace!))) {
+    return 'trace_diagnostics';
+  }
   if (successful.length != results.length) return 'partial';
   return 'ok';
+}
+
+bool _hasCompareFailure(Map<String, Object?> artifact) {
+  final peers = artifact['peers'];
+  if (peers is! List<Object?>) return true;
+  return peers
+      .cast<Map<String, Object?>>()
+      .any((peer) => peer['status'] != 'ok');
+}
+
+bool _hasTraceDiagnostics(Trace trace) {
+  return trace.diagnostics.droppedEvents != 0 ||
+      trace.diagnostics.unmatchedBeginEvents != 0 ||
+      trace.diagnostics.unmatchedEndEvents != 0;
 }
 
 int _traceDurationNs(_PeerTraceResult result) =>

@@ -481,6 +481,9 @@ Work:
 - Done in tracelite core: compare artifacts now include deterministic workload
   parameters plus setup, warmup, and measured phase timings from the child
   process.
+- Done in tracelite core: compare artifacts now include Dart/OS environment
+  metadata, and `compare` exits non-zero if any peer fails, emits no trace, or
+  reports dropped/unmatched trace diagnostics.
 - Done in the peer harness: initial `feed-paging`, `sync-burst`, `chat-sim`,
   and scaled `large-working-set` workload ports run across `sqlite3`, `drift`,
   `sqlite_async`, and `resqlite`.

@@ -40,6 +40,7 @@ void main() {
         as Map<String, Object?>;
     expect(artifact['schema'], 'tracelite.compare.v1');
     expect(artifact['workload'], isA<Map<String, Object?>>());
+    expect(artifact['environment'], isA<Map<String, Object?>>());
     expect(artifact['repetitions'], 2);
     final peers = artifact['peers'] as List<Object?>;
     expect(peers, hasLength(1));

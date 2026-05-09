@@ -33,7 +33,10 @@ vocabulary.
 - `tracelite calibrate` measures Dart recorder overhead with body-only,
   disabled-recorder, and active-recorder loops.
 - Compare artifacts now include deterministic workload parameters and
-  child-process setup, warmup, and measured phase timings.
+  child-process setup, warmup, measured phase timings, and Dart/OS environment
+  metadata.
+- `tracelite compare` now exits non-zero when any peer fails, emits no trace, or
+  reports dropped/unmatched trace diagnostics.
 - The peer harness now includes initial shared-SQL ports of resqlite's
   `feed-paging`, `sync-burst`, `chat-sim`, and scaled `large-working-set`
   workload shapes.
