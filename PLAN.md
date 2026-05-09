@@ -16,7 +16,12 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## What tracelite is
 
-A profiling system for the Dart SQLite ecosystem. The core insight: **every Dart SQLite library FFI-links to the same `libsqlite3` C library**, so instrumenting `libsqlite3` once captures every library that uses it — drift, sqlite_async, the `sqlite3` package itself, Resqlite, anything future. No coordination with library authors needed.
+A SQLite performance-analysis toolkit for the Dart ecosystem: a benchmarking
+tool powered by a profiler. The core insight: **every Dart SQLite library
+FFI-links to the same `libsqlite3` C library**, so instrumenting `libsqlite3`
+once captures every library that uses it — drift, sqlite_async, the `sqlite3`
+package itself, Resqlite, anything future. No coordination with library authors
+needed.
 
 Layered on top:
 
@@ -264,9 +269,46 @@ Things validated by build but not runtime:
 
 The implementation sequence after the prototype validation is:
 
-> format/schema → runtime mmap proof → registry generation → aggregator/reporting → SQLite shim coverage → peer harness/adapters → cross-library validation → visualizer
+> format/schema → runtime mmap proof → registry generation → aggregator/reporting → SQLite shim coverage → peer harness/adapters → cross-library validation → benchmark artifacts/diff → production resqlite parity → workload/statistics hardening → visualizer/export
 
-Format/schema, runtime mmap proof, registry generation, aggregator/reporting, wider SQLite shim coverage, peer harness/adapters, and the four-peer validation matrix are done for the local prototype.
+Format/schema, runtime mmap proof, registry generation, aggregator/reporting,
+wider SQLite shim coverage, peer harness/adapters, the four-peer validation
+matrix, and the first benchmark artifact/diff/calibration workflow are done for
+the local prototype.
+
+### Production-ready target
+
+Production-ready means tracelite can replace most of resqlite's custom profile
+runner/reporting code while improving cross-library evidence quality.
+
+The target split:
+
+- **tracelite owns** trace capture, SQLite attribution, Dart recorder APIs,
+  span/counter metadata, JSON artifacts, report generation, repetition
+  summaries, regression decisions, peer adapters, visualization, and optional
+  Perfetto/export paths.
+- **resqlite owns** benchmark workload definitions, public diagnostics APIs,
+  the trace-enabled native build hook, and small opt-in semantic emissions for
+  facts only resqlite can know.
+
+Exit criteria before deleting old resqlite profiling surfaces:
+
+- Old `benchmark/run_profile.dart` and new tracelite artifacts run side by side
+  for the same workload matrix.
+- Operation counts, row/cell decode counts, stream invalidation counters,
+  reader-pool pressure, and SQLite diagnostics snapshots have tracelite
+  equivalents.
+- Timing breakdowns directionally match the old profiler while adding
+  trace-level attribution to SQLite C, reader/writer handling, dispatch,
+  invalidation, and decode work.
+- `tracelite diff` can produce `improved`, `regressed`, `neutral`, or
+  `too_noisy` decisions from independent repetitions without depending on
+  pseudo-replicated within-run spans.
+- CI verifies the native shim path, the trace-enabled resqlite native-asset
+  path, generated schema freshness, and at least one cross-library smoke
+  benchmark.
+- The normal resqlite release path remains unaffected unless profile/tracing
+  build flags are explicitly enabled.
 
 ### Phase 4: Aggregator skeleton (complete)
 
@@ -351,16 +393,181 @@ Current evidence:
 - Tests cover region decoding, span pairing, string-pool decoding, markdown reporting, at least one real sqlite3 shim run, and the four-peer compare command.
 - The compare output includes the architectural warning from `peer-interface-contract.md`: tracelite compares shared SQL execution paths, not overall library quality.
 
-### Phase 8+ (deferred)
+### Phase 8: Benchmark artifact workflow (complete)
 
-- Linux build of the shim (different reexport mechanism, different SQLite path).
-- Upstream/package the `resqlite` trace-enabled native-asset mode.
-- LiveQuery / interval indexing for the visualizer.
-- Visualizer (Flutter web).
-- CLI binary (`tracelite run`, `compare`, `diff`, `report`, `show`).
-- Stack sampler integration (CPU attribution).
-- Hook callback wrapping (commit/update/preupdate).
-- Cross-process drainage.
+**Goal:** turn trace runs into benchmark artifacts that can replace resqlite's
+custom profile output over time.
+
+Delivered:
+
+- `tracelite compare --repetitions=N --out-json=compare.json` writes a stable
+  artifact with per-repetition samples, scenario elapsed time, child process
+  elapsed time, trace diagnostics, span groups, and counter groups.
+- Scenario elapsed time is measured inside the child process, so benchmark
+  timings exclude `dart run` startup and native-asset build-hook overhead.
+- `tracelite diff --baseline=base.json --candidate=change.json` compares
+  artifacts by summary metric with a percent threshold and coefficient-of-
+  variation noise gate.
+- `tracelite calibrate` measures body-only, disabled-recorder, and
+  active-recorder overhead.
+- `doc/production-benchmark-readiness.md` records the current measured evidence
+  and blockers.
+
+Current measured checkpoint:
+
+- Dart recorder overhead: active-minus-disabled mean 109ns/span, p90
+  259ns/span over 10K spans × 5 repetitions.
+- Four-peer `narrow-batch-insert` and `point-select` runs complete with
+  `0/0/0` max dropped/unmatched diagnostics.
+- `diff` can now refuse a verdict as `too_noisy` when CV exceeds the configured
+  gate.
+
+### Phase 9: Resqlite production integration and semantic parity (next)
+
+**Goal:** make resqlite's integration tiny while tracelite does the profiling
+and benchmark heavy lifting.
+
+Work:
+
+- Land the trace-enabled resqlite native-asset mode and logical-track Dart
+  bridge in resqlite.
+- Move bespoke resqlite bridge code toward tracelite-owned helpers where
+  possible: attach, span registration, correlation IDs, counters, gauges,
+  metadata naming, and no-op disabled behavior.
+- Keep resqlite-specific knowledge as a small vocabulary adapter, not a
+  profiling subsystem.
+- Emit the minimum semantic facts tracelite cannot infer:
+  - public operation spans: `database.select`, `select_bytes`, `execute`,
+    `execute_batch`;
+  - worker/dispatch spans: writer handle, reader handle, reader-pool dispatch;
+  - stream spans/counters: invalidate, dependency intersection, selected stream
+    re-query/change checks;
+  - decode counters: rows decoded, cells decoded;
+  - dispatcher counters/gauges: parked total, wake retries, current parked, max
+    parked;
+  - diagnostics snapshots: page cache bytes, schema bytes, statement bytes, WAL
+    bytes, stream counts, reader busy state.
+- Add side-by-side parity tests between current resqlite profile output and
+  tracelite artifacts for a small initial matrix.
+
+Acceptance gates:
+
+- A trace-enabled resqlite workload produces named resqlite spans/counters and
+  SQLite C spans with zero dropped/unmatched diagnostics.
+- Tracelite artifacts can reproduce the old profiler's operation counts,
+  row/cell counts, diagnostics deltas, and major timing buckets.
+- Removing `Timeline.startSync` markers and `ProfiledDatabase` wall-time
+  wrappers becomes a behavior-preserving cleanup, not a loss of evidence.
+
+### Phase 10: Workload matrix and peer fairness hardening
+
+**Goal:** make tracelite's benchmark harness broad enough to replace resqlite's
+profile workflow for real experiment decisions.
+
+Work:
+
+- Port the useful resqlite workload shapes:
+  - chat simulation;
+  - feed paging;
+  - sync burst;
+  - large working set;
+  - keyed primary-key subscriptions;
+  - high-cardinality fan-out;
+  - many-stream writer throughput;
+  - SQLite diagnostics workload.
+- Encode workload parameters and seeds in artifacts so runs are reproducible.
+- Separate setup/warmup/measured phases in the peer harness.
+- Document each peer's traced mode. In particular, `sqlite_async` currently
+  validates through a traced `singleConnection` wrapper; default native-pool
+  coverage needs separate validation or explicit exclusion.
+- Scale ring sizing from expected event volume and fail loudly if any producer
+  drops events.
+- Consider a compiled/snapshotted child or long-lived worker to reduce suite
+  wall time once region reset semantics are formalized.
+
+Acceptance gates:
+
+- The tracelite harness covers the workload shapes used for resqlite experiment
+  decisions.
+- Each peer has documented capability/fairness constraints.
+- Artifacts identify setup time, measured time, trace diagnostics, peer mode,
+  workload parameters, and environment.
+
+### Phase 11: Statistical decisioning and experiment artifacts
+
+**Goal:** make `tracelite diff` credible enough for PRs and experiment logs.
+
+Work:
+
+- Add confidence intervals or a non-parametric test over independent
+  repetitions.
+- Keep the CV/noise gate, but make verdicts explicit:
+  `improved`, `regressed`, `neutral`, `too_noisy`, `insufficient_samples`.
+- Add outlier classification and report it without silently deleting samples.
+- Support metric families: scenario elapsed, traced span total, specific span
+  groups, counters, diagnostics deltas, and peer-normalized comparisons.
+- Emit PR/experiment-ready markdown and JSON sidecars.
+- Add schema versioning for compare/diff artifacts.
+
+Acceptance gates:
+
+- Diff output names the metric, effect size, noise level, sample count, and
+  verdict.
+- CI can fail on configured regressions while treating noisy data as
+  inconclusive instead of pretending it is signal.
+
+### Phase 12: Profiling depth and report ergonomics
+
+**Goal:** make traces explain benchmark changes, not just detect them.
+
+Work:
+
+- Add SQL fingerprinting and redaction. Raw SQL capture must be explicit and
+  unsafe/detail-gated; grouping should default to normalized fingerprints.
+- Add causal-chain reporting from public Dart operation to reader/writer
+  dispatch, worker handling, stream invalidation, decode, and SQLite C spans.
+- Improve counter/gauge reports for semantic resqlite signals.
+- Add trace export paths for external inspection, likely Perfetto first.
+- Build a visualizer after the query/artifact layer is stable.
+- Consider stack sampling for CPU attribution only after wall/span attribution
+  is solid.
+
+Acceptance gates:
+
+- A regression report can answer "where did the time move?" across Dart,
+  resqlite semantic spans, and SQLite C.
+- High-cardinality values are redacted or fingerprinted by default.
+- Visual and exported traces agree with CLI summaries.
+
+### Phase 13: Portability, packaging, and CI
+
+**Goal:** make the profiler/benchmark workflow usable outside the local macOS
+prototype.
+
+Work:
+
+- Package the CLI and runtime build outputs cleanly.
+- Validate Linux shim loading (`LD_PRELOAD` or equivalent native-asset path).
+- Validate Windows substitution/loading strategy.
+- Add CI for:
+  - generator freshness;
+  - runtime/shim tests;
+  - benchmark artifact tests;
+  - resqlite `trace_sqlite` native-asset smoke;
+  - four-peer compare smoke where dependencies are available.
+- Publish docs for:
+  - using tracelite as a peer benchmark harness;
+  - adding a lightweight semantic adapter to a library;
+  - interpreting diff/noise verdicts;
+  - redaction and artifact storage policy.
+
+Acceptance gates:
+
+- A fresh checkout can run the documented smoke workflow without local hidden
+  state.
+- Resqlite can depend on tracelite's core recorder without pulling in peer
+  benchmark dependencies.
+- Platform-specific behavior is documented and tested.
 
 ---
 
@@ -416,7 +623,9 @@ If you're a new contributor, future-self after a break, or an LLM session contin
 2. **Read [README.md](README.md)** for the external pitch.
 3. **Skim [doc/format-spec.md](doc/format-spec.md)** sections 1–4 for the format mental model. Dive deeper if you'll touch the runtime.
 4. **Run the tests:** `dart pub get && dart test` should pass. The tests build the C producer and shim as needed.
-5. **Pick the next phase.** The prototype validation matrix is complete; next work is packaging the `resqlite` trace mode, portability hardening, or the deferred visualizer/diff surfaces.
+5. **Pick the next phase.** The prototype validation matrix and first artifact
+   workflow are complete; next work is Phase 9 resqlite semantic parity and
+   workload migration.
 
 ### Build commands worth memorizing
 
@@ -514,4 +723,4 @@ Total review feedback: ~5,800 LOC of markdown (preserved as *.feedback.md).
 
 ---
 
-*Last updated: 2026-05-08 — after aggregator/reporting, wider shim coverage, and the peer harness validated `sqlite3`, `drift`, `sqlite_async`, and trace-enabled local `resqlite`.*
+*Last updated: 2026-05-09 — after the production benchmark/profiling roadmap was expanded around resqlite semantic parity, workload coverage, statistical gates, profiling depth, and portability.*
