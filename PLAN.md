@@ -6,11 +6,11 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events.
+**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs, and recorder-overhead calibration.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** packaging and portability hardening — make the trace-enabled `resqlite` native-asset mode upstream-ready, then add Linux/Windows shim validation and CI coverage.
+**Next bottleneck:** production benchmark replacement hardening — add statistical gates, port the resqlite workload matrix, prove semantic parity against the existing profile runner, then finish packaging and Linux/Windows shim validation.
 
 ---
 
@@ -175,6 +175,14 @@ Run both: `dart test`. Both pass.
 - Span queries support `.ofType(...)`, `.during(...)`, `.durationStats()`, and `.groupStatsByType()`.
 - `Trace.toMarkdownReport()` emits the first report table.
 - `bin/tracelite.dart report <region>` prints that report from the CLI.
+- `bin/tracelite.dart compare --repetitions=N --out-json=compare.json` runs
+  repeated peer scenarios and writes benchmark artifacts with per-repetition
+  scenario elapsed time, child process time, trace diagnostics, span groups, and
+  counter groups.
+- `bin/tracelite.dart diff --baseline=base.json --candidate=change.json`
+  compares compare artifacts by summary metric.
+- `bin/tracelite.dart calibrate` measures body-only, disabled-recorder, and
+  active-recorder overhead for Dart producer spans.
 
 ### Wider macOS SQLite shim coverage (working)
 
@@ -234,8 +242,11 @@ A clear-eyed accounting. Designed ≠ proven.
 | Reexport + RTLD_NEXT lets us wrap selectively without breaking unwrapped symbols | ✓ proven | direct dlsym test + smoke test |
 | Current wrapped SQLite API subset is sufficient for non-trivial sqlite3/drift/sqlite_async/resqlite workloads | ✓ proven | full INSERT + SELECT cycle and peer scenarios work |
 | Aggregator skeleton loads region traces and reports stats | ✓ proven | `Trace.loadRegion`, report CLI, runtime/shim/CLI tests |
+| Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
+| Artifact diff can compare two benchmark outputs | ✓ basic | `tracelite diff` over compare JSON with threshold and CV gate; significance testing still pending |
+| Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer is implementable | ✗ designed only | no visualizer code exists |
-| Diff over repetitions produces meaningful significance | ✗ designed only | needs diff implementation and multi-repetition fixtures |
+| Diff over repetitions produces meaningful significance | △ partial | descriptive diff plus CV noise gate exists; confidence intervals pending |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux LD_PRELOAD shim works | ✗ designed only | macOS-only validation today |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |

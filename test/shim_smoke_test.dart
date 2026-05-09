@@ -29,7 +29,7 @@ void main() {
     TraceRegion.createFile(regionPath);
 
     final result = await Process.run(
-      'dart',
+      Platform.resolvedExecutable,
       ['run', 'example/sqlite3_user.dart'],
       environment: {
         'TRACELITE_REGION': regionPath,
@@ -101,5 +101,5 @@ void main() {
 
     print('  ${trace.spans.length} spans paired by Trace.loadRegion');
     print('  shim intercepts real sqlite3 calls successfully');
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

@@ -49,7 +49,7 @@ The C shim is a drop-in `libsqlite3` replacement that wraps SQLite C API calls w
 
 Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Optional stack sampling adds per-Dart-package attribution on top.
 
-The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation.
+The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts, and calibrate recorder overhead.
 
 ## What it makes possible
 
@@ -57,7 +57,7 @@ The aggregator is pure Dart and operates on the resulting event stream. Every me
 - **Apples-to-apples library comparison.** Same workload, same shim, same format. drift and Resqlite stop being a wall-time horse race; they become a structural comparison ("drift prepares per query; Resqlite caches statements").
 - **Causal chains across isolates.** A request's full lifecycle — main isolate → writer isolate → SQLite C → response → main isolate — observable as one chain.
 - **Tail-latency distributions, not just medians.** p99, histogram, distribution shape; effect-size and significance testing built in.
-- **Cross-commit regression detection.** `tracelite diff baseline.tlt change.tlt` flags actionable regressions with significance thresholds.
+- **Cross-commit regression detection.** `tracelite diff --baseline=base.json --candidate=change.json` flags actionable regressions with threshold and noise gates.
 
 ## Status
 
@@ -71,6 +71,9 @@ The design corpus is in `doc/`, and the implementation is present in `native/`, 
 | [Runtime mmap protocol](doc/runtime-protocol.md) | Draft v0.1 | Cross-language shared buffer, slot reservation, drainage, crash safety, lifecycle |
 | [Span ID registry](doc/span-registry.md) | Draft v0.2 | Reserved span IDs across SQLite C, Dart recorder, FFI bridge, user ranges |
 | [Peer interface contract](doc/peer-interface-contract.md) | Draft v0.1 | The `SqliteInterface` API, scenarios, adapters, fairness rules, standard scenario library |
+
+The latest production benchmark replacement audit is in
+[`doc/production-benchmark-readiness.md`](doc/production-benchmark-readiness.md).
 
 ## Non-goals
 

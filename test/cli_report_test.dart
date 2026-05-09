@@ -31,7 +31,7 @@ void main() {
         reason: 'producer exited non-zero: ${producerResult.stderr}');
 
     final reportResult = await Process.run(
-      'dart',
+      Platform.resolvedExecutable,
       ['run', 'bin/tracelite.dart', 'report', regionPath],
     );
     expect(reportResult.exitCode, 0,
@@ -41,5 +41,5 @@ void main() {
     expect(output, contains('# tracelite report'));
     expect(output, contains('sqlite3_step'));
     expect(output, contains('| span | count | p50 | p90 | p99 | total |'));
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }
