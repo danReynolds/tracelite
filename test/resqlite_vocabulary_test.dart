@@ -71,6 +71,88 @@ void main() {
     expect(report, contains('resqlite.rows_decoded'));
     expect(report, contains('resqlite.sqlite_page_cache_bytes'));
   });
+
+  test('resqlite metric helpers emit the migration parity counters', () async {
+    final runtime = await _ensureRuntimeLibrary();
+    final regionPath =
+        '${Directory.systemTemp.path}/tracelite-resqlite-helpers-$pid.tlt';
+    addTearDown(() {
+      try {
+        File(regionPath).deleteSync();
+      } catch (_) {}
+    });
+
+    TraceRegion.createFile(regionPath);
+    final session = TraceSession.attach(
+      regionPath: regionPath,
+      runtimeLibraryPath: runtime.absolute.path,
+      processName: 'resqlite_helper_test',
+      threadName: 'main',
+    );
+    expect(session.isActive, isTrue);
+
+    recordResqliteDecodeMetrics(
+      session,
+      rowsDecoded: 3,
+      cellsDecoded: 12,
+      correlationId: 99,
+    );
+    recordResqliteStreamMetrics(
+      session,
+      invalidateUs: 17,
+      invalidateCount: 2,
+      intersectionUs: 9,
+      intersectionEntries: 4,
+      correlationId: 99,
+    );
+    recordResqliteDispatcherMetrics(
+      session,
+      parkedTotal: 5,
+      wakeRetryTotal: 1,
+      currentParked: 2,
+      maxParkedConcurrent: 3,
+      correlationId: 99,
+    );
+    recordResqliteDiagnostics(
+      session,
+      sqlitePageCacheBytes: 4096,
+      sqliteSchemaBytes: 2048,
+      sqliteStmtBytes: 1024,
+      walBytes: 512,
+      streamCount: 7,
+      readerBusy: true,
+      correlationId: 99,
+    );
+    session.detach();
+
+    final trace = Trace.loadRegion(regionPath);
+    final names = {
+      for (final group in trace.counterEvents.groupCounterStatsByType(
+        spanNames: trace.spanNames,
+      ))
+        group.spanName,
+    };
+    expect(names, contains('resqlite.rows_decoded'));
+    expect(names, contains('resqlite.cells_decoded'));
+    expect(names, contains('resqlite.invalidate_us'));
+    expect(names, contains('resqlite.invalidate_count'));
+    expect(names, contains('resqlite.intersection_us'));
+    expect(names, contains('resqlite.intersection_entries'));
+    expect(names, contains('resqlite.dispatcher_parked_total'));
+    expect(names, contains('resqlite.dispatcher_wake_retry_total'));
+    expect(names, contains('resqlite.dispatcher_current_parked'));
+    expect(names, contains('resqlite.dispatcher_max_parked_concurrent'));
+    expect(names, contains('resqlite.sqlite_page_cache_bytes'));
+    expect(names, contains('resqlite.sqlite_schema_bytes'));
+    expect(names, contains('resqlite.sqlite_stmt_bytes'));
+    expect(names, contains('resqlite.wal_bytes'));
+    expect(names, contains('resqlite.stream_count'));
+    expect(names, contains('resqlite.reader_busy'));
+    expect(
+      trace.counterEvents.every((event) => event.correlationId == 99),
+      isTrue,
+    );
+  });
 }
 
 Future<File> _ensureRuntimeLibrary() async {

@@ -18,7 +18,9 @@ The current prototype does not yet replace resqlite's resqlite-specific
 semantic counters by itself. The C shim can say where SQLite time went. The new
 Dart recorder gives resqlite a place to emit stream invalidation cost,
 reader-pool dispatch pressure, row materialization counts, WAL-sidecar size,
-and per-operation caller intent, but resqlite still needs to adopt those hooks.
+and per-operation caller intent. `package:tracelite/resqlite.dart` now wraps
+the common counters and gauges in helper functions, but resqlite still needs to
+call those hooks at its semantic boundaries.
 
 ## Current resqlite profiling inventory
 
@@ -82,6 +84,9 @@ Delivered:
 - `metadata(...)` for workload name, library name, profile build flags, SQL
   fingerprint, operation tag, batch size, row count, and parameter count.
 - `Trace.counterEvents` plus markdown counter summaries in reports.
+- Resqlite-specific helpers:
+  `recordResqliteDecodeMetrics`, `recordResqliteStreamMetrics`,
+  `recordResqliteDispatcherMetrics`, and `recordResqliteDiagnostics`.
 
 ### 3. Cross-isolate correlation
 
@@ -185,7 +190,8 @@ These should be user/runtime-registered spans, not hard-coded SQLite C built-ins
 3. Build a tracelite-backed resqlite profile harness that reuses the existing
    `benchmark/profile/workloads.dart` shapes.
 4. Add opt-in resqlite Dart spans/counters behind the same profile-build
-   discipline used today.
+   discipline used today, using the tracelite helper functions wherever a
+   helper exists.
 5. Run old `benchmark/run_profile.dart` and the new tracelite harness side by
    side on a small workload matrix.
 6. Require parity for sample counts, operation grouping, row/cell counts,

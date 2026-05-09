@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  macos:
+    runs-on: macos-14
+
+    steps:
+      - name: Check out tracelite
+        uses: actions/checkout@v4
+        with:
+          path: tracelite
+
+      - name: Check out resqlite sibling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/resqlite
+          path: resqlite
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Install dependencies
+        working-directory: tracelite
+        run: dart pub get
+
+      - name: Verify generated span outputs
+        working-directory: tracelite
+        run: dart run tools/generate.dart --check
+
+      - name: Build native runtime and SQLite shim
+        working-directory: tracelite
+        run: |
+          mkdir -p build
+          cc -dynamiclib -O2 -Inative \
+            native/tracelite_runtime.c \
+            -o build/libtracelite_runtime.dylib
+          cc -dynamiclib -O2 -Inative \
+            native/tracelite_runtime.c native/shim_sqlite3.c \
+            -Wl,-reexport-lsqlite3 \
+            -o build/libsqlite_traced.dylib
+
+      - name: Analyze
+        working-directory: tracelite
+        run: dart analyze
+
+      - name: Test
+        working-directory: tracelite
+        run: dart test
+
+      - name: CI benchmark suite
+        working-directory: tracelite
+        run: |
+          dart run bin/tracelite.dart suite \
+            --profile=ci \
+            --interfaces=sqlite3,drift,sqlite_async,resqlite \
+            --out-dir=build/tracelite-ci-suite

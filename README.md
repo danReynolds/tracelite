@@ -47,9 +47,9 @@ tracelite is a profiling system designed around three observations about Dart's 
 
 The C shim is a drop-in `libsqlite3` replacement that wraps SQLite C API calls with timing and emits to a shared-memory ring buffer. The current macOS prototype loads the shim through sqlite3 native-asset configuration, with the shim re-exporting the real SQLite library and overriding traced symbols. For `resqlite`, which compiles SQLite into `libresqlite`, the local trace build compiles sqlite3mc under private symbols and embeds the same wrappers inside that native asset. Linux `LD_PRELOAD` and Windows substitution are planned but not yet validated. Peer libraries don't know they're being traced — they FFI into "SQLite" and the shim is what answers.
 
-Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Libraries can register lightweight vocabularies of span/counter/gauge names; `package:tracelite/resqlite.dart` provides the resqlite vocabulary so resqlite can emit semantic facts without owning report or metadata plumbing. Optional stack sampling adds per-Dart-package attribution on top.
+Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Libraries can register lightweight vocabularies of span/counter/gauge names; `package:tracelite/resqlite.dart` provides the resqlite vocabulary plus helpers for decode metrics, stream invalidation metrics, dispatcher pressure, and diagnostics so resqlite can emit semantic facts without owning report or metadata plumbing. Optional stack sampling adds per-Dart-package attribution on top.
 
-The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts, and calibrate recorder overhead.
+The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts with confidence-interval plus non-parametric repetition gates, run CI/production benchmark suites, and calibrate recorder overhead.
 
 The peer harness has a narrow common SQL lane and optional capability lanes. Shared SQL scenarios run across all peers; reactive scenarios currently run on `sqlite_async` and `resqlite`; the resqlite diagnostics scenario records semantic gauges from `Database.diagnostics()`. Peers that do not support a scenario are marked `unsupported` in the report and JSON artifact.
 
@@ -76,6 +76,8 @@ The design corpus is in `doc/`, and the implementation is present in `native/`, 
 
 The latest production benchmark replacement audit is in
 [`doc/production-benchmark-readiness.md`](doc/production-benchmark-readiness.md).
+The resqlite deletion/parity gate is tracked in
+[`doc/resqlite-replacement-checklist.md`](doc/resqlite-replacement-checklist.md).
 
 ## Non-goals
 

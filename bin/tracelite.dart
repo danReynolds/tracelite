@@ -19,6 +19,8 @@ Future<void> main(List<String> args) async {
       await _compare(args.skip(1).toList());
     case 'diff':
       _diff(args.skip(1).toList());
+    case 'suite':
+      await _suite(args.skip(1).toList());
     case 'calibrate':
       await _calibrate(args.skip(1).toList());
     case '_run-peer':
@@ -26,6 +28,90 @@ Future<void> main(List<String> args) async {
     default:
       stderr.writeln('unknown command: $command');
       _usage();
+  }
+}
+
+Future<void> _suite(List<String> args) async {
+  final options = _parseOptions(args);
+  final profileName = options['profile'] ?? 'ci';
+  late final _SuiteProfile profile;
+  try {
+    profile = _suiteProfile(profileName);
+  } on ArgumentError {
+    stderr.writeln('--profile must be ci or production');
+    exit(64);
+  }
+  final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
+  final outDir = Directory(options['out-dir'] ?? 'build/tracelite-suite');
+  outDir.createSync(recursive: true);
+
+  final runs = <Map<String, Object?>>[];
+  stdout
+    ..writeln('# tracelite suite')
+    ..writeln()
+    ..writeln('Profile: `$profileName`')
+    ..writeln('Interfaces: `$interfaces`')
+    ..writeln('Out dir: `${outDir.path}`')
+    ..writeln()
+    ..writeln('| scenario | rows | repetitions | status | artifact |')
+    ..writeln('|---|---:|---:|---|---|');
+
+  var failed = false;
+  for (final scenario in profile.scenarios) {
+    final artifactPath = '${outDir.path}/${scenario.name}.json';
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=${scenario.name}',
+        '--interfaces=$interfaces',
+        '--rows=${scenario.rows}',
+        '--repetitions=${scenario.repetitions}',
+        '--out-json=$artifactPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    final status = result.exitCode == 0 ? 'ok' : 'failed';
+    if (result.exitCode != 0) failed = true;
+    final logPath = '${outDir.path}/${scenario.name}.log';
+    File(logPath).writeAsStringSync(
+      'stdout:\n${result.stdout}\n\nstderr:\n${result.stderr}\n',
+    );
+    runs.add({
+      'scenario': scenario.name,
+      'rows': scenario.rows,
+      'repetitions': scenario.repetitions,
+      'artifact': artifactPath,
+      'log': logPath,
+      'exit_code': result.exitCode,
+      'status': status,
+    });
+    stdout.writeln(
+      '| `${scenario.name}` | ${scenario.rows} | '
+      '${scenario.repetitions} | $status | `$artifactPath` |',
+    );
+  }
+
+  final manifestPath = '${outDir.path}/manifest.json';
+  const encoder = JsonEncoder.withIndent('  ');
+  File(manifestPath).writeAsStringSync(
+    '${encoder.convert({
+          'schema': 'tracelite.suite.v1',
+          'generated_at': DateTime.now().toUtc().toIso8601String(),
+          'profile': profileName,
+          'description': profile.description,
+          'interfaces':
+              interfaces.split(',').map((name) => name.trim()).toList(),
+          'runs': runs,
+        })}\n',
+  );
+  stdout
+    ..writeln()
+    ..writeln('Manifest: `$manifestPath`');
+  if (failed) {
+    exitCode = 65;
   }
 }
 
@@ -172,6 +258,7 @@ void _diff(List<String> args) {
       ) ??
       5;
   final maxCvPercent = double.tryParse(options['max-cv-percent'] ?? '15') ?? 15;
+  final alpha = double.tryParse(options['alpha'] ?? '0.05') ?? 0.05;
 
   final baseline = _readJsonMap(baselinePath);
   final candidate = _readJsonMap(candidatePath);
@@ -181,6 +268,7 @@ void _diff(List<String> args) {
     metric: metric,
     thresholdPercent: thresholdPercent,
     maxCvPercent: maxCvPercent,
+    alpha: alpha,
   );
 }
 
@@ -617,6 +705,7 @@ void _printDiffReport({
   required String metric,
   required double thresholdPercent,
   required double maxCvPercent,
+  required double alpha,
 }) {
   final baselinePeers = _peersByName(baseline);
   final candidatePeers = _peersByName(candidate);
@@ -629,12 +718,13 @@ void _printDiffReport({
     ..writeln('Metric: `$metric`')
     ..writeln('Threshold: ${_trimDouble(thresholdPercent)}%')
     ..writeln('Max CV: ${_trimDouble(maxCvPercent)}%')
+    ..writeln('Alpha: ${_trimDouble(alpha)}')
     ..writeln()
     ..writeln(
       '| peer | samples | baseline mean | candidate mean | delta | '
-      'delta 95% CI | change | max cv | verdict |',
+      'delta 95% CI | nonparam p | outliers | change | max cv | verdict |',
     )
-    ..writeln('|---|---:|---:|---:|---:|---:|---:|---:|---|');
+    ..writeln('|---|---:|---:|---:|---:|---:|---:|---:|---:|---|');
 
   for (final name in names) {
     final baselinePeer = baselinePeers[name]!;
@@ -655,16 +745,27 @@ void _printDiffReport({
       baselineSamples: baselineSamples,
       candidateSamples: candidateSamples,
     );
+    final nonParametric = _mannWhitneyTwoSided(
+      baselineSamples: baselineSamples,
+      candidateSamples: candidateSamples,
+    );
+    final outliers = _outlierSummary(
+      baselineSamples: baselineSamples,
+      candidateSamples: candidateSamples,
+    );
     final hasSamples =
         baselineSamples.length >= 2 && candidateSamples.length >= 2;
     final statisticallyClear = ci.excludesZero;
+    final nonParametricClear = nonParametric.available &&
+        nonParametric.pValue <= alpha &&
+        nonParametric.directionMatches(change);
     final verdict = !hasSamples
         ? 'insufficient_samples'
         : maxCv > maxCvPercent
             ? 'too_noisy'
             : change.abs() < thresholdPercent
                 ? 'neutral'
-                : !statisticallyClear
+                : !statisticallyClear || !nonParametricClear
                     ? 'too_noisy'
                     : change < 0
                         ? 'improved'
@@ -675,6 +776,7 @@ void _printDiffReport({
       '${_formatMetricValue(metric, candidateMetric.mean)} | '
       '${_formatMetricValue(metric, delta)} | '
       '${_formatConfidenceInterval(metric, ci)} | '
+      '${_formatPValue(nonParametric)} | ${outliers.toReportCell()} | '
       '${_trimDouble(change)}% | ${_trimDouble(maxCv)}% | $verdict |',
     );
   }
@@ -888,6 +990,183 @@ _ConfidenceInterval _meanDeltaConfidenceInterval({
   return _ConfidenceInterval(lower: delta - margin, upper: delta + margin);
 }
 
+_MannWhitneyResult _mannWhitneyTwoSided({
+  required List<int> baselineSamples,
+  required List<int> candidateSamples,
+}) {
+  if (baselineSamples.length < 3 || candidateSamples.length < 3) {
+    return const _MannWhitneyResult.unavailable();
+  }
+
+  final combined = <_RankedValue>[
+    for (final value in baselineSamples) _RankedValue(value, true),
+    for (final value in candidateSamples) _RankedValue(value, false),
+  ]..sort((a, b) => a.value.compareTo(b.value));
+
+  final hasTies = _assignAverageRanks(combined);
+  final baselineCount = baselineSamples.length;
+  final candidateCount = candidateSamples.length;
+  final baselineRankSum = combined
+      .where((value) => value.isBaseline)
+      .fold<double>(0, (sum, value) => sum + value.rank);
+  final baselineU = baselineRankSum - baselineCount * (baselineCount + 1) / 2.0;
+  final maxU = baselineCount * candidateCount.toDouble();
+  final observedMinU = math.min(baselineU, maxU - baselineU);
+
+  final exactPValue = hasTies
+      ? null
+      : _exactMannWhitneyTwoSidedPValue(
+          totalCount: combined.length,
+          baselineCount: baselineCount,
+          observedMinU: observedMinU,
+        );
+  final pValue = exactPValue ??
+      _approximateMannWhitneyTwoSidedPValue(
+        u: baselineU,
+        baselineCount: baselineCount,
+        candidateCount: candidateCount,
+      );
+  final direction = candidateSamples.average - baselineSamples.average;
+  return _MannWhitneyResult(
+    pValue: pValue.clamp(0.0, 1.0).toDouble(),
+    direction: direction,
+    exact: exactPValue != null,
+  );
+}
+
+bool _assignAverageRanks(List<_RankedValue> values) {
+  var hasTies = false;
+  var index = 0;
+  while (index < values.length) {
+    var end = index + 1;
+    while (end < values.length && values[end].value == values[index].value) {
+      end++;
+    }
+    if (end - index > 1) {
+      hasTies = true;
+    }
+    final rank = (index + 1 + end) / 2.0;
+    for (var i = index; i < end; i++) {
+      values[i].rank = rank;
+    }
+    index = end;
+  }
+  return hasTies;
+}
+
+double? _exactMannWhitneyTwoSidedPValue({
+  required int totalCount,
+  required int baselineCount,
+  required double observedMinU,
+}) {
+  final candidateCount = totalCount - baselineCount;
+  final totalCombinations = _combinationCount(totalCount, baselineCount);
+  if (totalCombinations > 1000000) return null;
+
+  var extreme = 0;
+  var combinations = 0;
+
+  void visit(int nextRank, int chosen, int rankSum) {
+    if (chosen == baselineCount) {
+      combinations++;
+      final u = rankSum - baselineCount * (baselineCount + 1) / 2.0;
+      final minU = math.min(u, baselineCount * candidateCount - u);
+      if (minU <= observedMinU + 1e-9) {
+        extreme++;
+      }
+      return;
+    }
+    final remainingNeeded = baselineCount - chosen;
+    for (var rank = nextRank;
+        rank <= totalCount - remainingNeeded + 1;
+        rank++) {
+      visit(rank + 1, chosen + 1, rankSum + rank);
+    }
+  }
+
+  visit(1, 0, 0);
+  return combinations == 0 ? null : extreme / combinations;
+}
+
+int _combinationCount(int n, int k) {
+  final r = math.min(k, n - k);
+  var result = 1;
+  for (var i = 1; i <= r; i++) {
+    result = result * (n - r + i) ~/ i;
+  }
+  return result;
+}
+
+double _approximateMannWhitneyTwoSidedPValue({
+  required double u,
+  required int baselineCount,
+  required int candidateCount,
+}) {
+  final mean = baselineCount * candidateCount / 2.0;
+  final variance = baselineCount *
+      candidateCount *
+      (baselineCount + candidateCount + 1) /
+      12.0;
+  if (variance <= 0) return 1;
+  final continuity = u > mean
+      ? -0.5
+      : u < mean
+          ? 0.5
+          : 0.0;
+  final z = (u - mean + continuity) / math.sqrt(variance);
+  final oneTail = math.min(_normalCdf(z), 1.0 - _normalCdf(z));
+  return math.min(1.0, oneTail * 2.0);
+}
+
+double _normalCdf(double z) {
+  final sign = z < 0 ? -1.0 : 1.0;
+  final x = z.abs();
+  final t = 1.0 / (1.0 + 0.2316419 * x);
+  final y = 1.0 -
+      0.3989422804014327 *
+          math.exp(-x * x / 2.0) *
+          t *
+          (0.319381530 +
+              t *
+                  (-0.356563782 +
+                      t *
+                          (1.781477937 +
+                              t * (-1.821255978 + 1.330274429 * t))));
+  return sign == 1.0 ? y : 1.0 - y;
+}
+
+_OutlierSummary _outlierSummary({
+  required List<int> baselineSamples,
+  required List<int> candidateSamples,
+}) {
+  return _OutlierSummary(
+    baseline: _tukeyOutlierCount(baselineSamples),
+    candidate: _tukeyOutlierCount(candidateSamples),
+  );
+}
+
+int _tukeyOutlierCount(List<int> samples) {
+  if (samples.length < 4) return 0;
+  final sorted = samples.toList()..sort();
+  final q1 = _percentileInterpolated(sorted, 0.25);
+  final q3 = _percentileInterpolated(sorted, 0.75);
+  final iqr = q3 - q1;
+  if (iqr == 0) return 0;
+  final low = q1 - 1.5 * iqr;
+  final high = q3 + 1.5 * iqr;
+  return sorted.where((value) => value < low || value > high).length;
+}
+
+double _percentileInterpolated(List<int> values, double percentile) {
+  if (values.isEmpty) return 0;
+  final position = (values.length - 1) * percentile;
+  final lower = position.floor();
+  final upper = position.ceil();
+  if (lower == upper) return values[lower].toDouble();
+  final weight = position - lower;
+  return values[lower] * (1 - weight) + values[upper] * weight;
+}
+
 double _tCritical95(double degreesOfFreedom) {
   if (degreesOfFreedom >= 120) return 1.98;
   if (degreesOfFreedom >= 60) return 2.00;
@@ -1060,6 +1339,13 @@ String _formatConfidenceInterval(String metric, _ConfidenceInterval interval) {
       '${_formatMetricValue(metric, interval.upper)}]';
 }
 
+String _formatPValue(_MannWhitneyResult result) {
+  if (!result.available) return '-';
+  final prefix = result.exact ? '' : '~';
+  if (result.pValue < 0.001) return '${prefix}<0.001';
+  return '$prefix${_trimDouble(result.pValue)}';
+}
+
 String _formatNs(double ns) => formatDurationNs(ns.round());
 
 String _trimDouble(double value) {
@@ -1136,6 +1422,162 @@ class _ConfidenceInterval {
   bool get excludesZero => available && (upper < 0 || lower > 0);
 }
 
+class _MannWhitneyResult {
+  const _MannWhitneyResult({
+    required this.pValue,
+    required this.direction,
+    required this.exact,
+  }) : available = true;
+
+  const _MannWhitneyResult.unavailable()
+      : pValue = 1,
+        direction = 0,
+        exact = false,
+        available = false;
+
+  final double pValue;
+  final double direction;
+  final bool exact;
+  final bool available;
+
+  bool directionMatches(double meanChangePercent) {
+    if (direction == 0 || meanChangePercent == 0) return false;
+    return direction.sign == meanChangePercent.sign;
+  }
+}
+
+class _OutlierSummary {
+  const _OutlierSummary({
+    required this.baseline,
+    required this.candidate,
+  });
+
+  final int baseline;
+  final int candidate;
+
+  String toReportCell() => '$baseline/$candidate';
+}
+
+class _RankedValue {
+  _RankedValue(this.value, this.isBaseline);
+
+  final int value;
+  final bool isBaseline;
+  double rank = 0;
+}
+
+class _SuiteProfile {
+  const _SuiteProfile({
+    required this.description,
+    required this.scenarios,
+  });
+
+  final String description;
+  final List<_SuiteScenario> scenarios;
+}
+
+class _SuiteScenario {
+  const _SuiteScenario({
+    required this.name,
+    required this.rows,
+    required this.repetitions,
+  });
+
+  final String name;
+  final int rows;
+  final int repetitions;
+}
+
+_SuiteProfile _suiteProfile(String profileName) {
+  return switch (profileName) {
+    'ci' => const _SuiteProfile(
+        description: 'Small deterministic smoke matrix for pull requests.',
+        scenarios: [
+          _SuiteScenario(
+            name: narrowBatchInsertScenario,
+            rows: 3,
+            repetitions: 1,
+          ),
+          _SuiteScenario(
+            name: pointSelectScenario,
+            rows: 5,
+            repetitions: 1,
+          ),
+          _SuiteScenario(
+            name: keyedPkSubscriptionsScenario,
+            rows: 4,
+            repetitions: 1,
+          ),
+          _SuiteScenario(
+            name: sqliteDiagnosticsScenario,
+            rows: 4,
+            repetitions: 1,
+          ),
+        ],
+      ),
+    'production' => const _SuiteProfile(
+        description: 'Production-oriented matrix for benchmark replacement.',
+        scenarios: [
+          _SuiteScenario(
+            name: narrowBatchInsertScenario,
+            rows: 100,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: pointSelectScenario,
+            rows: 200,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: feedPagingScenario,
+            rows: 100,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: syncBurstScenario,
+            rows: 100,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: chatSimScenario,
+            rows: 100,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: largeWorkingSetScenario,
+            rows: 500,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: keyedPkSubscriptionsScenario,
+            rows: 20,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: highCardinalityFanoutScenario,
+            rows: 20,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: manyStreamsWriterThroughputScenario,
+            rows: 20,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: sqliteDiagnosticsScenario,
+            rows: 100,
+            repetitions: 7,
+          ),
+        ],
+      ),
+    _ => throw ArgumentError.value(
+        profileName,
+        'profile',
+        'expected ci or production',
+      ),
+  };
+}
+
 class _DoubleSample {
   _DoubleSample._({
     required this.count,
@@ -1163,6 +1605,13 @@ class _DoubleSample {
   final int count;
   final double mean;
   final double variance;
+}
+
+extension _AverageIntSamples on List<int> {
+  double get average {
+    if (isEmpty) return 0;
+    return fold<double>(0, (sum, value) => sum + value) / length;
+  }
 }
 
 class _PeerRunMetrics {
@@ -1311,9 +1760,12 @@ Never _usage({int exitCode = 64}) {
       '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
       '[--repetitions=5] [--out-json=compare.json]');
+  stderr.writeln('  dart run bin/tracelite.dart suite '
+      '[--profile=ci|production] [--interfaces=sqlite3,drift,...] '
+      '[--out-dir=build/tracelite-suite]');
   stderr.writeln('  dart run bin/tracelite.dart diff '
       '--baseline=base.json --candidate=change.json '
-      '[--metric=elapsed_ns] [--max-cv-percent=15]');
+      '[--metric=elapsed_ns] [--max-cv-percent=15] [--alpha=0.05]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');
   exit(exitCode);

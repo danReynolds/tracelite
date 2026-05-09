@@ -66,3 +66,4 @@ GENERATED FROM `tools/spans.yaml` — do not edit by hand.
 | `0x3001` | `ffi.exit` | — | — | `symbol: string_id` |
 | `0x3010` | `ffi.string.to_native` | `byte_len: bytes_len` | — | — |
 | `0x3011` | `ffi.string.from_native` | `byte_len: bytes_len` | — | — |
+

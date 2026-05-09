@@ -30,6 +30,17 @@ vocabulary.
 - `tracelite diff` now reports a 95% mean-delta confidence interval over
   independent repetitions and treats threshold-sized changes as `too_noisy`
   unless the interval excludes zero.
+- `tracelite diff` now reports a Mann-Whitney U two-sided p-value over
+  repetition samples and per-side Tukey outlier counts; threshold-sized changes
+  require both the mean interval and non-parametric repetition evidence to agree
+  before they are called `improved` or `regressed`.
+- `tracelite suite --profile=ci|production` now runs a repeatable benchmark
+  matrix and writes a suite manifest plus per-scenario compare artifacts and
+  logs.
+- `.github/workflows/ci.yml` now defines the intended macOS CI baseline:
+  generated-span freshness, native runtime/shim build, analysis, tests, and the
+  four-peer `ci` suite. It assumes a sibling resqlite repository checkout and
+  supports `CROSS_REPO_READ_TOKEN` for private installs.
 - `tracelite calibrate` measures Dart recorder overhead with body-only,
   disabled-recorder, and active-recorder loops.
 - Compare artifacts now include deterministic workload parameters and
@@ -47,8 +58,10 @@ vocabulary.
   These currently run on `sqlite_async` and `resqlite`; `sqlite3` and the
   current raw-SQL `drift` adapter report unsupported.
 - `package:tracelite/resqlite.dart` now includes
-  `recordResqliteDiagnostics`, and the `sqlite-diagnostics` scenario records
-  resqlite diagnostic snapshots as tracelite gauges.
+  `recordResqliteDecodeMetrics`, `recordResqliteStreamMetrics`,
+  `recordResqliteDispatcherMetrics`, and `recordResqliteDiagnostics`, and the
+  `sqlite-diagnostics` scenario records resqlite diagnostic snapshots as
+  tracelite gauges.
 
 ## Evidence from this pass
 
@@ -200,14 +213,14 @@ Keep for now:
 
 ## Remaining blockers
 
-### 1. Statistical decisioning still needs one more hardening pass
+### 1. Statistical decisioning needs production calibration
 
-`tracelite diff` currently compares summary means with a percent threshold and
-can return `too_noisy` when either side exceeds the configured coefficient of
-variation gate. It now also reports a 95% mean-delta confidence interval and
-requires the interval to exclude zero before calling a threshold-sized change
-improved or regressed. A production replacement should still add a
-non-parametric test and explicit outlier reporting over repetitions.
+`tracelite diff` now compares summary means with a percent threshold, CV gate,
+95% mean-delta confidence interval, Mann-Whitney U repetition evidence, and
+explicit outlier counts. This is enough to stop relying on pseudo-replicated
+within-run spans for decisions. The remaining work is calibration on real
+production-sized artifact history: choose default repetition counts, thresholds,
+and noise gates per workload family.
 
 ### 2. Workload coverage is broader, but still needs production scale
 
@@ -235,7 +248,9 @@ long-lived worker once region lifecycle and reset semantics are formalized.
 ### 4. Resqlite semantic parity depends on adoption
 
 The trace format and recorder now support the needed semantic events, and the
-resqlite bridge PR emits the first vocabulary. The old resqlite profile runner
+resqlite bridge PR emits the first vocabulary. tracelite now also exposes
+helpers for the migration counters and gauges so resqlite does not need to
+scatter event IDs through production code. The old resqlite profile runner
 should not be removed until tracelite artifacts prove parity for operation
 counts, rows/cells decoded, stream invalidation cost, reader-pool pressure, and
 diagnostic snapshots.
@@ -248,7 +263,8 @@ be called production-quality across Dart targets.
 
 ## Recommended next iteration
 
-1. Add statistical gates to `tracelite diff`.
+1. Run `tracelite suite --profile=production` for the full peer matrix and keep
+   the generated artifacts as the first baseline set.
 2. Run the new reactive and diagnostics scenarios at production-like parameter
    sizes with repetitions.
 3. Add a generated/table-registry-aware drift reactive adapter or document drift

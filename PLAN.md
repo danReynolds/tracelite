@@ -6,7 +6,7 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs, and recorder-overhead calibration.
+**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, CI/production suites, and recorder-overhead calibration.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
@@ -190,7 +190,11 @@ Run both: `dart test`. Both pass.
   scenario elapsed time, child process time, trace diagnostics, span groups, and
   counter groups.
 - `bin/tracelite.dart diff --baseline=base.json --candidate=change.json`
-  compares compare artifacts by summary metric.
+  compares compare artifacts by summary metric with CV gates, a 95% mean-delta
+  confidence interval, Mann-Whitney U repetition evidence, and outlier counts.
+- `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
+  repeatable scenario matrix and writes a manifest plus per-scenario artifacts
+  and logs.
 - `bin/tracelite.dart calibrate` measures body-only, disabled-recorder, and
   active-recorder overhead for Dart producer spans.
 
@@ -253,10 +257,10 @@ A clear-eyed accounting. Designed ≠ proven.
 | Current wrapped SQLite API subset is sufficient for non-trivial sqlite3/drift/sqlite_async/resqlite workloads | ✓ proven | full INSERT + SELECT cycle and peer scenarios work |
 | Aggregator skeleton loads region traces and reports stats | ✓ proven | `Trace.loadRegion`, report CLI, runtime/shim/CLI tests |
 | Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
-| Artifact diff can compare two benchmark outputs | ✓ basic | `tracelite diff` over compare JSON with threshold and CV gate; significance testing still pending |
+| Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer is implementable | ✗ designed only | no visualizer code exists |
-| Diff over repetitions produces meaningful significance | △ partial | descriptive diff, CV noise gate, and 95% mean-delta CI exist; non-parametric testing/outlier handling still pending |
+| Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, and outlier reporting exist; still needs calibration on real production-sized artifact history |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux LD_PRELOAD shim works | ✗ designed only | macOS-only validation today |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
@@ -266,7 +270,13 @@ A clear-eyed accounting. Designed ≠ proven.
 Things validated by build but not runtime:
 
 - The C runtime's `_Static_assert`s ensure `sizeof(tlt_region_header_t) == 128`, `sizeof(tlt_registry_slot_t) == 16`, `sizeof(tlt_ring_header_t) == 64`. These caught a real bug during initial development (region header padding mistake).
-- The schema generator's `--check` mode catches drift between `spans.yaml` and any of its 4 outputs. CI integration pending.
+- The schema generator's `--check` mode catches drift between `spans.yaml` and
+  any of its 4 outputs. `.github/workflows/ci.yml` runs that check, builds the
+  macOS runtime/shim, runs analysis/tests, and runs
+  `tracelite suite --profile=ci` against the four-peer matrix. The workflow
+  assumes a sibling `${{ github.repository_owner }}/resqlite` repository because
+  local validation uses `dependency_overrides: resqlite: ../resqlite`; private
+  installs should provide `CROSS_REPO_READ_TOKEN`.
 
 ---
 
@@ -278,8 +288,8 @@ The implementation sequence after the prototype validation is:
 
 Format/schema, runtime mmap proof, registry generation, aggregator/reporting,
 wider SQLite shim coverage, peer harness/adapters, the four-peer validation
-matrix, and the first benchmark artifact/diff/calibration workflow are done for
-the local prototype.
+matrix, and the first benchmark artifact/diff/calibration/suite workflow are
+done for the local prototype.
 
 ### Production-ready target
 
@@ -689,6 +699,18 @@ cc -dynamiclib -O2 -Inative \
 
 # Run all tests
 dart test
+
+# Run the small artifact-producing CI benchmark suite
+dart run bin/tracelite.dart suite \
+  --profile=ci \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --out-dir=build/tracelite-ci-suite
+
+# Run the production-oriented replacement matrix
+dart run bin/tracelite.dart suite \
+  --profile=production \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --out-dir=build/tracelite-production-suite
 ```
 
 ### Common gotchas
