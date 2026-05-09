@@ -582,39 +582,50 @@ void _printDiffReport({
     ..writeln('Max CV: ${_trimDouble(maxCvPercent)}%')
     ..writeln()
     ..writeln(
-      '| peer | baseline mean | candidate mean | delta | change | max cv | '
-      'verdict |',
+      '| peer | samples | baseline mean | candidate mean | delta | '
+      'delta 95% CI | change | max cv | verdict |',
     )
-    ..writeln('|---|---:|---:|---:|---:|---:|---|');
+    ..writeln('|---|---:|---:|---:|---:|---:|---:|---:|---|');
 
   for (final name in names) {
-    final baselineMetric = _metric(
-      baselinePeers[name]!['summary']! as Map<String, Object?>,
-      metric,
-    );
-    final candidateMetric = _metric(
-      candidatePeers[name]!['summary']! as Map<String, Object?>,
-      metric,
-    );
+    final baselinePeer = baselinePeers[name]!;
+    final candidatePeer = candidatePeers[name]!;
+    final baselineMetric =
+        _metric(baselinePeer['summary']! as Map<String, Object?>, metric);
+    final candidateMetric =
+        _metric(candidatePeer['summary']! as Map<String, Object?>, metric);
+    final baselineSamples = _sampleMetricValues(baselinePeer, metric);
+    final candidateSamples = _sampleMetricValues(candidatePeer, metric);
     final delta = candidateMetric.mean - baselineMetric.mean;
     final change =
         baselineMetric.mean == 0 ? 0.0 : delta / baselineMetric.mean * 100.0;
     final baselineCv = _cvPercent(baselineMetric);
     final candidateCv = _cvPercent(candidateMetric);
     final maxCv = math.max(baselineCv, candidateCv);
-    final verdict = baselineMetric.count < 2 || candidateMetric.count < 2
+    final ci = _meanDeltaConfidenceInterval(
+      baselineSamples: baselineSamples,
+      candidateSamples: candidateSamples,
+    );
+    final hasSamples =
+        baselineSamples.length >= 2 && candidateSamples.length >= 2;
+    final statisticallyClear = ci.excludesZero;
+    final verdict = !hasSamples
         ? 'insufficient_samples'
         : maxCv > maxCvPercent
             ? 'too_noisy'
             : change.abs() < thresholdPercent
                 ? 'neutral'
-                : change < 0
-                    ? 'improved'
-                    : 'regressed';
+                : !statisticallyClear
+                    ? 'too_noisy'
+                    : change < 0
+                        ? 'improved'
+                        : 'regressed';
     stdout.writeln(
-      '| `$name` | ${_formatMetricValue(metric, baselineMetric.mean)} | '
+      '| `$name` | ${baselineSamples.length}/${candidateSamples.length} | '
+      '${_formatMetricValue(metric, baselineMetric.mean)} | '
       '${_formatMetricValue(metric, candidateMetric.mean)} | '
       '${_formatMetricValue(metric, delta)} | '
+      '${_formatConfidenceInterval(metric, ci)} | '
       '${_trimDouble(change)}% | ${_trimDouble(maxCv)}% | $verdict |',
     );
   }
@@ -756,6 +767,95 @@ _IntStats _metric(Map<String, Object?> summary, String metric) {
   return _IntStats.fromJson(value);
 }
 
+List<int> _sampleMetricValues(Map<String, Object?> peer, String metric) {
+  final samples = peer['samples'];
+  if (samples is! List<Object?>) return const [];
+  return [
+    for (final sampleObj in samples)
+      if (sampleObj is Map<String, Object?> && sampleObj['status'] == 'ok')
+        if (_sampleMetricValue(sampleObj, metric) case final value?) value,
+  ];
+}
+
+int? _sampleMetricValue(Map<String, Object?> sample, String metric) {
+  final direct = sample[metric];
+  if (direct is int) return direct;
+
+  final diagnostics = sample['diagnostics'];
+  if (diagnostics is Map<String, Object?>) {
+    final diagnostic = diagnostics[metric];
+    if (diagnostic is int) return diagnostic;
+  }
+
+  final spanGroups = sample['span_groups'];
+  if (spanGroups is List<Object?>) {
+    if (metric == 'trace_span_total_ns') {
+      var total = 0;
+      for (final group in spanGroups) {
+        if (group is Map<String, Object?> && group['total_ns'] is int) {
+          total += group['total_ns']! as int;
+        }
+      }
+      return total;
+    }
+
+    for (final group in spanGroups) {
+      if (group is! Map<String, Object?>) continue;
+      if (group['span_name'] != 'sqlite3_step') continue;
+      return switch (metric) {
+        'sqlite3_step_count' => group['count'] as int?,
+        'sqlite3_step_total_ns' => group['total_ns'] as int?,
+        _ => null,
+      };
+    }
+  }
+
+  return null;
+}
+
+_ConfidenceInterval _meanDeltaConfidenceInterval({
+  required List<int> baselineSamples,
+  required List<int> candidateSamples,
+}) {
+  if (baselineSamples.length < 2 || candidateSamples.length < 2) {
+    return const _ConfidenceInterval.unavailable();
+  }
+
+  final baseline = _DoubleSample.fromInts(baselineSamples);
+  final candidate = _DoubleSample.fromInts(candidateSamples);
+  final delta = candidate.mean - baseline.mean;
+  final baselineTerm = baseline.variance / baseline.count;
+  final candidateTerm = candidate.variance / candidate.count;
+  final standardError = math.sqrt(baselineTerm + candidateTerm);
+  if (standardError == 0) {
+    return _ConfidenceInterval(lower: delta, upper: delta);
+  }
+
+  final numerator = math.pow(baselineTerm + candidateTerm, 2).toDouble();
+  final denominator = math.pow(baselineTerm, 2) / (baseline.count - 1) +
+      math.pow(candidateTerm, 2) / (candidate.count - 1);
+  final degreesOfFreedom = denominator == 0 ? 1.0 : numerator / denominator;
+  final margin = _tCritical95(degreesOfFreedom) * standardError;
+  return _ConfidenceInterval(lower: delta - margin, upper: delta + margin);
+}
+
+double _tCritical95(double degreesOfFreedom) {
+  if (degreesOfFreedom >= 120) return 1.98;
+  if (degreesOfFreedom >= 60) return 2.00;
+  if (degreesOfFreedom >= 40) return 2.02;
+  if (degreesOfFreedom >= 30) return 2.04;
+  if (degreesOfFreedom >= 20) return 2.09;
+  if (degreesOfFreedom >= 15) return 2.13;
+  if (degreesOfFreedom >= 10) return 2.23;
+  if (degreesOfFreedom >= 8) return 2.31;
+  if (degreesOfFreedom >= 6) return 2.45;
+  if (degreesOfFreedom >= 5) return 2.57;
+  if (degreesOfFreedom >= 4) return 2.78;
+  if (degreesOfFreedom >= 3) return 3.18;
+  if (degreesOfFreedom >= 2) return 4.30;
+  return 12.71;
+}
+
 String _peerStatus(List<_PeerTraceResult> results) {
   final successful = results.where((result) => result.trace != null).toList();
   if (successful.isEmpty) return 'failed';
@@ -854,8 +954,18 @@ double _cvPercent(_IntStats stats) {
 }
 
 String _formatMetricValue(String metric, double value) {
-  if (metric.endsWith('_ns')) return formatDurationNs(value.round());
+  if (metric.endsWith('_ns')) {
+    final rounded = value.round();
+    if (rounded < 0) return '-${formatDurationNs(-rounded)}';
+    return formatDurationNs(rounded);
+  }
   return _trimDouble(value);
+}
+
+String _formatConfidenceInterval(String metric, _ConfidenceInterval interval) {
+  if (!interval.available) return '-';
+  return '[${_formatMetricValue(metric, interval.lower)}, '
+      '${_formatMetricValue(metric, interval.upper)}]';
 }
 
 String _formatNs(double ns) => formatDurationNs(ns.round());
@@ -899,6 +1009,53 @@ class _PeerTraceResult {
   int get setupElapsedNs => metrics.setupElapsedNs;
   int get warmupElapsedNs => metrics.warmupElapsedNs;
   int get measuredElapsedNs => metrics.measuredElapsedNs;
+}
+
+class _ConfidenceInterval {
+  const _ConfidenceInterval({
+    required this.lower,
+    required this.upper,
+  }) : available = true;
+
+  const _ConfidenceInterval.unavailable()
+      : lower = 0,
+        upper = 0,
+        available = false;
+
+  final double lower;
+  final double upper;
+  final bool available;
+
+  bool get excludesZero => available && (upper < 0 || lower > 0);
+}
+
+class _DoubleSample {
+  _DoubleSample._({
+    required this.count,
+    required this.mean,
+    required this.variance,
+  });
+
+  factory _DoubleSample.fromInts(List<int> values) {
+    final count = values.length;
+    final mean = values.fold<double>(0, (sum, value) => sum + value) / count;
+    final variance = count < 2
+        ? 0.0
+        : values.fold<double>(
+              0,
+              (sum, value) => sum + math.pow(value - mean, 2),
+            ) /
+            (count - 1);
+    return _DoubleSample._(
+      count: count,
+      mean: mean,
+      variance: variance,
+    );
+  }
+
+  final int count;
+  final double mean;
+  final double variance;
 }
 
 class _PeerRunMetrics {

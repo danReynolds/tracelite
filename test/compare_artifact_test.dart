@@ -76,6 +76,7 @@ void main() {
           'stderr:\n${diff.stderr}',
     );
     expect(diff.stdout.toString(), contains('| `sqlite3` |'));
+    expect(diff.stdout.toString(), contains('delta 95% CI'));
     expect(diff.stdout.toString(), contains('neutral'));
   }, timeout: const Timeout(Duration(minutes: 2)));
 }

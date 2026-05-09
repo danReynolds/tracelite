@@ -10,7 +10,7 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — finish the resqlite workload matrix, add statistical gates, prove semantic parity against the existing profile runner, then finish packaging and Linux/Windows shim validation.
+**Next bottleneck:** production benchmark replacement hardening — finish capability-specific resqlite workloads, prove semantic parity against the existing profile runner, then finish packaging and Linux/Windows shim validation.
 
 ---
 
@@ -256,7 +256,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Artifact diff can compare two benchmark outputs | ✓ basic | `tracelite diff` over compare JSON with threshold and CV gate; significance testing still pending |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer is implementable | ✗ designed only | no visualizer code exists |
-| Diff over repetitions produces meaningful significance | △ partial | descriptive diff plus CV noise gate exists; confidence intervals pending |
+| Diff over repetitions produces meaningful significance | △ partial | descriptive diff, CV noise gate, and 95% mean-delta CI exist; non-parametric testing/outlier handling still pending |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux LD_PRELOAD shim works | ✗ designed only | macOS-only validation today |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
@@ -515,14 +515,16 @@ Acceptance gates:
 - Artifacts identify setup time, measured time, trace diagnostics, peer mode,
   workload parameters, and environment.
 
-### Phase 11: Statistical decisioning and experiment artifacts
+### Phase 11: Statistical decisioning and experiment artifacts (in progress)
 
 **Goal:** make `tracelite diff` credible enough for PRs and experiment logs.
 
 Work:
 
-- Add confidence intervals or a non-parametric test over independent
-  repetitions.
+- Done in tracelite core: `diff` now computes a 95% mean-delta confidence
+  interval over independent repetitions and treats threshold-sized changes as
+  `too_noisy` unless the interval excludes zero.
+- Add a non-parametric test over independent repetitions.
 - Keep the CV/noise gate, but make verdicts explicit:
   `improved`, `regressed`, `neutral`, `too_noisy`, `insufficient_samples`.
 - Add outlier classification and report it without silently deleting samples.

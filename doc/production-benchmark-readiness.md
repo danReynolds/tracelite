@@ -27,6 +27,9 @@ vocabulary.
   overhead.
 - `tracelite diff --baseline=base.json --candidate=change.json` compares
   repetition artifacts by a chosen summary metric.
+- `tracelite diff` now reports a 95% mean-delta confidence interval over
+  independent repetitions and treats threshold-sized changes as `too_noisy`
+  unless the interval excludes zero.
 - `tracelite calibrate` measures Dart recorder overhead with body-only,
   disabled-recorder, and active-recorder loops.
 - Compare artifacts now include deterministic workload parameters and
@@ -152,12 +155,14 @@ Keep for now:
 
 ## Remaining blockers
 
-### 1. Statistical decisioning is still shallow
+### 1. Statistical decisioning still needs one more hardening pass
 
 `tracelite diff` currently compares summary means with a percent threshold and
 can return `too_noisy` when either side exceeds the configured coefficient of
-variation gate. A production replacement still needs confidence intervals or a
-non-parametric test over repetitions.
+variation gate. It now also reports a 95% mean-delta confidence interval and
+requires the interval to exclude zero before calling a threshold-sized change
+improved or regressed. A production replacement should still add a
+non-parametric test and explicit outlier reporting over repetitions.
 
 ### 2. Workload coverage is still incomplete
 
