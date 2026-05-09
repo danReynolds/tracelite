@@ -144,6 +144,11 @@ doc/span-registry.generated.md     full per-category schemas with arg lists
 - `counter(...)`, `gauge(...)`, and `metadata(...)` emit non-duration samples
   needed for semantic metrics such as resqlite stream invalidation counts,
   dispatcher pressure, and diagnostic snapshots.
+- `TraceVocabulary` and `TraceRecorder.registerVocabulary(...)` let adapters
+  register stable span/counter/gauge names without copying metadata code into
+  the measured library.
+- `package:tracelite/resqlite.dart` exposes the resqlite semantic vocabulary
+  that resqlite can import instead of hard-coding IDs and names locally.
 - The public `tracelite` library is now core-only. Peer adapters live under
   `bin/src/` and their dependencies are dev-only, so a library such as
   `resqlite` can depend on tracelite's recorder without a package cycle.
@@ -422,7 +427,7 @@ Current measured checkpoint:
 - `diff` can now refuse a verdict as `too_noisy` when CV exceeds the configured
   gate.
 
-### Phase 9: Resqlite production integration and semantic parity (next)
+### Phase 9: Resqlite production integration and semantic parity (in progress)
 
 **Goal:** make resqlite's integration tiny while tracelite does the profiling
 and benchmark heavy lifting.
@@ -434,6 +439,9 @@ Work:
 - Move bespoke resqlite bridge code toward tracelite-owned helpers where
   possible: attach, span registration, correlation IDs, counters, gauges,
   metadata naming, and no-op disabled behavior.
+- Done in tracelite core: generic vocabulary registration and the public
+  resqlite vocabulary now live in tracelite. Next resqlite PR work should
+  consume this surface instead of duplicating span IDs and metadata names.
 - Keep resqlite-specific knowledge as a small vocabulary adapter, not a
   profiling subsystem.
 - Emit the minimum semantic facts tracelite cannot infer:
@@ -658,6 +666,10 @@ dart test
 - **macOS `-Wl,-reexport-lsqlite3`** is the load-bearing flag for the shim. Without it, the shim only exposes explicitly wrapped symbols and `package:sqlite3` fails on first dlsym for an unwrapped function.
 - **resqlite needs embedded tracing, not dynamic interposition.** Its native asset compiles sqlite3mc into `libresqlite`, so the trace build renames selected sqlite3mc API symbols to `tlt_sqlite3_*` and embeds tracelite's wrappers under the public `sqlite3_*` names.
 - **Don't add `Stopwatch` calls in Dart producers.** Use `tlt_now_ns()` via FFI. The protocol contract requires a single shared clock primitive.
+- **Runtime tests are serialized.** The current C runtime has one active mapped
+  region per loaded process. `dart_test.yaml` sets `concurrency: 1` so tests
+  that attach different trace regions do not race each other until multi-region
+  or explicit detach/unmap support exists.
 
 ---
 
