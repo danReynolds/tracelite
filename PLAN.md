@@ -487,24 +487,37 @@ Work:
 - Done in the peer harness: initial `feed-paging`, `sync-burst`, `chat-sim`,
   and scaled `large-working-set` workload ports run across `sqlite3`, `drift`,
   `sqlite_async`, and `resqlite`.
+- Done in the peer harness: capability-aware scenario dispatch now reports
+  `unsupported` peers without failing the compare run, and artifacts include
+  each peer's advertised capabilities.
+- Done in the peer harness: initial reactive scenarios cover keyed primary-key
+  subscriptions, high-cardinality fan-out, and many-stream writer throughput
+  for peers with a stream/watch API. The current `sqlite_async` and `resqlite`
+  adapters implement this lane; `sqlite3` and the current raw-SQL `drift`
+  adapter report unsupported.
+- Done in the resqlite vocabulary: `recordResqliteDiagnostics` records
+  `Database.diagnostics()` snapshots as tracelite gauges, and the
+  `sqlite-diagnostics` scenario validates the path through resqlite.
 - Port the useful resqlite workload shapes:
   - chat simulation; ✓ initial shared-SQL port
   - feed paging; ✓ initial shared-SQL port
   - sync burst; ✓ initial shared-SQL port
   - large working set; ✓ scaled shared-SQL port
-  - keyed primary-key subscriptions; needs capability-specific reactive
-    scenario support;
-  - high-cardinality fan-out; needs capability-specific reactive scenario
-    support;
-  - many-stream writer throughput; needs capability-specific reactive scenario
-    support;
-  - SQLite diagnostics workload; needs resqlite semantic gauges/metadata rather
-    than the common peer interface.
+  - keyed primary-key subscriptions; ✓ initial capability-specific reactive
+    scenario;
+  - high-cardinality fan-out; ✓ initial capability-specific reactive scenario;
+  - many-stream writer throughput; ✓ initial capability-specific reactive
+    scenario;
+  - SQLite diagnostics workload; ✓ initial resqlite semantic gauge scenario.
 - Encode workload parameters and seeds in artifacts so runs are reproducible.
 - Separate setup/warmup/measured phases in the peer harness.
 - Document each peer's traced mode. In particular, `sqlite_async` currently
   validates through a traced `singleConnection` wrapper; default native-pool
   coverage needs separate validation or explicit exclusion.
+- Add a real drift reactive adapter backed by generated/table-registry-aware
+  drift queries before claiming drift support for the optional reactive lane.
+  The current raw `NativeDatabase` adapter cannot honestly model drift's stream
+  invalidation semantics.
 - Scale ring sizing from expected event volume and fail loudly if any producer
   drops events.
 - Consider a compiled/snapshotted child or long-lived worker to reduce suite

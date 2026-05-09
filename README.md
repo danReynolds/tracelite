@@ -1,6 +1,6 @@
 # tracelite
 
-> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, and peer harness are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for baseline plus initial resqlite-derived feed-paging, sync-burst, chat-sim, and large-working-set scenarios.
+> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, and peer harness are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for baseline plus initial resqlite-derived feed-paging, sync-burst, chat-sim, and large-working-set scenarios. Capability-aware reactive and diagnostic scenarios now report unsupported peers explicitly instead of forcing every library into the same feature model.
 
 Cross-library SQLite profiling and tracing for the Dart ecosystem. Point it at any Dart program that uses SQLite — Resqlite, drift, sqlite_async, the raw `sqlite3` package, anything — and see the full call timeline: into FFI, through SQLite's C internals, and back. On a single shared clock, with no instrumentation in the libraries being measured.
 
@@ -50,6 +50,8 @@ The C shim is a drop-in `libsqlite3` replacement that wraps SQLite C API calls w
 Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Libraries can register lightweight vocabularies of span/counter/gauge names; `package:tracelite/resqlite.dart` provides the resqlite vocabulary so resqlite can emit semantic facts without owning report or metadata plumbing. Optional stack sampling adds per-Dart-package attribution on top.
 
 The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts, and calibrate recorder overhead.
+
+The peer harness has a narrow common SQL lane and optional capability lanes. Shared SQL scenarios run across all peers; reactive scenarios currently run on `sqlite_async` and `resqlite`; the resqlite diagnostics scenario records semantic gauges from `Database.diagnostics()`. Peers that do not support a scenario are marked `unsupported` in the report and JSON artifact.
 
 ## What it makes possible
 

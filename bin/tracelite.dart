@@ -95,6 +95,18 @@ Future<void> _compare(List<String> args) async {
           },
         );
         stopwatch.stop();
+        final metrics = _readPeerMetrics(metricsPath);
+        if (metrics.status == 'unsupported') {
+          results.add(
+            _PeerTraceResult.unsupported(
+              peer: peer,
+              repetition: repetition,
+              metrics: metrics,
+              childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+            ),
+          );
+          continue;
+        }
 
         if (child.exitCode != 0) {
           results.add(
@@ -273,6 +285,7 @@ Future<void> _runPeer(List<String> args) async {
   }
   final stopwatch = Stopwatch()..start();
   PeerScenarioResult? result;
+  UnsupportedPeerScenario? unsupported;
   try {
     result = await runPeerScenario(
       peerName: peer,
@@ -280,12 +293,16 @@ Future<void> _runPeer(List<String> args) async {
       databasePath: database,
       rows: rows,
     );
+  } on UnsupportedPeerScenario catch (error) {
+    unsupported = error;
   } finally {
     stopwatch.stop();
     if (metrics != null && metrics.isNotEmpty) {
       File(metrics).writeAsStringSync(
         jsonEncode({
           'schema': 'tracelite.peer_metrics.v1',
+          'status': unsupported == null ? 'ok' : 'unsupported',
+          if (unsupported != null) 'unsupported_reason': unsupported.message,
           'scenario_elapsed_ns': stopwatch.elapsedMicroseconds * 1000,
           if (result != null) ...result.toJson(),
         }),
@@ -361,7 +378,9 @@ Map<String, Object?> _peerArtifact({
     for (final result in results) _sampleArtifact(result),
   ];
   final successful = results.where((result) => result.trace != null).toList();
-  final failed = results.length - successful.length;
+  final unsupported =
+      results.where((result) => result.status == 'unsupported').length;
+  final failed = results.where((result) => result.status == 'failed').length;
   final eventCounts = successful.map((result) => result.trace!.events.length);
   final spanCounts = successful.map((result) => result.trace!.spans.length);
   final elapsedNs = successful.map((result) => result.elapsedNs);
@@ -402,6 +421,7 @@ Map<String, Object?> _peerArtifact({
     'status': _peerStatus(results),
     'successful_repetitions': successful.length,
     'failed_repetitions': failed,
+    'unsupported_repetitions': unsupported,
     'summary': {
       'elapsed_ns': _IntStats.fromValues(elapsedNs).toJson(),
       'setup_elapsed_ns': _IntStats.fromValues(setupElapsedNs).toJson(),
@@ -420,11 +440,21 @@ Map<String, Object?> _peerArtifact({
       'unmatched_end_events': _IntStats.fromValues(unmatchedEndEvents).toJson(),
     },
     'samples': samples,
+    'capabilities': peerCapabilities(peer),
   };
 }
 
 Map<String, Object?> _sampleArtifact(_PeerTraceResult result) {
   final trace = result.trace;
+  if (result.status == 'unsupported') {
+    return {
+      'repetition': result.repetition,
+      'status': 'unsupported',
+      'elapsed_ns': result.elapsedNs,
+      'child_elapsed_ns': result.childElapsedNs,
+      'unsupported_reason': result.unsupportedReason,
+    };
+  }
   if (trace == null) {
     return {
       'repetition': result.repetition,
@@ -446,6 +476,7 @@ Map<String, Object?> _sampleArtifact(_PeerTraceResult result) {
     'warmup_elapsed_ns': result.warmupElapsedNs,
     'measured_elapsed_ns': result.measuredElapsedNs,
     'child_elapsed_ns': result.childElapsedNs,
+    if (result.measurements.isNotEmpty) 'measurements': result.measurements,
     'events': trace.events.length,
     'spans': trace.spans.length,
     'trace_duration_ns': _traceDurationNs(result),
@@ -515,6 +546,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
     final summary = peer['summary']! as Map<String, Object?>;
     final successful = peer['successful_repetitions'] as int;
     final failed = peer['failed_repetitions'] as int;
+    final unsupported = peer['unsupported_repetitions'] as int;
     final events = _metric(summary, 'events');
     final spans = _metric(summary, 'spans');
     final steps = _metric(summary, 'sqlite3_step_count');
@@ -532,7 +564,11 @@ void _printCompareReport(Map<String, Object?> artifact) {
     );
     if (failed > 0) {
       stdout.writeln();
-      stdout.writeln('`$peer` had $failed failed repetition(s).');
+      stdout.writeln('`${peer['peer']}` had $failed failed repetition(s).');
+    }
+    if (unsupported > 0) {
+      stdout.writeln();
+      stdout.writeln('`${peer['peer']}` does not support this scenario.');
     }
   }
 
@@ -870,6 +906,12 @@ double _tCritical95(double degreesOfFreedom) {
 }
 
 String _peerStatus(List<_PeerTraceResult> results) {
+  if (results.every((result) => result.status == 'unsupported')) {
+    return 'unsupported';
+  }
+  if (results.any((result) => result.status == 'failed')) {
+    return 'failed';
+  }
   final successful = results.where((result) => result.trace != null).toList();
   if (successful.isEmpty) return 'failed';
   if (successful.any((result) => result.trace!.events.isEmpty)) {
@@ -887,7 +929,7 @@ bool _hasCompareFailure(Map<String, Object?> artifact) {
   if (peers is! List<Object?>) return true;
   return peers
       .cast<Map<String, Object?>>()
-      .any((peer) => peer['status'] != 'ok');
+      .any((peer) => peer['status'] != 'ok' && peer['status'] != 'unsupported');
 }
 
 bool _hasTraceDiagnostics(Trace trace) {
@@ -915,6 +957,7 @@ int _positiveIntOption(
 }
 
 int _ringWordsForScenario(String scenario, int rows) {
+  final parameters = peerScenarioParameters(scenario, rows: rows);
   final expectedEvents = switch (scenario) {
     narrowBatchInsertScenario => rows * 80 + 4096,
     pointSelectScenario => rows * 120 + 4096,
@@ -922,9 +965,28 @@ int _ringWordsForScenario(String scenario, int rows) {
     syncBurstScenario => rows * 180 + 4096,
     chatSimScenario => rows * 700 + 8192,
     largeWorkingSetScenario => rows * 260 + 8192,
+    keyedPkSubscriptionsScenario => _intParameter(parameters, 'rows') * 40 +
+        _intParameter(parameters, 'stream_count') * 800 +
+        _intParameter(parameters, 'write_count') * 300 +
+        16384,
+    highCardinalityFanoutScenario => _intParameter(parameters, 'rows') * 250 +
+        _intParameter(parameters, 'stream_count') * 2000 +
+        _intParameter(parameters, 'write_count') * 1000 +
+        32768,
+    manyStreamsWriterThroughputScenario =>
+      _intParameter(parameters, 'rows') * 500 +
+          _intParameter(parameters, 'stream_count') * 2000 +
+          _intParameter(parameters, 'write_count') * 2000 +
+          32768,
+    sqliteDiagnosticsScenario => rows * 160 + 8192,
     _ => rows * 120 + 4096,
   };
   return _ringWordsForEvents(expectedEvents);
+}
+
+int _intParameter(Map<String, Object?> parameters, String name) {
+  final value = parameters[name];
+  return value is int ? value : 0;
 }
 
 int _ringWordsForEvents(int events) {
@@ -1025,7 +1087,19 @@ class _PeerTraceResult {
     required this.stdout,
     required this.stderr,
   })  : trace = null,
-        metrics = _PeerRunMetrics(scenarioElapsedNs: elapsedNs);
+        metrics = _PeerRunMetrics(
+          status: 'failed',
+          scenarioElapsedNs: elapsedNs,
+        );
+
+  _PeerTraceResult.unsupported({
+    required this.peer,
+    required this.repetition,
+    required this.metrics,
+    required this.childElapsedNs,
+  })  : trace = null,
+        stdout = '',
+        stderr = '';
 
   final String peer;
   final int repetition;
@@ -1039,6 +1113,9 @@ class _PeerTraceResult {
   int get setupElapsedNs => metrics.setupElapsedNs;
   int get warmupElapsedNs => metrics.warmupElapsedNs;
   int get measuredElapsedNs => metrics.measuredElapsedNs;
+  String get status => metrics.status;
+  String get unsupportedReason => metrics.unsupportedReason;
+  Map<String, Object?> get measurements => metrics.measurements;
 }
 
 class _ConfidenceInterval {
@@ -1090,10 +1167,13 @@ class _DoubleSample {
 
 class _PeerRunMetrics {
   const _PeerRunMetrics({
+    this.status = 'ok',
+    this.unsupportedReason = '',
     this.scenarioElapsedNs = 0,
     this.setupElapsedNs = 0,
     this.warmupElapsedNs = 0,
     this.measuredElapsedNs = 0,
+    this.measurements = const {},
   });
 
   factory _PeerRunMetrics.fromJson(Map<String, Object?> json) {
@@ -1103,17 +1183,27 @@ class _PeerRunMetrics {
     }
 
     return _PeerRunMetrics(
+      status: json['status'] is String ? json['status']! as String : 'ok',
+      unsupportedReason: json['unsupported_reason'] is String
+          ? json['unsupported_reason']! as String
+          : '',
       scenarioElapsedNs: readInt('scenario_elapsed_ns'),
       setupElapsedNs: readInt('setup_elapsed_ns'),
       warmupElapsedNs: readInt('warmup_elapsed_ns'),
       measuredElapsedNs: readInt('measured_elapsed_ns'),
+      measurements: json['measurements'] is Map
+          ? Map<String, Object?>.from(json['measurements']! as Map)
+          : const {},
     );
   }
 
+  final String status;
+  final String unsupportedReason;
   final int scenarioElapsedNs;
   final int setupElapsedNs;
   final int warmupElapsedNs;
   final int measuredElapsedNs;
+  final Map<String, Object?> measurements;
 }
 
 class _LoopTiming {

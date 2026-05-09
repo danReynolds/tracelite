@@ -448,6 +448,19 @@ The package ships an initial library of scenarios covering common SQLite usage p
 | `chat-sim` | Simulate a chat: 1K interleaved inserts + per-conversation queries | Tests read-write interleaving with locality |
 | `keyed-pk-lookups` | 1K lookups by random PKs from a deterministic distribution | Tests primary-key index path |
 
+### Optional capability lanes
+
+These are standard tracelite scenarios, but they are not part of the narrow
+common SQL contract. Peers that do not expose the required capability are
+reported as `unsupported` instead of being forced through a distorted fallback.
+
+| Scenario name | Required capability | What it does | Why it matters |
+|---|---|---|---|
+| `keyed-pk-subscriptions` | `reactive` | Many streams watch individual primary-key rows while random updates land | Tests precise invalidation for common row-detail screens |
+| `high-cardinality-fanout` | `reactive` | Many partitioned streams watch indexed owner buckets while random updates fan out | Tests watcher cardinality and dependency-intersection cost |
+| `many-streams-writer-throughput` | `reactive` | Measures writer throughput with many active streams and both disjoint and overlapping column updates | Tests whether reactive bookkeeping slows unrelated writes |
+| `sqlite-diagnostics` | `diagnostics` | Imports SQLite/resqlite diagnostic snapshots as gauges | Tests whether semantic memory/WAL/stream facts can live in the shared trace artifact |
+
 Each scenario is a Dart class in `scenarios/` implementing the `Scenario` interface. Standard library has ~15 scenarios at v1.0; users add custom scenarios for their own workloads.
 
 ## 5. Peer adapters
@@ -645,6 +658,12 @@ narrow-batch-insert (10000 rows × 2 params):
 
 Readers see what they're comparing. "sqlite_async is 3x slower" is contextualized: it doesn't have a native batch API, so it's running the slow fallback. Comparing the two means comparing "drift's batch" vs "sqlite_async's transaction-wrapped loop" — both are valid implementations, but the fairness flag tells you that.
 
+For optional capability lanes, the harness should prefer `unsupported` over a
+fallback that changes the feature being measured. For example, the current
+raw-SQL drift adapter does not implement the reactive lane because drift's
+stream semantics depend on generated/table-registry-aware queries; pretending a
+raw `NativeDatabase` watch is equivalent would make the benchmark misleading.
+
 ### Fixed-version requirement
 
 A report's metadata includes the version of every peer:
@@ -688,7 +707,7 @@ This list is normative — these features are excluded from the cross-library co
 
 | Feature | Why excluded |
 |---|---|
-| Reactive queries (streams, watchers, observers) | Each library has a different model; comparisons are apples-to-oranges. Use library-specific user spans for in-library measurement. |
+| Reactive queries (streams, watchers, observers) | Excluded from the common SQL interface because each library has a different model. They may appear in an optional `reactive` capability lane with explicit unsupported peers. |
 | Type-safe DSLs (drift's typed queries, custom ORMs) | Compares DSL overhead, not SQL execution. The interface uses raw SQL. |
 | Migrations / schema versioning | Each library has different opinions; out of scope. |
 | Connection pooling, isolate models | Visible in trace structure (track count, async spans across tracks); not prescribed by the interface. |

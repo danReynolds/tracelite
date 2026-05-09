@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -7,6 +8,7 @@ import 'package:drift/native.dart' as drift_native;
 import 'package:resqlite/resqlite.dart' as resqlite;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
+import 'package:tracelite/resqlite.dart' as tracelite_resqlite;
 
 const String narrowBatchInsertScenario = 'narrow-batch-insert';
 const String pointSelectScenario = 'point-select';
@@ -14,6 +16,11 @@ const String feedPagingScenario = 'feed-paging';
 const String syncBurstScenario = 'sync-burst';
 const String chatSimScenario = 'chat-sim';
 const String largeWorkingSetScenario = 'large-working-set';
+const String keyedPkSubscriptionsScenario = 'keyed-pk-subscriptions';
+const String highCardinalityFanoutScenario = 'high-cardinality-fanout';
+const String manyStreamsWriterThroughputScenario =
+    'many-streams-writer-throughput';
+const String sqliteDiagnosticsScenario = 'sqlite-diagnostics';
 
 const List<String> defaultScenarioNames = [
   narrowBatchInsertScenario,
@@ -22,6 +29,10 @@ const List<String> defaultScenarioNames = [
   syncBurstScenario,
   chatSimScenario,
   largeWorkingSetScenario,
+  keyedPkSubscriptionsScenario,
+  highCardinalityFanoutScenario,
+  manyStreamsWriterThroughputScenario,
+  sqliteDiagnosticsScenario,
 ];
 
 const int _feedPagingSeed = 0xFEED;
@@ -35,6 +46,8 @@ const int _chatSimSeed = 0x5EED;
 const double _chatSimZipfExponent = 1.0;
 const int _largeWorkingSetSeed = 0xB16B00B5;
 const int _largeWorkingSetPayloadLength = 128;
+const int _reactiveSeed = 0xBEEF;
+const int _fanoutSeed = 0xCAFEF0;
 
 const List<String> defaultPeerNames = [
   'sqlite3',
@@ -60,22 +73,77 @@ abstract interface class SqlitePeer {
   Future<void> executeBatch(String sql, List<List<Object?>> parameterSets);
 }
 
+abstract interface class ReactiveSqlitePeer implements SqlitePeer {
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> parameters = const [],
+    Set<String> readsFrom = const {},
+  });
+}
+
+abstract interface class DiagnosticSqlitePeer implements SqlitePeer {
+  Future<SqliteDiagnosticSnapshot> snapshotDiagnostics();
+}
+
+final class SqliteDiagnosticSnapshot {
+  const SqliteDiagnosticSnapshot({
+    required this.sqlitePageCacheBytes,
+    required this.sqliteSchemaBytes,
+    required this.sqliteStmtBytes,
+    required this.walBytes,
+    required this.streamCount,
+    required this.readerBusy,
+  });
+
+  final int sqlitePageCacheBytes;
+  final int sqliteSchemaBytes;
+  final int sqliteStmtBytes;
+  final int walBytes;
+  final int streamCount;
+  final bool readerBusy;
+
+  int get sqliteTotalBytes =>
+      sqlitePageCacheBytes + sqliteSchemaBytes + sqliteStmtBytes;
+
+  Map<String, Object?> toJson() => {
+        'sqlite_total_bytes': sqliteTotalBytes,
+        'sqlite_page_cache_bytes': sqlitePageCacheBytes,
+        'sqlite_schema_bytes': sqliteSchemaBytes,
+        'sqlite_stmt_bytes': sqliteStmtBytes,
+        'wal_bytes': walBytes,
+        'stream_count': streamCount,
+        'reader_busy': readerBusy,
+      };
+}
+
 final class PeerScenarioResult {
   const PeerScenarioResult({
     required this.setupElapsedNs,
     required this.warmupElapsedNs,
     required this.measuredElapsedNs,
+    this.measurements = const {},
   });
 
   final int setupElapsedNs;
   final int warmupElapsedNs;
   final int measuredElapsedNs;
+  final Map<String, Object?> measurements;
 
   Map<String, Object?> toJson() => {
         'setup_elapsed_ns': setupElapsedNs,
         'warmup_elapsed_ns': warmupElapsedNs,
         'measured_elapsed_ns': measuredElapsedNs,
+        if (measurements.isNotEmpty) 'measurements': measurements,
       };
+}
+
+final class UnsupportedPeerScenario implements Exception {
+  const UnsupportedPeerScenario(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 SqlitePeer createPeer(String name) {
@@ -88,6 +156,17 @@ SqlitePeer createPeer(String name) {
   };
 }
 
+List<String> peerCapabilities(String peerName) {
+  final capabilities = <String>['sql', 'batch'];
+  if (peerName == 'resqlite' || peerName == 'sqlite_async') {
+    capabilities.add('reactive');
+  }
+  if (peerName == 'resqlite') {
+    capabilities.add('diagnostics');
+  }
+  return capabilities;
+}
+
 Map<String, Object?> peerScenarioParameters(
   String scenarioName, {
   required int rows,
@@ -95,17 +174,20 @@ Map<String, Object?> peerScenarioParameters(
   return switch (scenarioName) {
     narrowBatchInsertScenario => {
         'rows': rows,
+        'required_capabilities': ['sql', 'batch'],
         'columns': 2,
         'measured_operations': ['execute_batch', 'count_select'],
       },
     pointSelectScenario => {
         'rows': rows,
+        'required_capabilities': ['sql'],
         'lookups': rows,
         'seed': 0,
         'measured_operations': ['point_select'],
       },
     feedPagingScenario => {
         'rows': rows,
+        'required_capabilities': ['sql', 'batch'],
         'seed': _feedPagingSeed,
         'page_size': math.min(_feedPagingPageSize, math.max(1, rows)),
         'page_count': _feedPagingPageCount,
@@ -118,6 +200,7 @@ Map<String, Object?> peerScenarioParameters(
       },
     syncBurstScenario => {
         'rows': rows,
+        'required_capabilities': ['sql', 'batch'],
         'bulk_chunk_size': math.min(_syncBurstChunkSize, math.max(1, rows)),
         'merge_rounds': _syncBurstMergeRounds,
         'merge_rows_per_round': math.min(
@@ -132,6 +215,7 @@ Map<String, Object?> peerScenarioParameters(
       },
     chatSimScenario => {
         'operations': rows,
+        'required_capabilities': ['sql', 'batch'],
         'warmup_operations': _chatWarmupOps(rows),
         'users': _chatUserCount(rows),
         'conversations': _chatConversationCount(rows),
@@ -147,6 +231,7 @@ Map<String, Object?> peerScenarioParameters(
       },
     largeWorkingSetScenario => {
         'rows': rows,
+        'required_capabilities': ['sql', 'batch'],
         'seed': _largeWorkingSetSeed,
         'payload_bytes': _largeWorkingSetPayloadLength,
         'point_queries': _largeWorkingSetPointQueries(rows),
@@ -156,6 +241,50 @@ Map<String, Object?> peerScenarioParameters(
           'random_point_select',
           'range_scan_select',
           'pragma_shrink_memory',
+        ],
+      },
+    keyedPkSubscriptionsScenario => {
+        'rows': _reactiveRowCount(rows),
+        'stream_count': _reactiveStreamCount(rows),
+        'write_count': _reactiveWriteCount(rows),
+        'seed': _reactiveSeed,
+        'required_capabilities': ['sql', 'reactive'],
+        'measured_operations': [
+          'stream_initial_drain',
+          'random_pk_update',
+          'stream_settle',
+        ],
+      },
+    highCardinalityFanoutScenario => {
+        'rows': _fanoutRowCount(rows),
+        'stream_count': _fanoutStreamCount(rows),
+        'write_count': _fanoutWriteCount(rows),
+        'seed': _fanoutSeed,
+        'required_capabilities': ['sql', 'reactive'],
+        'measured_operations': [
+          'partition_stream_initial_drain',
+          'random_partition_update',
+          'stream_settle',
+        ],
+      },
+    manyStreamsWriterThroughputScenario => {
+        'rows': _writerRowCount(rows),
+        'stream_count': _writerStreamCount(rows),
+        'write_count': _writerWriteCount(rows),
+        'required_capabilities': ['sql', 'reactive'],
+        'measured_operations': [
+          'baseline_updates',
+          'disjoint_updates_with_streams',
+          'overlap_updates_with_streams',
+        ],
+      },
+    sqliteDiagnosticsScenario => {
+        'rows': rows,
+        'required_capabilities': ['sql', 'diagnostics'],
+        'measured_operations': [
+          'seed',
+          'warm_read',
+          'diagnostic_snapshot',
         ],
       },
     _ => throw ArgumentError.value(
@@ -188,6 +317,14 @@ Future<PeerScenarioResult> runPeerScenario({
         return await _runChatSim(peer, rows: rows);
       case largeWorkingSetScenario:
         return await _runLargeWorkingSet(peer, rows: rows);
+      case keyedPkSubscriptionsScenario:
+        return await _runKeyedPkSubscriptions(peer, rows: rows);
+      case highCardinalityFanoutScenario:
+        return await _runHighCardinalityFanout(peer, rows: rows);
+      case manyStreamsWriterThroughputScenario:
+        return await _runManyStreamsWriterThroughput(peer, rows: rows);
+      case sqliteDiagnosticsScenario:
+        return await _runSqliteDiagnostics(peer, rows: rows);
       default:
         throw ArgumentError.value(
           scenarioName,
@@ -557,6 +694,346 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
   );
 }
 
+Future<PeerScenarioResult> _runKeyedPkSubscriptions(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final reactive = _requireReactivePeer(peer);
+  final rowCount = _reactiveRowCount(rows);
+  final streamCount = _reactiveStreamCount(rows);
+  final writeCount = _reactiveWriteCount(rows);
+
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_keyed_items');
+  await peer.execute(
+    'CREATE TABLE tracelite_keyed_items('
+    'id INTEGER PRIMARY KEY, '
+    'body TEXT NOT NULL, '
+    'updated_at INTEGER NOT NULL)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_keyed_items(id, body, updated_at) VALUES (?, ?, ?)',
+    [
+      for (var i = 1; i <= rowCount; i++) [i, 'body_$i', 0],
+    ],
+  );
+  setup.stop();
+
+  final watchedIds = [for (var i = 1; i <= streamCount; i++) i];
+  final emitCounts = List<int>.filled(streamCount, 0);
+  final subscriptions = <StreamSubscription<List<Map<String, Object?>>>>[];
+  final warmup = Stopwatch()..start();
+  for (var i = 0; i < streamCount; i++) {
+    final index = i;
+    subscriptions.add(
+      reactive.watch(
+        'SELECT id, body, updated_at '
+        'FROM tracelite_keyed_items WHERE id = ?',
+        parameters: [watchedIds[i]],
+        readsFrom: const {'tracelite_keyed_items'},
+      ).listen((_) => emitCounts[index]++),
+    );
+  }
+  try {
+    await _waitUntil(
+      () => emitCounts.every((count) => count > 0),
+      timeout: const Duration(seconds: 10),
+      description: '${peer.name} keyed stream initial emissions',
+    );
+    warmup.stop();
+
+    for (var i = 0; i < emitCounts.length; i++) {
+      emitCounts[i] = 0;
+    }
+
+    final prng = math.Random(_reactiveSeed);
+    var observedHits = 0;
+    final measured = Stopwatch()..start();
+    for (var i = 0; i < writeCount; i++) {
+      final id = prng.nextInt(rowCount) + 1;
+      if (watchedIds.contains(id)) observedHits++;
+      await peer.execute(
+        'UPDATE tracelite_keyed_items '
+        'SET body = ?, updated_at = ? WHERE id = ?',
+        ['body_${i}_$id', i + 1, id],
+      );
+    }
+    await _waitForQuietReactiveWindow(() => emitCounts.fold<int>(0, _sum));
+    measured.stop();
+
+    return PeerScenarioResult(
+      setupElapsedNs: _elapsedNs(setup),
+      warmupElapsedNs: _elapsedNs(warmup),
+      measuredElapsedNs: _elapsedNs(measured),
+      measurements: {
+        'stream_count': streamCount,
+        'write_count': writeCount,
+        'post_baseline_emissions': emitCounts.fold<int>(0, _sum),
+        'observed_watched_pk_hits': observedHits,
+      },
+    );
+  } finally {
+    await Future.wait([for (final sub in subscriptions) sub.cancel()]);
+  }
+}
+
+Future<PeerScenarioResult> _runHighCardinalityFanout(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final reactive = _requireReactivePeer(peer);
+  final rowCount = _fanoutRowCount(rows);
+  final streamCount = _fanoutStreamCount(rows);
+  final writeCount = _fanoutWriteCount(rows);
+
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_fanout_items');
+  await peer.execute(
+    'CREATE TABLE tracelite_fanout_items('
+    'id INTEGER PRIMARY KEY, '
+    'owner_id INTEGER NOT NULL, '
+    'value TEXT NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE INDEX tracelite_fanout_owner '
+    'ON tracelite_fanout_items(owner_id)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_fanout_items(id, owner_id, value) VALUES (?, ?, ?)',
+    [
+      for (var i = 1; i <= rowCount; i++)
+        [i, ((i - 1) % streamCount) + 1, 'value_$i'],
+    ],
+  );
+  setup.stop();
+
+  final emitCounts = List<int>.filled(streamCount, 0);
+  final subscriptions = <StreamSubscription<List<Map<String, Object?>>>>[];
+  final warmup = Stopwatch()..start();
+  for (var ownerId = 1; ownerId <= streamCount; ownerId++) {
+    final index = ownerId - 1;
+    subscriptions.add(
+      reactive.watch(
+        'SELECT id, value FROM tracelite_fanout_items '
+        'WHERE owner_id = ? ORDER BY id',
+        parameters: [ownerId],
+        readsFrom: const {'tracelite_fanout_items'},
+      ).listen((_) => emitCounts[index]++),
+    );
+  }
+  try {
+    await _waitUntil(
+      () => emitCounts.every((count) => count > 0),
+      timeout: const Duration(seconds: 10),
+      description: '${peer.name} fanout stream initial emissions',
+    );
+    warmup.stop();
+    for (var i = 0; i < emitCounts.length; i++) {
+      emitCounts[i] = 0;
+    }
+
+    final prng = math.Random(_fanoutSeed);
+    final touchedOwners = <int>{};
+    final measured = Stopwatch()..start();
+    for (var i = 0; i < writeCount; i++) {
+      final id = prng.nextInt(rowCount) + 1;
+      touchedOwners.add(((id - 1) % streamCount) + 1);
+      await peer.execute(
+        'UPDATE tracelite_fanout_items SET value = ? WHERE id = ?',
+        ['updated_${i}_$id', id],
+      );
+    }
+    await _waitForQuietReactiveWindow(() => emitCounts.fold<int>(0, _sum));
+    measured.stop();
+
+    return PeerScenarioResult(
+      setupElapsedNs: _elapsedNs(setup),
+      warmupElapsedNs: _elapsedNs(warmup),
+      measuredElapsedNs: _elapsedNs(measured),
+      measurements: {
+        'stream_count': streamCount,
+        'write_count': writeCount,
+        'post_baseline_emissions': emitCounts.fold<int>(0, _sum),
+        'touched_owner_count': touchedOwners.length,
+      },
+    );
+  } finally {
+    await Future.wait([for (final sub in subscriptions) sub.cancel()]);
+  }
+}
+
+Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final reactive = _requireReactivePeer(peer);
+  final rowCount = _writerRowCount(rows);
+  final streamCount = _writerStreamCount(rows);
+  final writeCount = _writerWriteCount(rows);
+
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_wide_items');
+  await peer.execute(
+    'CREATE TABLE tracelite_wide_items('
+    'id INTEGER PRIMARY KEY, '
+    'partition_id INTEGER NOT NULL, '
+    'a TEXT NOT NULL, '
+    'b TEXT NOT NULL, '
+    'c TEXT NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE INDEX tracelite_wide_partition '
+    'ON tracelite_wide_items(partition_id)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_wide_items(id, partition_id, a, b, c) '
+    'VALUES (?, ?, ?, ?, ?)',
+    [
+      for (var i = 1; i <= rowCount; i++)
+        [i, (i - 1) % streamCount, 'a_$i', 'b_$i', 'c_$i'],
+    ],
+  );
+  setup.stop();
+
+  final baseline = Stopwatch()..start();
+  await _runWideUpdates(
+    peer,
+    column: 'c',
+    writeCount: writeCount,
+    rowCount: rowCount,
+    valuePrefix: 'baseline',
+  );
+  baseline.stop();
+
+  final emitCounts = List<int>.filled(streamCount, 0);
+  final subscriptions = <StreamSubscription<List<Map<String, Object?>>>>[];
+  final warmup = Stopwatch()..start();
+  for (var partition = 0; partition < streamCount; partition++) {
+    final index = partition;
+    subscriptions.add(
+      reactive.watch(
+        'SELECT id, a, b FROM tracelite_wide_items '
+        'WHERE partition_id = ? ORDER BY id',
+        parameters: [partition],
+        readsFrom: const {'tracelite_wide_items'},
+      ).listen((_) => emitCounts[index]++),
+    );
+  }
+  try {
+    await _waitUntil(
+      () => emitCounts.every((count) => count > 0),
+      timeout: const Duration(seconds: 10),
+      description: '${peer.name} many-stream initial emissions',
+    );
+    warmup.stop();
+    for (var i = 0; i < emitCounts.length; i++) {
+      emitCounts[i] = 0;
+    }
+
+    final measured = Stopwatch()..start();
+    final disjoint = Stopwatch()..start();
+    await _runWideUpdates(
+      peer,
+      column: 'c',
+      writeCount: writeCount,
+      rowCount: rowCount,
+      valuePrefix: 'disjoint',
+    );
+    await _waitForQuietReactiveWindow(() => emitCounts.fold<int>(0, _sum));
+    disjoint.stop();
+    final disjointEmissions = emitCounts.fold<int>(0, _sum);
+
+    for (var i = 0; i < emitCounts.length; i++) {
+      emitCounts[i] = 0;
+    }
+
+    final overlap = Stopwatch()..start();
+    await _runWideUpdates(
+      peer,
+      column: 'a',
+      writeCount: writeCount,
+      rowCount: rowCount,
+      valuePrefix: 'overlap',
+    );
+    await _waitForQuietReactiveWindow(() => emitCounts.fold<int>(0, _sum));
+    overlap.stop();
+    measured.stop();
+
+    return PeerScenarioResult(
+      setupElapsedNs: _elapsedNs(setup),
+      warmupElapsedNs: _elapsedNs(warmup),
+      measuredElapsedNs: _elapsedNs(measured),
+      measurements: {
+        'stream_count': streamCount,
+        'write_count': writeCount,
+        'baseline_elapsed_ns': _elapsedNs(baseline),
+        'disjoint_elapsed_ns': _elapsedNs(disjoint),
+        'overlap_elapsed_ns': _elapsedNs(overlap),
+        'disjoint_emissions': disjointEmissions,
+        'overlap_emissions': emitCounts.fold<int>(0, _sum),
+      },
+    );
+  } finally {
+    await Future.wait([for (final sub in subscriptions) sub.cancel()]);
+  }
+}
+
+Future<PeerScenarioResult> _runSqliteDiagnostics(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final diagnosticPeer = _requireDiagnosticPeer(peer);
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_diag_items');
+  await peer.execute(
+    'CREATE TABLE tracelite_diag_items('
+    'id INTEGER PRIMARY KEY, '
+    'payload TEXT NOT NULL)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_diag_items(id, payload) VALUES (?, ?)',
+    [
+      for (var i = 1; i <= rows; i++) [i, 'payload_$i'],
+    ],
+  );
+  setup.stop();
+
+  final measured = Stopwatch()..start();
+  for (var i = 1; i <= math.min(rows, 10); i++) {
+    await peer.select(
+      'SELECT payload FROM tracelite_diag_items WHERE id = ?',
+      [i],
+    );
+  }
+  final snapshot = await diagnosticPeer.snapshotDiagnostics();
+  final session = tracelite_resqlite.TraceSession.attach(
+    processName: 'tracelite_peer',
+    threadName: 'resqlite_diagnostics',
+    vocabularies: const [tracelite_resqlite.resqliteTraceVocabulary],
+  );
+  try {
+    tracelite_resqlite.recordResqliteDiagnostics(
+      session,
+      sqlitePageCacheBytes: snapshot.sqlitePageCacheBytes,
+      sqliteSchemaBytes: snapshot.sqliteSchemaBytes,
+      sqliteStmtBytes: snapshot.sqliteStmtBytes,
+      walBytes: snapshot.walBytes,
+      streamCount: snapshot.streamCount,
+      readerBusy: snapshot.readerBusy,
+    );
+  } finally {
+    session.detach();
+  }
+  measured.stop();
+
+  return PeerScenarioResult(
+    setupElapsedNs: _elapsedNs(setup),
+    warmupElapsedNs: 0,
+    measuredElapsedNs: _elapsedNs(measured),
+    measurements: snapshot.toJson(),
+  );
+}
+
 Future<void> _seedNarrowItems(SqlitePeer peer, {required int rows}) async {
   await peer.execute('DROP TABLE IF EXISTS tracelite_items');
   await peer.execute(
@@ -720,6 +1197,87 @@ int _largeWorkingSetPointQueries(int rows) => math.max(1, rows ~/ 2);
 int _largeWorkingSetRangeScans(int rows) => math.max(1, rows ~/ 20);
 
 int _largeWorkingSetRangeLimit(int rows) => math.min(25, math.max(1, rows));
+
+ReactiveSqlitePeer _requireReactivePeer(SqlitePeer peer) {
+  if (peer is ReactiveSqlitePeer) return peer;
+  throw UnsupportedPeerScenario('${peer.name} does not support reactive watch');
+}
+
+DiagnosticSqlitePeer _requireDiagnosticPeer(SqlitePeer peer) {
+  if (peer is DiagnosticSqlitePeer) return peer;
+  throw UnsupportedPeerScenario('${peer.name} does not expose diagnostics');
+}
+
+Future<void> _waitUntil(
+  bool Function() predicate, {
+  required Duration timeout,
+  required String description,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!predicate()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('timed out waiting for $description');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
+Future<void> _waitForQuietReactiveWindow(int Function() readCount) async {
+  var last = readCount();
+  var stableWindows = 0;
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final current = readCount();
+    if (current == last) {
+      stableWindows++;
+      if (stableWindows >= 2) return;
+      continue;
+    }
+    stableWindows = 0;
+    last = current;
+  }
+}
+
+Future<void> _runWideUpdates(
+  SqlitePeer peer, {
+  required String column,
+  required int writeCount,
+  required int rowCount,
+  required String valuePrefix,
+}) async {
+  for (var i = 0; i < writeCount; i++) {
+    final id = (i % rowCount) + 1;
+    await peer.execute(
+      'UPDATE tracelite_wide_items SET $column = ? WHERE id = ?',
+      ['${valuePrefix}_$i', id],
+    );
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
+int _sum(int a, int b) => a + b;
+
+int _reactiveStreamCount(int rows) => math.min(50, math.max(1, rows));
+
+int _reactiveWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
+
+int _reactiveRowCount(int rows) =>
+    math.max(_reactiveStreamCount(rows) * 4, rows * 100);
+
+int _fanoutStreamCount(int rows) => math.min(100, math.max(2, rows));
+
+int _fanoutWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
+
+int _fanoutRowCount(int rows) =>
+    math.max(_fanoutStreamCount(rows) * 10, rows * 100);
+
+int _writerStreamCount(int rows) => math.min(50, math.max(2, rows));
+
+int _writerWriteCount(int rows) => math.min(100, math.max(10, rows * 4));
+
+int _writerRowCount(int rows) =>
+    math.max(_writerStreamCount(rows) * 10, rows * 100);
 
 enum _ChatOpKind {
   insertMessage,
@@ -921,7 +1479,7 @@ final class _DriftUser implements drift_backend.QueryExecutorUser {
   ) async {}
 }
 
-final class SqliteAsyncPeer implements SqlitePeer {
+final class SqliteAsyncPeer implements SqlitePeer, ReactiveSqlitePeer {
   sqlite_async.SqliteDatabase? _db;
   sqlite3.Database? _raw;
 
@@ -968,9 +1526,27 @@ final class SqliteAsyncPeer implements SqlitePeer {
   Future<void> executeBatch(String sql, List<List<Object?>> parameterSets) {
     return _db!.executeBatch(sql, parameterSets);
   }
+
+  @override
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> parameters = const [],
+    Set<String> readsFrom = const {},
+  }) {
+    return _db!
+        .watchUnthrottled(
+          sql,
+          parameters: parameters,
+          triggerOnTables: readsFrom.isEmpty ? null : readsFrom,
+        )
+        .map((rows) => [
+              for (final row in rows) Map<String, Object?>.from(row),
+            ]);
+  }
 }
 
-final class ResqlitePeer implements SqlitePeer {
+final class ResqlitePeer
+    implements SqlitePeer, ReactiveSqlitePeer, DiagnosticSqlitePeer {
   resqlite.Database? _db;
 
   @override
@@ -1004,5 +1580,27 @@ final class ResqlitePeer implements SqlitePeer {
   @override
   Future<void> executeBatch(String sql, List<List<Object?>> parameterSets) {
     return _db!.executeBatch(sql, parameterSets);
+  }
+
+  @override
+  Stream<List<Map<String, Object?>>> watch(
+    String sql, {
+    List<Object?> parameters = const [],
+    Set<String> readsFrom = const {},
+  }) {
+    return _db!.stream(sql, parameters);
+  }
+
+  @override
+  Future<SqliteDiagnosticSnapshot> snapshotDiagnostics() async {
+    final diagnostics = await _db!.diagnostics();
+    return SqliteDiagnosticSnapshot(
+      sqlitePageCacheBytes: diagnostics.sqlitePageCacheBytes,
+      sqliteSchemaBytes: diagnostics.sqliteSchemaBytes,
+      sqliteStmtBytes: diagnostics.sqliteStmtBytes,
+      walBytes: diagnostics.walBytes,
+      streamCount: diagnostics.streamLength,
+      readerBusy: diagnostics.readersBusyAtSnapshot,
+    );
   }
 }

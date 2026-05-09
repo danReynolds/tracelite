@@ -40,6 +40,15 @@ vocabulary.
 - The peer harness now includes initial shared-SQL ports of resqlite's
   `feed-paging`, `sync-burst`, `chat-sim`, and scaled `large-working-set`
   workload shapes.
+- Compare artifacts now include peer capability metadata and can represent
+  unsupported capability-specific scenarios without failing the whole run.
+- The peer harness now includes initial reactive ports for keyed PK
+  subscriptions, high-cardinality fan-out, and many-stream writer throughput.
+  These currently run on `sqlite_async` and `resqlite`; `sqlite3` and the
+  current raw-SQL `drift` adapter report unsupported.
+- `package:tracelite/resqlite.dart` now includes
+  `recordResqliteDiagnostics`, and the `sqlite-diagnostics` scenario records
+  resqlite diagnostic snapshots as tracelite gauges.
 
 ## Evidence from this pass
 
@@ -139,6 +148,39 @@ and scaled `large-working-set`. The small row count is a smoke validation of
 scenario semantics and tracing coverage; production-scale numbers still need
 repetition counts, larger parameter sets, and statistical decisioning.
 
+### Capability-aware reactive and diagnostic lanes
+
+Commands:
+
+```bash
+dart run bin/tracelite.dart compare \
+  --scenario=keyed-pk-subscriptions \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --rows=4
+
+dart run bin/tracelite.dart compare \
+  --scenario=high-cardinality-fanout \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --rows=4
+
+dart run bin/tracelite.dart compare \
+  --scenario=many-streams-writer-throughput \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --rows=4
+
+dart run bin/tracelite.dart compare \
+  --scenario=sqlite-diagnostics \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --rows=4
+```
+
+Result: reactive scenarios report `sqlite3` and the current raw-SQL `drift`
+adapter as `unsupported`, while `sqlite_async` and `resqlite` complete with
+non-empty traces and `0/0/0` diagnostics. The diagnostics scenario reports
+`sqlite3`, `drift`, and `sqlite_async` as unsupported and records resqlite
+gauges for page-cache bytes, schema bytes, statement bytes, WAL bytes, stream
+count, and reader-busy state.
+
 ## What this can replace first
 
 Ready to migrate first:
@@ -167,13 +209,20 @@ requires the interval to exclude zero before calling a threshold-sized change
 improved or regressed. A production replacement should still add a
 non-parametric test and explicit outlier reporting over repetitions.
 
-### 2. Workload coverage is still incomplete
+### 2. Workload coverage is broader, but still needs production scale
 
 `narrow-batch-insert`, `point-select`, `feed-paging`, `sync-burst`, `chat-sim`,
-and scaled `large-working-set` are now implemented in tracelite's peer harness.
-Production replacement still requires capability-specific reactive support for
-keyed PK subscriptions, fan-out, and many-stream writer throughput, plus
-resqlite semantic gauge/metadata support for SQLite diagnostics.
+scaled `large-working-set`, keyed PK subscriptions, high-cardinality fan-out,
+many-stream writer throughput, and `sqlite-diagnostics` are now implemented in
+tracelite's peer harness. Production replacement still requires larger
+parameter sets, repeated-run artifacts for each workload, and side-by-side
+parity against the current resqlite profiler outputs.
+
+The biggest architectural gap is drift's optional reactive lane. The current
+tracelite `drift` peer adapter is intentionally raw-SQL based, so it cannot
+honestly exercise drift's generated stream-query invalidation model. Supporting
+drift reactivity needs a generated/table-registry-aware adapter rather than a
+fake watch wrapper around the current raw `NativeDatabase` path.
 
 ### 3. Runner startup is separated, not eliminated
 
@@ -200,8 +249,10 @@ be called production-quality across Dart targets.
 ## Recommended next iteration
 
 1. Add statistical gates to `tracelite diff`.
-2. Port the remaining resqlite profile workloads into tracelite's peer harness.
-3. Add diagnostic snapshot import as trace metadata/gauges.
+2. Run the new reactive and diagnostics scenarios at production-like parameter
+   sizes with repetitions.
+3. Add a generated/table-registry-aware drift reactive adapter or document drift
+   as unsupported for the optional reactive lane.
 4. Run old resqlite profile artifacts and tracelite artifacts side by side for
    the same workloads.
 5. Remove only the resqlite profile surfaces that have proven tracelite parity.
