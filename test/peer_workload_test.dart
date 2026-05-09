@@ -3,7 +3,12 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
-  for (final scenario in ['feed-paging', 'sync-burst']) {
+  for (final scenario in [
+    'feed-paging',
+    'sync-burst',
+    'chat-sim',
+    'large-working-set',
+  ]) {
     test('compare validates $scenario on all peers', () async {
       final result = await Process.run(
         Platform.resolvedExecutable,
@@ -27,10 +32,19 @@ void main() {
 
       final output = result.stdout as String;
       for (final peer in ['sqlite3', 'drift', 'sqlite_async', 'resqlite']) {
+        final line = output
+            .split('\n')
+            .firstWhere((line) => line.startsWith('| `$peer` |'));
         expect(
-          output,
+          line,
           contains('| `$peer` | ok |'),
           reason: '$peer should complete $scenario and emit trace events.\n'
+              '$output',
+        );
+        expect(
+          line,
+          contains('| 0/0/0 |'),
+          reason: '$peer should complete $scenario without trace diagnostics.\n'
               '$output',
         );
       }

@@ -32,7 +32,8 @@ vocabulary.
 - Compare artifacts now include deterministic workload parameters and
   child-process setup, warmup, and measured phase timings.
 - The peer harness now includes initial shared-SQL ports of resqlite's
-  `feed-paging` and `sync-burst` workload shapes.
+  `feed-paging`, `sync-burst`, `chat-sim`, and scaled `large-working-set`
+  workload shapes.
 
 ## Evidence from this pass
 
@@ -125,11 +126,12 @@ dart run bin/tracelite.dart compare \
   --rows=8
 ```
 
-Result: both workload shapes completed on all four peers with non-empty SQLite
-traces and `0/0/0` max dropped/unmatched diagnostics. The small row count is a
-smoke validation of scenario semantics and tracing coverage; production-scale
-numbers still need repetition counts, larger parameter sets, and statistical
-decisioning.
+Result: the first two resqlite-derived workload shapes completed on all four
+peers with non-empty SQLite traces and `0/0/0` max dropped/unmatched
+diagnostics. Follow-up validation extended the same smoke test to `chat-sim`
+and scaled `large-working-set`. The small row count is a smoke validation of
+scenario semantics and tracing coverage; production-scale numbers still need
+repetition counts, larger parameter sets, and statistical decisioning.
 
 ## What this can replace first
 
@@ -159,10 +161,11 @@ non-parametric test over repetitions.
 
 ### 2. Workload coverage is still incomplete
 
-`narrow-batch-insert`, `point-select`, `feed-paging`, and `sync-burst` are now
-implemented in tracelite's peer harness. Production replacement still requires
-the rest of the resqlite workload matrix: chat sim, large working set, keyed PK
-subscriptions, fan-out, many-stream writer throughput, and SQLite diagnostics.
+`narrow-batch-insert`, `point-select`, `feed-paging`, `sync-burst`, `chat-sim`,
+and scaled `large-working-set` are now implemented in tracelite's peer harness.
+Production replacement still requires capability-specific reactive support for
+keyed PK subscriptions, fan-out, and many-stream writer throughput, plus
+resqlite semantic gauge/metadata support for SQLite diagnostics.
 
 ### 3. Runner startup is separated, not eliminated
 

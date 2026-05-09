@@ -27,10 +27,18 @@ void main() {
 
     final output = result.stdout as String;
     for (final peer in ['sqlite3', 'drift', 'sqlite_async', 'resqlite']) {
+      final line = output
+          .split('\n')
+          .firstWhere((line) => line.startsWith('| `$peer` |'));
       expect(
-        output,
+        line,
         contains('| `$peer` | ok |'),
         reason: '$peer should complete and emit trace events.\n$output',
+      );
+      expect(
+        line,
+        contains('| 0/0/0 |'),
+        reason: '$peer should complete without trace diagnostics.\n$output',
       );
     }
     expect(output, isNot(contains('no trace')));

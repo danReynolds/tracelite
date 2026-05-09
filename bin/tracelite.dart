@@ -72,7 +72,7 @@ Future<void> _compare(List<String> args) async {
         final metricsPath = '${tempRoot.path}/$peer-r$repetition.metrics.json';
         TraceRegion.createFile(
           regionPath,
-          ringDataWords: _ringWordsForScenario(rows),
+          ringDataWords: _ringWordsForScenario(scenario, rows),
         );
 
         final stopwatch = Stopwatch()..start();
@@ -784,7 +784,18 @@ int _positiveIntOption(
   return value;
 }
 
-int _ringWordsForScenario(int rows) => _ringWordsForEvents(rows * 80 + 4096);
+int _ringWordsForScenario(String scenario, int rows) {
+  final expectedEvents = switch (scenario) {
+    narrowBatchInsertScenario => rows * 80 + 4096,
+    pointSelectScenario => rows * 120 + 4096,
+    feedPagingScenario => rows * 140 + 4096,
+    syncBurstScenario => rows * 180 + 4096,
+    chatSimScenario => rows * 700 + 8192,
+    largeWorkingSetScenario => rows * 260 + 8192,
+    _ => rows * 120 + 4096,
+  };
+  return _ringWordsForEvents(expectedEvents);
+}
 
 int _ringWordsForEvents(int events) {
   final needed = math.max(8192, events * 3);

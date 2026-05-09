@@ -481,17 +481,22 @@ Work:
 - Done in tracelite core: compare artifacts now include deterministic workload
   parameters plus setup, warmup, and measured phase timings from the child
   process.
-- Done in the peer harness: initial `feed-paging` and `sync-burst` workload
-  ports run across `sqlite3`, `drift`, `sqlite_async`, and `resqlite`.
+- Done in the peer harness: initial `feed-paging`, `sync-burst`, `chat-sim`,
+  and scaled `large-working-set` workload ports run across `sqlite3`, `drift`,
+  `sqlite_async`, and `resqlite`.
 - Port the useful resqlite workload shapes:
-  - chat simulation;
+  - chat simulation; ✓ initial shared-SQL port
   - feed paging; ✓ initial shared-SQL port
   - sync burst; ✓ initial shared-SQL port
-  - large working set;
-  - keyed primary-key subscriptions;
-  - high-cardinality fan-out;
-  - many-stream writer throughput;
-  - SQLite diagnostics workload.
+  - large working set; ✓ scaled shared-SQL port
+  - keyed primary-key subscriptions; needs capability-specific reactive
+    scenario support;
+  - high-cardinality fan-out; needs capability-specific reactive scenario
+    support;
+  - many-stream writer throughput; needs capability-specific reactive scenario
+    support;
+  - SQLite diagnostics workload; needs resqlite semantic gauges/metadata rather
+    than the common peer interface.
 - Encode workload parameters and seeds in artifacts so runs are reproducible.
 - Separate setup/warmup/measured phases in the peer harness.
 - Document each peer's traced mode. In particular, `sqlite_async` currently

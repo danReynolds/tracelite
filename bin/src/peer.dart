@@ -12,12 +12,16 @@ const String narrowBatchInsertScenario = 'narrow-batch-insert';
 const String pointSelectScenario = 'point-select';
 const String feedPagingScenario = 'feed-paging';
 const String syncBurstScenario = 'sync-burst';
+const String chatSimScenario = 'chat-sim';
+const String largeWorkingSetScenario = 'large-working-set';
 
 const List<String> defaultScenarioNames = [
   narrowBatchInsertScenario,
   pointSelectScenario,
   feedPagingScenario,
   syncBurstScenario,
+  chatSimScenario,
+  largeWorkingSetScenario,
 ];
 
 const int _feedPagingSeed = 0xFEED;
@@ -27,6 +31,10 @@ const int _feedPagingLikeWrites = 8;
 const int _syncBurstChunkSize = 25;
 const int _syncBurstMergeRounds = 3;
 const int _syncBurstMergeRowsPerRound = 10;
+const int _chatSimSeed = 0x5EED;
+const double _chatSimZipfExponent = 1.0;
+const int _largeWorkingSetSeed = 0xB16B00B5;
+const int _largeWorkingSetPayloadLength = 128;
 
 const List<String> defaultPeerNames = [
   'sqlite3',
@@ -122,6 +130,34 @@ Map<String, Object?> peerScenarioParameters(
           'count_select',
         ],
       },
+    chatSimScenario => {
+        'operations': rows,
+        'warmup_operations': _chatWarmupOps(rows),
+        'users': _chatUserCount(rows),
+        'conversations': _chatConversationCount(rows),
+        'seed_messages': _chatSeedMessageCount(rows),
+        'seed': _chatSimSeed,
+        'zipf_exponent': _chatSimZipfExponent,
+        'operation_mix': {
+          'insert_message_percent': 5,
+          'update_conversation_percent': 5,
+          'read_messages_percent': 45,
+          'read_user_percent': 45,
+        },
+      },
+    largeWorkingSetScenario => {
+        'rows': rows,
+        'seed': _largeWorkingSetSeed,
+        'payload_bytes': _largeWorkingSetPayloadLength,
+        'point_queries': _largeWorkingSetPointQueries(rows),
+        'range_scans': _largeWorkingSetRangeScans(rows),
+        'range_scan_limit': _largeWorkingSetRangeLimit(rows),
+        'measured_operations': [
+          'random_point_select',
+          'range_scan_select',
+          'pragma_shrink_memory',
+        ],
+      },
     _ => throw ArgumentError.value(
         scenarioName,
         'scenarioName',
@@ -148,6 +184,10 @@ Future<PeerScenarioResult> runPeerScenario({
         return await _runFeedPaging(peer, rows: rows);
       case syncBurstScenario:
         return await _runSyncBurst(peer, rows: rows);
+      case chatSimScenario:
+        return await _runChatSim(peer, rows: rows);
+      case largeWorkingSetScenario:
+        return await _runLargeWorkingSet(peer, rows: rows);
       default:
         throw ArgumentError.value(
           scenarioName,
@@ -358,6 +398,165 @@ Future<PeerScenarioResult> _runSyncBurst(
   );
 }
 
+Future<PeerScenarioResult> _runChatSim(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final userCount = _chatUserCount(rows);
+  final conversationCount = _chatConversationCount(rows);
+  final seedMessages = _chatSeedMessageCount(rows);
+
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_chat_messages');
+  await peer.execute('DROP TABLE IF EXISTS tracelite_chat_conversations');
+  await peer.execute('DROP TABLE IF EXISTS tracelite_chat_users');
+  await peer.execute(
+    'CREATE TABLE tracelite_chat_users('
+    'id INTEGER PRIMARY KEY, '
+    'name TEXT NOT NULL, '
+    'avatar_url TEXT NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE TABLE tracelite_chat_conversations('
+    'id INTEGER PRIMARY KEY, '
+    'last_msg_at INTEGER NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE TABLE tracelite_chat_messages('
+    'id INTEGER PRIMARY KEY, '
+    'conv_id INTEGER NOT NULL, '
+    'sender_id INTEGER NOT NULL, '
+    'body TEXT NOT NULL, '
+    'sent_at INTEGER NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE INDEX tracelite_chat_messages_conv_sent '
+    'ON tracelite_chat_messages(conv_id, sent_at DESC)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_chat_users(id, name, avatar_url) VALUES (?, ?, ?)',
+    [
+      for (var i = 1; i <= userCount; i++)
+        [i, 'user_$i', 'https://example.com/avatars/$i.png'],
+    ],
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_chat_conversations(id, last_msg_at) VALUES (?, ?)',
+    [
+      for (var i = 1; i <= conversationCount; i++) [i, 0]
+    ],
+  );
+  final seedZipf = _ZipfianSampler(
+    conversationCount,
+    _chatSimZipfExponent,
+    _chatSimSeed ^ 0xABC,
+  );
+  final seedPrng = math.Random(_chatSimSeed ^ 0xDEF);
+  await peer.executeBatch(
+    'INSERT INTO tracelite_chat_messages('
+    'id, conv_id, sender_id, body, sent_at'
+    ') VALUES (?, ?, ?, ?, ?)',
+    [
+      for (var i = 1; i <= seedMessages; i++)
+        [
+          i,
+          seedZipf.sample() + 1,
+          seedPrng.nextInt(userCount) + 1,
+          'seed_message_$i',
+          i,
+        ],
+    ],
+  );
+  setup.stop();
+
+  final ops = _generateChatOps(
+    totalOps: rows,
+    userCount: userCount,
+    conversationCount: conversationCount,
+    seedMessageCount: seedMessages,
+  );
+  final warmupOps = _chatWarmupOps(rows);
+  final warmup = Stopwatch()..start();
+  for (final op in ops.take(warmupOps)) {
+    await _executeChatOp(peer, op);
+  }
+  warmup.stop();
+
+  final measured = Stopwatch()..start();
+  for (final op in ops.skip(warmupOps)) {
+    await _executeChatOp(peer, op);
+  }
+  measured.stop();
+
+  return PeerScenarioResult(
+    setupElapsedNs: _elapsedNs(setup),
+    warmupElapsedNs: _elapsedNs(warmup),
+    measuredElapsedNs: _elapsedNs(measured),
+  );
+}
+
+Future<PeerScenarioResult> _runLargeWorkingSet(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_large_items');
+  await peer.execute(
+    'CREATE TABLE tracelite_large_items('
+    'id INTEGER PRIMARY KEY, '
+    'payload TEXT NOT NULL)',
+  );
+  final payload = List.filled(_largeWorkingSetPayloadLength, 'x').join();
+  await peer.executeBatch(
+    'INSERT INTO tracelite_large_items(id, payload) VALUES (?, ?)',
+    [
+      for (var i = 1; i <= rows; i++) [i, '$payload$i'],
+    ],
+  );
+  setup.stop();
+
+  final warmup = Stopwatch()..start();
+  await peer.select('SELECT payload FROM tracelite_large_items WHERE id = ?', [
+    1,
+  ]);
+  await peer.execute('PRAGMA shrink_memory');
+  warmup.stop();
+
+  final measured = Stopwatch()..start();
+  final prng = math.Random(_largeWorkingSetSeed);
+  for (var i = 0; i < _largeWorkingSetPointQueries(rows); i++) {
+    final id = prng.nextInt(rows) + 1;
+    final result = await peer.select(
+      'SELECT payload FROM tracelite_large_items WHERE id = ?',
+      [id],
+    );
+    if (result.isEmpty) {
+      throw StateError('${peer.name} returned no large row for id=$id');
+    }
+    _consumeRows(result);
+  }
+  final rangeLimit = _largeWorkingSetRangeLimit(rows);
+  for (var i = 0; i < _largeWorkingSetRangeScans(rows); i++) {
+    final start = prng.nextInt(math.max(1, rows - rangeLimit + 1)) + 1;
+    final result = await peer.select(
+      'SELECT payload FROM tracelite_large_items '
+      'WHERE id >= ? AND id < ? LIMIT ?',
+      [start, start + rangeLimit, rangeLimit],
+    );
+    if (result.isEmpty) {
+      throw StateError('${peer.name} returned no large range for id=$start');
+    }
+    _consumeRows(result);
+  }
+  measured.stop();
+
+  return PeerScenarioResult(
+    setupElapsedNs: _elapsedNs(setup),
+    warmupElapsedNs: _elapsedNs(warmup),
+    measuredElapsedNs: _elapsedNs(measured),
+  );
+}
+
 Future<void> _seedNarrowItems(SqlitePeer peer, {required int rows}) async {
   await peer.execute('DROP TABLE IF EXISTS tracelite_items');
   await peer.execute(
@@ -414,6 +613,187 @@ Future<void> _applyFeedLikeWrites(SqlitePeer peer, {required int rows}) async {
       'SET like_count = like_count + 1 WHERE id = ?',
       [id],
     );
+  }
+}
+
+List<_ChatOp> _generateChatOps({
+  required int totalOps,
+  required int userCount,
+  required int conversationCount,
+  required int seedMessageCount,
+}) {
+  final prng = math.Random(_chatSimSeed);
+  final zipf = _ZipfianSampler(
+    conversationCount,
+    _chatSimZipfExponent,
+    _chatSimSeed,
+  );
+  final ops = <_ChatOp>[];
+  var clock = seedMessageCount + 1;
+
+  for (var i = 0; i < totalOps; i++) {
+    final roll = prng.nextInt(100);
+    if (roll < 5) {
+      ops.add(
+        _ChatOp.insertMessage(
+          conversationId: zipf.sample() + 1,
+          userId: prng.nextInt(userCount) + 1,
+          sentAt: clock++,
+        ),
+      );
+    } else if (roll < 10) {
+      ops.add(
+        _ChatOp.updateConversation(
+          conversationId: zipf.sample() + 1,
+          sentAt: clock++,
+        ),
+      );
+    } else if (roll < 55) {
+      ops.add(_ChatOp.readMessages(conversationId: zipf.sample() + 1));
+    } else {
+      ops.add(_ChatOp.readUser(userId: prng.nextInt(userCount) + 1));
+    }
+  }
+  return ops;
+}
+
+Future<void> _executeChatOp(SqlitePeer peer, _ChatOp op) async {
+  switch (op.kind) {
+    case _ChatOpKind.insertMessage:
+      await peer.execute(
+        'INSERT INTO tracelite_chat_messages('
+        'conv_id, sender_id, body, sent_at'
+        ') VALUES (?, ?, ?, ?)',
+        [
+          op.conversationId,
+          op.userId,
+          'body_${op.sentAt}',
+          op.sentAt,
+        ],
+      );
+    case _ChatOpKind.updateConversation:
+      await peer.execute(
+        'UPDATE tracelite_chat_conversations '
+        'SET last_msg_at = ? WHERE id = ?',
+        [op.sentAt, op.conversationId],
+      );
+    case _ChatOpKind.readMessages:
+      final result = await peer.select(
+        'SELECT m.id, m.body, m.sent_at, u.name, u.avatar_url '
+        'FROM tracelite_chat_messages m '
+        'JOIN tracelite_chat_users u ON u.id = m.sender_id '
+        'WHERE m.conv_id = ? '
+        'ORDER BY m.sent_at DESC LIMIT 20',
+        [op.conversationId],
+      );
+      _consumeRows(result);
+    case _ChatOpKind.readUser:
+      final result = await peer.select(
+        'SELECT id, name, avatar_url FROM tracelite_chat_users WHERE id = ?',
+        [op.userId],
+      );
+      if (result.isEmpty) {
+        throw StateError('${peer.name} returned no user for id=${op.userId}');
+      }
+      _consumeRows(result);
+  }
+}
+
+void _consumeRows(List<Map<String, Object?>> rows) {
+  for (final row in rows) {
+    for (final value in row.values) {
+      if (identical(value, value)) continue;
+    }
+  }
+}
+
+int _chatUserCount(int rows) => math.max(10, rows * 2);
+
+int _chatConversationCount(int rows) => math.max(4, rows);
+
+int _chatSeedMessageCount(int rows) => math.max(20, rows * 20);
+
+int _chatWarmupOps(int rows) => math.min(rows ~/ 10, math.max(0, rows - 1));
+
+int _largeWorkingSetPointQueries(int rows) => math.max(1, rows ~/ 2);
+
+int _largeWorkingSetRangeScans(int rows) => math.max(1, rows ~/ 20);
+
+int _largeWorkingSetRangeLimit(int rows) => math.min(25, math.max(1, rows));
+
+enum _ChatOpKind {
+  insertMessage,
+  updateConversation,
+  readMessages,
+  readUser,
+}
+
+final class _ChatOp {
+  _ChatOp.insertMessage({
+    required this.conversationId,
+    required this.userId,
+    required this.sentAt,
+  }) : kind = _ChatOpKind.insertMessage;
+
+  _ChatOp.updateConversation({
+    required this.conversationId,
+    required this.sentAt,
+  })  : kind = _ChatOpKind.updateConversation,
+        userId = null;
+
+  _ChatOp.readMessages({required this.conversationId})
+      : kind = _ChatOpKind.readMessages,
+        userId = null,
+        sentAt = null;
+
+  _ChatOp.readUser({required this.userId})
+      : kind = _ChatOpKind.readUser,
+        conversationId = null,
+        sentAt = null;
+
+  final _ChatOpKind kind;
+  final int? conversationId;
+  final int? userId;
+  final int? sentAt;
+}
+
+final class _ZipfianSampler {
+  _ZipfianSampler(int n, double s, int seed)
+      : _rng = math.Random(seed ^ 0xBADBEEF),
+        _cdf = _buildCdf(n, s);
+
+  final math.Random _rng;
+  final List<double> _cdf;
+
+  int sample() {
+    final r = _rng.nextDouble();
+    var lo = 0;
+    var hi = _cdf.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi) >>> 1;
+      if (_cdf[mid] >= r) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    return lo;
+  }
+
+  static List<double> _buildCdf(int n, double s) {
+    final weights = List<double>.generate(
+      n,
+      (k) => 1.0 / math.pow(k + 1, s),
+    );
+    final sum = weights.fold<double>(0, (a, b) => a + b);
+    final cdf = List<double>.filled(n, 0);
+    var acc = 0.0;
+    for (var i = 0; i < n; i++) {
+      acc += weights[i] / sum;
+      cdf[i] = acc;
+    }
+    cdf[n - 1] = 1.0;
+    return cdf;
   }
 }
 
