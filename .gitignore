@@ -1,0 +1,37 @@
+# Dart / Pub
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# Flutter (visualizer)
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE
+*.iml
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Native build artifacts
+native/build/
+native/CMakeCache.txt
+native/CMakeFiles/
+native/Makefile
+native/cmake_install.cmake
+*.o
+*.so
+*.dylib
+*.dll
+
+# Trace artifacts (don't commit recordings unless they're test fixtures)
+*.tlt
+!test/fixtures/*.tlt
+!doc/examples/*.tlt
+
+# Logs
+*.log

@@ -1,0 +1,466 @@
+# tracelite — source-of-truth registry for built-in spans.
+#
+# This file is the canonical definition of every reserved span ID,
+# every arg schema, and every category. The generator at
+# tools/generate.dart reads this file and emits:
+#
+#   - lib/src/builtin_spans.g.dart    Dart constants
+#   - native/builtin_spans.g.h        C #defines
+#   - doc/format-spec.appendix.md     Markdown appendix tables
+#   - doc/span-registry.generated.md  span-registry tables
+#
+# Any change to span IDs, names, schemas, or categories MUST be made
+# here. The generator's CI check fails if any consumer file has been
+# hand-edited inconsistently with this file.
+#
+# Schema:
+#   spans:
+#     - id: 0xNNNN          # 16-bit hex
+#       name: foo.bar       # stable identifier
+#       category: sqlite_c | dart | ffi | user | tracelite
+#       begin_args: [...]   # list of {name, type}
+#       end_args: [...]
+#       instant_args: [...] # at most one of begin/end vs instant_args
+#       deprecated: false   # optional; if true, decoders show a warning
+#       superseded_by: 0xMMMM   # optional; for renumbering during deprecation
+#
+# Arg types must match the format-spec arg type codes.
+
+format_version: [1, 0]
+
+# Reserved built-in ranges (informational; enforced in generator):
+ranges:
+  tracelite: [0x0000, 0x0FFF]
+  sqlite_c: [0x1000, 0x1FFF]
+  dart_recorder: [0x2000, 0x2FFF]
+  ffi_bridge: [0x3000, 0x3FFF]
+  user: [0x4000, 0xFFFF]
+
+# ---------------------------------------------------------------------
+# tracelite built-ins (0x0000–0x0FFF)
+# ---------------------------------------------------------------------
+
+spans:
+
+  - id: 0x0001
+    name: _metadata
+    category: tracelite
+    # METADATA events use a fixed schema per metadata_kind, defined in
+    # format-spec.md §6.1. The span_id field is reused as metadata_kind
+    # for METADATA events; this entry is informational only.
+    instant_args: []
+
+  - id: 0x0002
+    name: _dropped_events
+    category: tracelite
+    instant_args:
+      - {name: dropped_count, type: u64}
+
+  - id: 0x0003
+    name: _trace_start
+    category: tracelite
+    instant_args: []
+
+  - id: 0x0004
+    name: _trace_end
+    category: tracelite
+    instant_args: []
+
+  - id: 0x0005
+    name: _producer_registered
+    category: tracelite
+    instant_args:
+      - {name: track_id, type: u32}
+      - {name: kind, type: u32}
+
+  - id: 0x0006
+    name: _string_pool_overflow
+    category: tracelite
+    instant_args:
+      - {name: bytes_lost, type: u64}
+
+  - id: 0x0007
+    name: _drain_boundary
+    category: tracelite
+    instant_args:
+      - {name: drain_seq, type: u64}
+
+# ---------------------------------------------------------------------
+# SQLite C API (0x1000–0x1FFF)
+#
+# Every SQLite C wrapper has begin_args (inputs known when the call
+# starts) and end_args (outputs and return codes known after).
+# Output pointers (`stmt_out`, `blob_out`) appear in end_args, not
+# begin_args, because their value isn't valid until the call returns.
+# ---------------------------------------------------------------------
+
+  # Connection lifecycle (0x1000–0x100F)
+
+  - id: 0x1000
+    name: sqlite3_open
+    category: sqlite_c
+    begin_args:
+      - {name: filename, type: string_id}
+    end_args:
+      - {name: db, type: ptr}
+      - {name: rc, type: i32}
+
+  - id: 0x1001
+    name: sqlite3_open_v2
+    category: sqlite_c
+    begin_args:
+      - {name: filename, type: string_id}
+      - {name: flags, type: i32}
+      - {name: vfs, type: string_id}
+    end_args:
+      - {name: db, type: ptr}
+      - {name: rc, type: i32}
+
+  - id: 0x1003
+    name: sqlite3_close
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1004
+    name: sqlite3_close_v2
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: rc, type: i32}
+
+  # Statement lifecycle (0x1010–0x102F)
+
+  - id: 0x1011
+    name: sqlite3_prepare_v2
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+      - {name: sql, type: string_id}
+    end_args:
+      - {name: stmt_out, type: ptr}
+      - {name: rc, type: i32}
+
+  - id: 0x1012
+    name: sqlite3_prepare_v3
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+      - {name: sql, type: string_id}
+      - {name: flags, type: u32}
+    end_args:
+      - {name: stmt_out, type: ptr}
+      - {name: rc, type: i32}
+
+  - id: 0x1020
+    name: sqlite3_finalize
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+    end_args:
+      - {name: rc, type: i32}
+
+  # Statement execution (0x1030–0x103F)
+
+  - id: 0x1030
+    name: sqlite3_step
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1031
+    name: sqlite3_reset
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+    end_args:
+      - {name: rc, type: i32}
+
+  # Bind (0x1040–0x107F)
+
+  - id: 0x1040
+    name: sqlite3_bind_null
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1041
+    name: sqlite3_bind_int
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+      - {name: val, type: i64}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1042
+    name: sqlite3_bind_int64
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+      - {name: val, type: i64}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1043
+    name: sqlite3_bind_double
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+      - {name: val, type: f64}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1044
+    name: sqlite3_bind_text
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+      - {name: len, type: bytes_len}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1048
+    name: sqlite3_bind_blob
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+      - {name: len, type: bytes_len}
+    end_args:
+      - {name: rc, type: i32}
+
+  - id: 0x1053
+    name: sqlite3_clear_bindings
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+    end_args:
+      - {name: rc, type: i32}
+
+  # Column access (0x1080–0x10CF)
+  # These are typically called many times per row; output is the
+  # column value at the given index. We model them as BEGIN/END
+  # because the value is observed at call return.
+
+  - id: 0x1080
+    name: sqlite3_column_count
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+    end_args:
+      - {name: count, type: i32}
+
+  - id: 0x1090
+    name: sqlite3_column_int
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: val, type: i64}
+
+  - id: 0x1091
+    name: sqlite3_column_int64
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: val, type: i64}
+
+  - id: 0x1092
+    name: sqlite3_column_double
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: val, type: f64}
+
+  - id: 0x1093
+    name: sqlite3_column_text
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: len, type: bytes_len}
+
+  - id: 0x1095
+    name: sqlite3_column_blob
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: len, type: bytes_len}
+
+  - id: 0x1096
+    name: sqlite3_column_bytes
+    category: sqlite_c
+    begin_args:
+      - {name: stmt, type: ptr}
+      - {name: idx, type: i32}
+    end_args:
+      - {name: len, type: bytes_len}
+
+  # Direct execution (0x10D0–0x10DF)
+
+  - id: 0x10D0
+    name: sqlite3_exec
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+      - {name: sql, type: string_id}
+    end_args:
+      - {name: rc, type: i32}
+
+  # Convenience accessors (0x10E0–0x10FF)
+
+  - id: 0x10E0
+    name: sqlite3_changes
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: count, type: i32}
+
+  - id: 0x10E2
+    name: sqlite3_total_changes
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: count, type: i32}
+
+  - id: 0x10E4
+    name: sqlite3_last_insert_rowid
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: rowid, type: i64}
+
+  # Errors (0x1100–0x110F)
+
+  - id: 0x1100
+    name: sqlite3_errcode
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: code, type: i32}
+
+  - id: 0x1102
+    name: sqlite3_errmsg
+    category: sqlite_c
+    begin_args:
+      - {name: db, type: ptr}
+    end_args:
+      - {name: msg, type: string_id}
+
+# ---------------------------------------------------------------------
+# Hook *callback invocations* (0x1200–0x12FF)
+#
+# These are different from the registration calls above (sqlite3_*_hook,
+# 0x1120–0x113F) — they fire when SQLite actually invokes the registered
+# callback. Registration spans don't tell you anything about runtime
+# behavior; invocation spans do.
+#
+# v0.1 reserves the range; entries to be filled in as the shim's
+# callback wrappers are written.
+# ---------------------------------------------------------------------
+
+# (deferred to v0.2 — shim wrappers for hook callbacks aren't in scope yet)
+
+# ---------------------------------------------------------------------
+# Dart recorder built-ins (0x2000–0x2FFF)
+# ---------------------------------------------------------------------
+
+  - id: 0x2000
+    name: dart.isolate.spawn
+    category: dart_recorder
+    begin_args:
+      - {name: parent_track, type: u64}
+    end_args:
+      - {name: child_track, type: u64}
+      - {name: name, type: string_id}
+
+  - id: 0x2001
+    name: dart.isolate.exit
+    category: dart_recorder
+    instant_args:
+      - {name: track, type: u64}
+
+  - id: 0x2010
+    name: dart.gc.minor
+    category: dart_recorder
+    begin_args:
+      - {name: reason, type: string_id}
+      - {name: before_bytes, type: u64}
+    end_args:
+      - {name: after_bytes, type: u64}
+
+  - id: 0x2011
+    name: dart.gc.major
+    category: dart_recorder
+    begin_args:
+      - {name: reason, type: string_id}
+      - {name: before_bytes, type: u64}
+    end_args:
+      - {name: after_bytes, type: u64}
+
+  # Stack samples — variable-length frame list, hence list arg type
+  - id: 0x2030
+    name: dart.stack.sample
+    category: dart_recorder
+    instant_args:
+      - {name: frames, type: list_string_id}
+
+# ---------------------------------------------------------------------
+# FFI bridge (0x3000–0x3FFF)
+#
+# These wrap the Dart↔C boundary, distinct from C-side SQLite spans.
+# `ffi.entry` is emitted just before crossing into C; `ffi.exit` is
+# emitted just after returning. The C-side span (e.g., sqlite3_step)
+# nests inside, capturing pure SQLite cost.
+# ---------------------------------------------------------------------
+
+  - id: 0x3000
+    name: ffi.entry
+    category: ffi_bridge
+    instant_args:
+      - {name: symbol, type: string_id}
+
+  - id: 0x3001
+    name: ffi.exit
+    category: ffi_bridge
+    instant_args:
+      - {name: symbol, type: string_id}
+
+  - id: 0x3010
+    name: ffi.string.to_native
+    category: ffi_bridge
+    begin_args:
+      - {name: byte_len, type: bytes_len}
+    end_args: []
+
+  - id: 0x3011
+    name: ffi.string.from_native
+    category: ffi_bridge
+    begin_args:
+      - {name: byte_len, type: bytes_len}
+    end_args: []

@@ -1,0 +1,40 @@
+name: tracelite
+description: >-
+  Cross-library SQLite profiling and tracing for the Dart ecosystem.
+  See into SQLite, FFI, and any peer library on a unified timeline.
+version: 0.0.1-dev
+
+# Prototype implementation is in progress. See PLAN.md for the current
+# implementation roadmap and docs/status boundaries.
+
+# homepage: https://github.com/<owner>/tracelite
+# repository: https://github.com/<owner>/tracelite
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  ffi: ^2.1.4
+
+dependency_overrides:
+  # Local validation needs resqlite's trace_sqlite native-asset build mode.
+  resqlite:
+    path: ../resqlite
+
+dev_dependencies:
+  drift: ^2.33.0
+  resqlite: ^0.3.1
+  sqlite3: ^3.3.1
+  sqlite_async: ^0.14.1
+  yaml: ^3.1.2     # tools/generate.dart reads tools/spans.yaml
+  test: ^1.25.0
+  lints: ^4.0.0
+
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name: sqlite_traced
+    resqlite:
+      trace_sqlite: true
+      tracelite_root: .
