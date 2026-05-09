@@ -57,8 +57,8 @@ class TraceRegion {
     final perProducerRingSize = perRingSize(ringDataWords: ringDataWords);
     final size = ringSectionOffset + perProducerRingSize * maxProducers;
 
-    final bytes = Uint8List(size);
-    final view = ByteData.sublistView(bytes);
+    final headerBytes = Uint8List(kHeaderSize);
+    final view = ByteData.sublistView(headerBytes);
 
     view.setUint32(0, kTraceliteRegionMagic, Endian.little);
     view.setUint16(4, kFormatVersion[0], Endian.little);
@@ -80,13 +80,25 @@ class TraceRegion {
     view.setUint8(53, 1);
     view.setUint64(56, 0, Endian.little);
 
-    for (var i = 0; i < maxProducers; i++) {
-      final offset = ringSectionOffset + i * perProducerRingSize;
-      view.setUint32(offset + 24, ringDataWords, Endian.little);
-      view.setUint32(offset + 28, ringDataWords - 1, Endian.little);
-    }
+    final file = File(path);
+    final opened = file.openSync(mode: FileMode.write);
+    try {
+      opened.setPositionSync(0);
+      opened.writeFromSync(headerBytes);
+      opened.truncateSync(size);
 
-    File(path).writeAsBytesSync(bytes);
+      final ringHeaderBytes = Uint8List(kRingHeaderSize);
+      final ringHeaderView = ByteData.sublistView(ringHeaderBytes);
+      ringHeaderView.setUint32(24, ringDataWords, Endian.little);
+      ringHeaderView.setUint32(28, ringDataWords - 1, Endian.little);
+      for (var i = 0; i < maxProducers; i++) {
+        final offset = ringSectionOffset + i * perProducerRingSize;
+        opened.setPositionSync(offset);
+        opened.writeFromSync(ringHeaderBytes);
+      }
+    } finally {
+      opened.closeSync();
+    }
   }
 
   static void _checkPowerOfTwo(int value, String name) {
@@ -120,6 +132,50 @@ class Trace {
 
   Iterable<TraceEvent> get metadataEvents =>
       events.where((event) => event.isMetadata);
+
+  List<TraceWorkload> get workloads {
+    final result = <TraceWorkload>[];
+    for (final span in spans.where(
+      (span) =>
+          span.isComplete &&
+          spanName(span.spanId).endsWith('.profile.workload'),
+    )) {
+      final startNs = span.startNs;
+      final endNs = span.endNs ?? span.startNs;
+      final correlationId = span.begin.correlationId ?? span.end?.correlationId;
+      final name = span.beginArgs.isEmpty
+          ? spanName(span.spanId)
+          : strings[span.beginArgs.first] ?? span.beginArgs.first.toString();
+      final iterations = span.beginArgs.length > 1 ? span.beginArgs[1] : null;
+      final sampleCount = span.endArgs.isNotEmpty ? span.endArgs.first : null;
+      result.add(
+        TraceWorkload(
+          name: name,
+          span: span,
+          iterations: iterations,
+          sampleCount: sampleCount,
+          spans: spans
+              .where(
+                (candidate) =>
+                    !identical(candidate, span) &&
+                    candidate.isComplete &&
+                    candidate.startNs >= startNs &&
+                    (candidate.endNs ?? candidate.startNs) <= endNs,
+              )
+              .toList(growable: false),
+          counters: counterEvents.where((event) {
+            final inRange =
+                event.timestampNs >= startNs && event.timestampNs <= endNs;
+            final correlated =
+                correlationId != null && event.correlationId == correlationId;
+            return inRange || correlated;
+          }).toList(growable: false),
+        ),
+      );
+    }
+    result.sort((a, b) => a.span.startNs.compareTo(b.span.startNs));
+    return List.unmodifiable(result);
+  }
 
   Duration get duration {
     if (events.isEmpty) return Duration.zero;
@@ -232,6 +288,81 @@ class Trace {
           '${formatDurationNs(stats.p99Ns)} | '
           '${formatDurationNs(stats.totalNs)} |',
         );
+      }
+    }
+
+    final workloadGroups = workloads;
+    if (workloadGroups.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('## Workloads')
+        ..writeln()
+        ..writeln(
+          '| workload | iterations | samples | duration | spans | counters |',
+        )
+        ..writeln('|---|---:|---:|---:|---:|---:|');
+
+      for (final workload in workloadGroups) {
+        buffer.writeln(
+          '| `${_markdownCell(workload.name)}` | '
+          '${workload.iterations ?? '-'} | '
+          '${workload.sampleCount ?? '-'} | '
+          '${formatDurationNs(workload.span.durationNs)} | '
+          '${workload.spans.length} | '
+          '${workload.counters.length} |',
+        );
+      }
+
+      for (final workload in workloadGroups) {
+        buffer
+          ..writeln()
+          ..writeln('### ${workload.name}')
+          ..writeln()
+          ..writeln('| span | count | p50 | p90 | p99 | total |')
+          ..writeln('|---|---:|---:|---:|---:|---:|');
+
+        final nestedGroups = workload.spans.groupStatsByType(
+          spanNames: spanNames,
+        )..sort((a, b) {
+            final byTotal = b.stats.totalNs.compareTo(a.stats.totalNs);
+            if (byTotal != 0) return byTotal;
+            return a.spanName.compareTo(b.spanName);
+          });
+        if (nestedGroups.isEmpty) {
+          buffer.writeln('| _(no nested spans)_ | 0 | - | - | - | - |');
+        } else {
+          for (final group in nestedGroups) {
+            final stats = group.stats;
+            buffer.writeln(
+              '| `${group.spanName}` | ${stats.count} | '
+              '${formatDurationNs(stats.p50Ns)} | '
+              '${formatDurationNs(stats.p90Ns)} | '
+              '${formatDurationNs(stats.p99Ns)} | '
+              '${formatDurationNs(stats.totalNs)} |',
+            );
+          }
+        }
+
+        final workloadCounters = workload.counters.groupCounterStatsByType(
+          spanNames: spanNames,
+        )..sort((a, b) {
+            final byName = a.spanName.compareTo(b.spanName);
+            if (byName != 0) return byName;
+            return a.spanId.compareTo(b.spanId);
+          });
+        if (workloadCounters.isNotEmpty) {
+          buffer
+            ..writeln()
+            ..writeln('| counter | samples | latest | min | max |')
+            ..writeln('|---|---:|---:|---:|---:|');
+          for (final group in workloadCounters) {
+            final stats = group.stats;
+            buffer.writeln(
+              '| `${group.spanName}` | ${stats.count} | ${stats.latest} | '
+              '${stats.min} | ${stats.max} |',
+            );
+          }
+        }
       }
     }
 
@@ -422,6 +553,24 @@ class TraceSpan {
   bool get isComplete => end != null || begin.isInstant;
 }
 
+class TraceWorkload {
+  TraceWorkload({
+    required this.name,
+    required this.span,
+    required this.iterations,
+    required this.sampleCount,
+    required this.spans,
+    required this.counters,
+  });
+
+  final String name;
+  final TraceSpan span;
+  final int? iterations;
+  final int? sampleCount;
+  final List<TraceSpan> spans;
+  final List<TraceEvent> counters;
+}
+
 class TraceDiagnostics {
   const TraceDiagnostics({
     required this.unmatchedBeginEvents,
@@ -598,6 +747,8 @@ Map<int, String> _readSpanNames(
 }
 
 String hexSpanId(int spanId) => '0x${spanId.toRadixString(16).padLeft(4, '0')}';
+
+String _markdownCell(String value) => value.replaceAll('|', '\\|');
 
 String formatDurationNs(int ns) {
   if (ns < 1000) return '${ns}ns';

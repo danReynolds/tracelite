@@ -42,6 +42,7 @@ void main() {
     expect(artifact['workload'], isA<Map<String, Object?>>());
     expect(artifact['environment'], isA<Map<String, Object?>>());
     expect(artifact['repetitions'], 2);
+    expect(artifact['ring_data_words'] as int, greaterThan(0));
     final peers = artifact['peers'] as List<Object?>;
     expect(peers, hasLength(1));
     final sqlite3 = peers.single as Map<String, Object?>;

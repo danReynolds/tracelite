@@ -13,6 +13,8 @@ abstract final class ResqliteTraceSpans {
   static const int streamInvalidate = 0x4020;
   static const int streamIntersectDependencies = 0x4021;
   static const int streamSelectIfChanged = 0x4022;
+
+  static const int profileWorkload = 0x4030;
 }
 
 abstract final class ResqliteTraceCounters {
@@ -100,6 +102,12 @@ const TraceVocabulary resqliteTraceVocabulary = TraceVocabulary(
     TraceDefinition(
       id: ResqliteTraceSpans.streamSelectIfChanged,
       name: 'resqlite.stream.select_if_changed',
+      category: 'resqlite',
+      kind: TraceDefinitionKind.span,
+    ),
+    TraceDefinition(
+      id: ResqliteTraceSpans.profileWorkload,
+      name: 'resqlite.profile.workload',
       category: 'resqlite',
       kind: TraceDefinitionKind.span,
     ),

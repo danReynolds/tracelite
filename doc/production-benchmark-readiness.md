@@ -62,6 +62,15 @@ vocabulary.
   `recordResqliteDispatcherMetrics`, and `recordResqliteDiagnostics`, and the
   `sqlite-diagnostics` scenario records resqlite diagnostic snapshots as
   tracelite gauges.
+- The trace region writer now creates sparse external region files, and
+  `tracelite create-region` can provision a region for external producers such
+  as resqlite profile harnesses.
+- Reactive production scenarios now size trace rings from the expected event
+  count instead of under-provisioning high-event stream workloads.
+- The generic markdown report now recognizes `*.profile.workload` spans and
+  renders workload-scoped nested span and counter summaries.
+- The resqlite PR bridge now caches interned string IDs so repeated SQL strings
+  do not exhaust the tracelite string pool during large profile runs.
 
 ## Evidence from this pass
 
@@ -255,6 +264,15 @@ should not be removed until tracelite artifacts prove parity for operation
 counts, rows/cells decoded, stream invalidation cost, reader-pool pressure, and
 diagnostic snapshots.
 
+The 2026-05-09 side-by-side run closed the first semantic parity gaps:
+workload-scope spans preserve the old profile workload names and sample counts,
+per-workload diagnostics now appear as correlated tracelite gauges, and the
+many-streams profile emits stream invalidation, dependency intersection, and
+dispatcher pressure counters into the trace. The remaining resqlite migration
+work is export compatibility rather than raw signal capture: old profile JSON
+fields such as noop-floor subtraction, `work_us`, RSS deltas, per-write fanout
+deltas, and existing A/B diff inputs still need a tracelite summary path.
+
 ### 5. Portability is still macOS-first
 
 The current shim validation is macOS-oriented. Linux `LD_PRELOAD`, Windows
@@ -263,12 +281,12 @@ be called production-quality across Dart targets.
 
 ## Recommended next iteration
 
-1. Run `tracelite suite --profile=production` for the full peer matrix and keep
-   the generated artifacts as the first baseline set.
-2. Run the new reactive and diagnostics scenarios at production-like parameter
-   sizes with repetitions.
-3. Add a generated/table-registry-aware drift reactive adapter or document drift
+1. Add a tracelite workload-summary export, likely JSON first, that can replace
+   the old resqlite profile JSON fields consumed by experiment diffs.
+2. Add RSS/peak-RSS counters or explicitly keep RSS as a resqlite-local
+   profile signal.
+3. Port the many-streams fanout-delta table to tracelite-derived summaries or
+   keep that harness as a temporary specialized profile.
+4. Add a generated/table-registry-aware drift reactive adapter or document drift
    as unsupported for the optional reactive lane.
-4. Run old resqlite profile artifacts and tracelite artifacts side by side for
-   the same workloads.
 5. Remove only the resqlite profile surfaces that have proven tracelite parity.

@@ -17,6 +17,10 @@ void main() {
       'resqlite.database.select',
     );
     expect(
+      resqliteTraceVocabulary.spanNames[ResqliteTraceSpans.profileWorkload],
+      'resqlite.profile.workload',
+    );
+    expect(
       resqliteTraceVocabulary.spanNames[ResqliteTraceCounters.rowsDecoded],
       'resqlite.rows_decoded',
     );
@@ -70,6 +74,57 @@ void main() {
     expect(report, contains('resqlite.database.select'));
     expect(report, contains('resqlite.rows_decoded'));
     expect(report, contains('resqlite.sqlite_page_cache_bytes'));
+  });
+
+  test('resqlite workload spans render grouped report sections', () async {
+    final runtime = await _ensureRuntimeLibrary();
+    final regionPath =
+        '${Directory.systemTemp.path}/tracelite-resqlite-workload-$pid.tlt';
+    addTearDown(() {
+      try {
+        File(regionPath).deleteSync();
+      } catch (_) {}
+    });
+
+    TraceRegion.createFile(regionPath);
+    final recorder = TraceRecorder.attach(
+      regionPath: regionPath,
+      runtimeLibraryPath: runtime.absolute.path,
+      processName: 'resqlite_workload_test',
+      threadName: 'main',
+    );
+    expect(recorder.isActive, isTrue);
+
+    recorder.registerVocabulary(resqliteTraceVocabulary);
+    final workloadName = recorder.internString('point_query');
+    await recorder.traceAsync<void>(
+      ResqliteTraceSpans.profileWorkload,
+      () async {
+        recorder.trace(ResqliteTraceSpans.databaseSelect, () {});
+        recorder.counter(
+          ResqliteTraceCounters.rowsDecoded,
+          10,
+          correlationId: 7,
+        );
+      },
+      beginArgs: [workloadName, 3],
+      endArgs: [9],
+      correlationId: 7,
+    );
+    recorder.detach();
+
+    final trace = Trace.loadRegion(regionPath);
+    expect(trace.workloads, hasLength(1));
+    expect(trace.workloads.single.name, 'point_query');
+    expect(trace.workloads.single.iterations, 3);
+    expect(trace.workloads.single.sampleCount, 9);
+
+    final report = trace.toMarkdownReport();
+    expect(report, contains('## Workloads'));
+    expect(report, contains('| `point_query` | 3 | 9 |'));
+    expect(report, contains('### point_query'));
+    expect(report, contains('resqlite.database.select'));
+    expect(report, contains('resqlite.rows_decoded'));
   });
 
   test('resqlite metric helpers emit the migration parity counters', () async {

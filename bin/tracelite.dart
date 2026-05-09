@@ -23,12 +23,45 @@ Future<void> main(List<String> args) async {
       await _suite(args.skip(1).toList());
     case 'calibrate':
       await _calibrate(args.skip(1).toList());
+    case 'create-region':
+      _createRegion(args.skip(1).toList());
     case '_run-peer':
       await _runPeer(args.skip(1).toList());
     default:
       stderr.writeln('unknown command: $command');
       _usage();
   }
+}
+
+void _createRegion(List<String> args) {
+  final options = _parseOptions(args);
+  final out = options['out'];
+  if (out == null || out.isEmpty) {
+    stderr.writeln('create-region requires --out=path');
+    _usage();
+  }
+  final maxProducers = _positiveIntOption(options, 'max-producers', 8);
+  final stringPoolBytes = _positiveIntOption(
+    options,
+    'string-pool-bytes',
+    kDefaultStringPoolSize,
+  );
+  final ringDataWords = _positivePowerOfTwoOption(
+    options,
+    'ring-data-words',
+    kDefaultRingDataWords,
+  );
+  File(out).parent.createSync(recursive: true);
+  TraceRegion.createFile(
+    out,
+    maxProducers: maxProducers,
+    stringPoolSize: stringPoolBytes,
+    ringDataWords: ringDataWords,
+  );
+  stdout.writeln('Created tracelite region: $out');
+  stdout.writeln('  max_producers: $maxProducers');
+  stdout.writeln('  string_pool_bytes: $stringPoolBytes');
+  stdout.writeln('  ring_data_words: $ringDataWords');
 }
 
 Future<void> _suite(List<String> args) async {
@@ -136,6 +169,7 @@ Future<void> _compare(List<String> args) async {
   final rows = _positiveIntOption(options, 'rows', 100);
   final repetitions = _positiveIntOption(options, 'repetitions', 1);
   final outJson = options['out-json'];
+  final ringDataWords = _ringWordsForScenario(scenario, rows);
 
   final shim = File('build/libsqlite_traced.dylib');
   if (!shim.existsSync()) {
@@ -158,7 +192,7 @@ Future<void> _compare(List<String> args) async {
         final metricsPath = '${tempRoot.path}/$peer-r$repetition.metrics.json';
         TraceRegion.createFile(
           regionPath,
-          ringDataWords: _ringWordsForScenario(scenario, rows),
+          ringDataWords: ringDataWords,
         );
 
         final stopwatch = Stopwatch()..start();
@@ -225,6 +259,7 @@ Future<void> _compare(List<String> args) async {
       scenario: scenario,
       rows: rows,
       repetitions: repetitions,
+      ringDataWords: ringDataWords,
       results: results,
     );
     if (outJson != null && outJson.isNotEmpty) {
@@ -427,6 +462,7 @@ Map<String, Object?> _compareArtifact({
   required String scenario,
   required int rows,
   required int repetitions,
+  required int ringDataWords,
   required List<_PeerTraceResult> results,
 }) {
   final peers = <String, List<_PeerTraceResult>>{};
@@ -442,6 +478,7 @@ Map<String, Object?> _compareArtifact({
     'workload': peerScenarioParameters(scenario, rows: rows),
     'environment': _environmentArtifact(),
     'repetitions': repetitions,
+    'ring_data_words': ringDataWords,
     'peers': [
       for (final entry in peers.entries)
         _peerArtifact(peer: entry.key, results: entry.value),
@@ -1235,6 +1272,19 @@ int _positiveIntOption(
   return value;
 }
 
+int _positivePowerOfTwoOption(
+  Map<String, String> options,
+  String name,
+  int defaultValue,
+) {
+  final value = _positiveIntOption(options, name, defaultValue);
+  if (value & (value - 1) != 0) {
+    stderr.writeln('--$name must be a power of two');
+    exit(64);
+  }
+  return value;
+}
+
 int _ringWordsForScenario(String scenario, int rows) {
   final parameters = peerScenarioParameters(scenario, rows: rows);
   final expectedEvents = switch (scenario) {
@@ -1269,7 +1319,12 @@ int _intParameter(Map<String, Object?> parameters, String name) {
 }
 
 int _ringWordsForEvents(int events) {
-  final needed = math.max(8192, events * 3);
+  // The scenario formulas estimate semantic SQLite wrapper events, but ring
+  // capacity is counted in data words and reactive peer adapters can fan out
+  // far more SQLite calls than their high-level write count suggests. Keep a
+  // generous default so production benchmark artifacts fail on real behavior,
+  // not trace-buffer pressure.
+  final needed = math.max(8192, events * 12);
   var power = 1;
   while (power < needed) {
     power <<= 1;
@@ -1768,5 +1823,7 @@ Never _usage({int exitCode = 64}) {
       '[--metric=elapsed_ns] [--max-cv-percent=15] [--alpha=0.05]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');
+  stderr.writeln('  dart run bin/tracelite.dart create-region '
+      '--out=trace.tlt-region [--ring-data-words=1048576]');
   exit(exitCode);
 }

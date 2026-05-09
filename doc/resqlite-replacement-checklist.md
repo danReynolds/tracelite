@@ -63,11 +63,37 @@ the same workload parameters.
 
 ## Current state
 
-- Ready to replace first: report generation, repetition artifact storage,
-  low-value wall-time wrappers, and Timeline-style markers once the side-by-side
-  matrix is captured.
-- Not ready to delete yet: `ProfileCounters`, stream/reader/decode counters,
-  and diagnostics import points. These now have tracelite helper APIs, but
-  resqlite still needs to adopt and prove them.
+- Ready to replace first: generic report generation, repetition artifact
+  storage, workload-scoped span summaries, low-value wall-time wrappers, and
+  Timeline-style worker markers once the resqlite PR adopts the tracelite
+  report/export path.
+- Not ready to delete yet: old profile JSON/diff compatibility,
+  `ProfiledDatabase` sample storage, custom many-streams fanout-delta JSON, and
+  RSS memory capture. Tracelite now captures the underlying spans, diagnostics,
+  decode counters, stream invalidation counters, and dispatcher counters, but
+  it still needs an export that matches the fields consumed by resqlite
+  experiments.
 - Not a deletion target: benchmark workload definitions, public diagnostics,
   native diagnostics helpers, and the trace-enabled embedded SQLite build hook.
+
+## Latest parity run
+
+See [`resqlite-parity-run-2026-05-09.md`](resqlite-parity-run-2026-05-09.md).
+
+Summary:
+
+- The full tracelite production suite now passes after the sparse-region and
+  ring-sizing hardening.
+- PR #109's tracelite semantic hook path produced a clean trace with 565,520
+  events, 6 producers, and `0/0/0` trace diagnostics.
+- Decode counter totals matched the old profile runner totals for the profile
+  workloads.
+- The trace report now groups resqlite profile workloads by name (`noop`,
+  `single_insert`, `point_query`, `merge_rounds`) and includes correlated
+  per-workload SQLite diagnostic gauges.
+- The many-streams writer profile now emits workload spans for `baseline`,
+  `disjoint`, and `overlap`; the tracelite report includes stream invalidation,
+  intersection, and dispatcher counters with `0/0/0` trace diagnostics.
+- No broad resqlite profiling deletion is justified yet because old profile
+  JSON/diff compatibility, RSS capture, and specialized fanout-delta summaries
+  still need a tracelite replacement/export.
