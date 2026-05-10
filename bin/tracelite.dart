@@ -21,6 +21,8 @@ Future<void> main(List<String> args) async {
       await _compare(args.skip(1).toList());
     case 'diff':
       _diff(args.skip(1).toList());
+    case 'decision':
+      _decision(args.skip(1).toList());
     case 'suite':
       await _suite(args.skip(1).toList());
     case 'calibrate':
@@ -326,6 +328,63 @@ void _diff(List<String> args) {
     maxCvPercent: maxCvPercent,
     alpha: alpha,
   );
+}
+
+void _decision(List<String> args) {
+  final options = _parseOptions(args);
+  final baselinePath = options['baseline'];
+  final candidatePath = options['candidate'];
+  if (baselinePath == null || candidatePath == null) {
+    stderr.writeln('decision requires --baseline and --candidate');
+    _usage();
+  }
+
+  final expectation = options['expect'] ?? 'improvement';
+  if (expectation != 'improvement' && expectation != 'no_regression') {
+    stderr.writeln('--expect must be improvement or no_regression');
+    exit(64);
+  }
+
+  final decision = benchmarkDecisionArtifact(
+    baselineArtifacts: _readComparableArtifacts(baselinePath),
+    candidateArtifacts: _readComparableArtifacts(candidatePath),
+    baselinePath: baselinePath,
+    candidatePath: candidatePath,
+    options: BenchmarkDecisionOptions(
+      expectation: expectation,
+      primaryPeer: options['primary-peer'] ?? 'resqlite',
+      primaryScenarios: _csvOption(options['primary-scenarios']),
+      primaryMetric: options['primary-metric'] ?? 'elapsed_ns',
+      guardrailPeers: _csvOption(options['guardrail-peers']),
+      guardrailScenarios: _csvOption(options['guardrail-scenarios']),
+      guardrailMetrics: _csvOption(
+        options['guardrail-metrics'],
+        defaultValue: defaultGuardrailMetrics,
+      ),
+      primaryThresholdPercent: double.tryParse(
+            options['primary-threshold-percent'] ?? '5',
+          ) ??
+          5,
+      maxRegressionPercent: double.tryParse(
+            options['max-regression-percent'] ?? '3',
+          ) ??
+          3,
+      maxCvPercent: double.tryParse(options['max-cv-percent'] ?? '15') ?? 15,
+      alpha: double.tryParse(options['alpha'] ?? '0.05') ?? 0.05,
+    ),
+  );
+
+  final outJson = options['out-json'];
+  if (outJson != null && outJson.isNotEmpty) {
+    const encoder = JsonEncoder.withIndent('  ');
+    File(outJson)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('${encoder.convert(decision)}\n');
+  }
+  stdout.write(benchmarkDecisionMarkdown(decision));
+  if (!benchmarkDecisionPassed(decision)) {
+    exitCode = 65;
+  }
 }
 
 Future<void> _calibrate(List<String> args) async {
@@ -947,6 +1006,49 @@ Map<String, Object?> _readJsonMap(String path) {
     throw FormatException('$path does not contain a JSON object');
   }
   return decoded;
+}
+
+List<Map<String, Object?>> _readComparableArtifacts(String path) {
+  final root = _readJsonMap(path);
+  return switch (root['schema']) {
+    'tracelite.compare.v1' => [root],
+    'tracelite.suite.v1' => _readSuiteCompareArtifacts(path, root),
+    _ => throw FormatException(
+        '$path is not a tracelite compare artifact or suite manifest',
+      ),
+  };
+}
+
+List<Map<String, Object?>> _readSuiteCompareArtifacts(
+  String manifestPath,
+  Map<String, Object?> manifest,
+) {
+  final runs = manifest['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$manifestPath has no runs list');
+  }
+  return [
+    for (final run in runs.cast<Map<String, Object?>>())
+      _readJsonMap(_resolveManifestArtifactPath(
+        manifestPath,
+        run['artifact']! as String,
+      )),
+  ];
+}
+
+String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
+  final artifact = File(artifactPath);
+  if (artifact.isAbsolute || artifact.existsSync()) return artifact.path;
+  return File(manifestPath).parent.uri.resolve(artifactPath).toFilePath();
+}
+
+List<String> _csvOption(String? value, {List<String> defaultValue = const []}) {
+  if (value == null || value.trim().isEmpty) return defaultValue;
+  return value
+      .split(',')
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
 }
 
 _PeerRunMetrics _readPeerMetrics(String path) {
@@ -1844,6 +1946,11 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('  dart run bin/tracelite.dart diff '
       '--baseline=base.json --candidate=change.json '
       '[--metric=elapsed_ns] [--max-cv-percent=15] [--alpha=0.05]');
+  stderr.writeln('  dart run bin/tracelite.dart decision '
+      '--baseline=base.json --candidate=change.json '
+      '[--expect=improvement|no_regression] '
+      '[--primary-peer=resqlite] [--primary-metric=elapsed_ns] '
+      '[--out-json=decision.json]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');
   stderr.writeln('  dart run bin/tracelite.dart create-region '

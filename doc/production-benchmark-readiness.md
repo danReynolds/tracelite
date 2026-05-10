@@ -1,18 +1,18 @@
 # Production benchmark replacement readiness
 
-Status: implementation-backed pass, 2026-05-09
+Status: implementation-backed pass, 2026-05-10
 
 ## Verdict
 
-tracelite is now viable as the benchmark artifact and attribution layer, but it
-is not yet a complete replacement for resqlite's production benchmark profiling
-stack.
+tracelite is now viable as the benchmark artifact, attribution, and
+decision-gating layer, but it is not yet a complete replacement for resqlite's
+production benchmark profiling stack.
 
 The core direction held up: one trace format can capture sqlite3, drift,
 sqlite_async, and trace-enabled resqlite under the same SQLite call model, and
 the recorder overhead is small enough for profile-mode instrumentation. The
-remaining gaps are around benchmark-runner maturity: workload coverage,
-significance testing, packaging, and resqlite's migration to the semantic event
+remaining gaps are around benchmark-runner maturity: production-scale
+calibration, packaging, and resqlite's migration to the semantic event
 vocabulary.
 
 ## What changed in this pass
@@ -75,6 +75,30 @@ vocabulary.
   summary JSON from trace regions, including raw measured sample lists,
   noop-floor subtraction, RSS gauges, SQLite diagnostic deltas, profile counter
   deltas, and many-streams fanout summaries.
+- `tracelite decision --baseline=... --candidate=...` now turns compare
+  artifacts or suite manifests into an accepted/rejected/inconclusive decision
+  artifact with trace-health, primary-metric, noise, significance, and
+  guardrail gates.
+
+## New profiling standard
+
+The canonical standard for regressions and experiments is no longer "inspect
+the benchmark output." It is:
+
+1. Run baseline and candidate compare artifacts or suite manifests.
+2. Preserve the raw trace regions where available.
+3. Run `tracelite decision` with the experiment policy.
+4. Accept only `accepted`.
+5. Preserve `rejected` and `inconclusive` artifacts when they teach something.
+
+The detailed policy is documented in
+[`profiling-decision-standard.md`](profiling-decision-standard.md). In short:
+
+- trace health must be clean;
+- the primary metric must clear the configured threshold;
+- repeated samples must pass CV, confidence-interval, and Mann-Whitney gates;
+- guardrail metrics must not show clear regressions;
+- missing, neutral, or noisy primary evidence is inconclusive, not accepted.
 
 ## Evidence from this pass
 
@@ -216,6 +240,8 @@ Ready to migrate first:
 - Cross-library SQLite call attribution.
 - Low-value wall-time wrappers whose only job is operation duration.
 - Timeline-style worker markers where tracelite spans already exist.
+- Experiment acceptance/rejection decisions that currently rely on manual
+  reading of resqlite-local profile diffs.
 
 Keep for now:
 
@@ -226,12 +252,10 @@ Keep for now:
 
 ## Remaining blockers
 
-### 1. Statistical decisioning needs production calibration
+### 1. Decision policy needs production calibration
 
-`tracelite diff` now compares summary means with a percent threshold, CV gate,
-95% mean-delta confidence interval, Mann-Whitney U repetition evidence, and
-explicit outlier counts. This is enough to stop relying on pseudo-replicated
-within-run spans for decisions. The remaining work is calibration on real
+`tracelite decision` now formalizes primary, trace-health, noise, statistical,
+and guardrail gates. The remaining work is calibration on real
 production-sized artifact history: choose default repetition counts, thresholds,
 and noise gates per workload family.
 

@@ -6,11 +6,11 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, CI/production suites, and recorder-overhead calibration.
+**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, CI/production suites, and recorder-overhead calibration.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — finish capability-specific resqlite workloads, prove semantic parity against the existing profile runner, then finish packaging and Linux/Windows shim validation.
+**Next bottleneck:** production benchmark replacement hardening — calibrate decision thresholds on production-sized history, wire resqlite's profile workflow to tracelite artifacts, then finish packaging and Linux/Windows shim validation.
 
 ---
 
@@ -192,6 +192,10 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart diff --baseline=base.json --candidate=change.json`
   compares compare artifacts by summary metric with CV gates, a 95% mean-delta
   confidence interval, Mann-Whitney U repetition evidence, and outlier counts.
+- `bin/tracelite.dart decision --baseline=base.json --candidate=change.json`
+  turns compare artifacts or suite manifests into an accepted/rejected/
+  inconclusive decision using trace-health, primary-metric, noise,
+  significance, and guardrail gates.
 - `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
   repeatable scenario matrix and writes a manifest plus per-scenario artifacts
   and logs.
@@ -258,6 +262,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Aggregator skeleton loads region traces and reports stats | ✓ proven | `Trace.loadRegion`, report CLI, runtime/shim/CLI tests |
 | Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
 | Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
+| Benchmark decisions are machine-gated | ✓ proven | `tracelite decision` over compare JSON and suite manifests, command tests for accepted/rejected/inconclusive outcomes |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer is implementable | ✗ designed only | no visualizer code exists |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, and outlier reporting exist; still needs calibration on real production-sized artifact history |

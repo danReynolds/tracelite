@@ -12,8 +12,8 @@ semantic emitters and diagnostics that tracelite cannot infer generically.
 | resqlite surface | Replacement target | Delete when |
 |---|---|---|
 | `ProfiledDatabase` wall-time wrappers | `resqlite.database.execute`, `resqlite.database.execute_batch`, `resqlite.database.select`, and `resqlite.database.select_bytes` spans | Tracelite artifacts group by operation tag/fingerprint and match old operation counts. |
-| Markdown/JSON profile reporting | `tracelite compare`, `tracelite suite`, and `tracelite diff` artifacts | The resqlite profile matrix has a tracelite suite manifest and experiment logs no longer need resqlite-local reporters. |
-| A/B profile diffing | `tracelite diff` repetition gates | Existing baseline/candidate examples produce the same direction or `too_noisy` where the old diff was unstable. |
+| Markdown/JSON profile reporting | `tracelite compare`, `tracelite suite`, `tracelite workload-summary`, and `tracelite decision` artifacts | The resqlite profile matrix has a tracelite suite/workload-summary manifest and experiment logs no longer need resqlite-local reporters. |
+| A/B profile diffing | `tracelite decision` primary and guardrail gates, with `tracelite diff` as the exploratory detail view | Existing baseline/candidate examples produce accepted/rejected/inconclusive decisions with the same direction or stricter `inconclusive` outcomes where the old diff was unstable. |
 | `Timeline.startSync` worker markers | `resqlite.writer.handle`, `resqlite.reader.handle`, and `resqlite.reader_pool.dispatch` spans | Worker timing is visible in traces with correlation IDs from public operation boundary to worker handling. |
 | Stream invalidation counters | `recordResqliteStreamMetrics` plus stream spans | Invalidation count/time, intersection time, and intersection entries match the old profile counters. |
 | Reader-pool pressure counters | `recordResqliteDispatcherMetrics` | Parked total, wake retry total, current parked, and max parked concurrent match the old profile counters. |
@@ -57,8 +57,10 @@ the same workload parameters.
 2. Run the matching old resqlite profile matrix from the resqlite checkout.
 3. Compare sample counts, semantic counters, diagnostics snapshots, and timing
    direction before looking at deletion.
-4. Delete only surfaces in the replacement bucket whose parity row is complete.
-5. Leave a short resqlite PR note naming the tracelite artifact path and the
+4. Run `tracelite decision` over the baseline/candidate artifacts and use the
+   accepted/rejected/inconclusive vocabulary in the experiment write-up.
+5. Delete only surfaces in the replacement bucket whose parity row is complete.
+6. Leave a short resqlite PR note naming the tracelite artifact path and the
    old profile artifact path used as evidence.
 
 ## Current state
@@ -104,6 +106,8 @@ Summary:
 - The existing resqlite `benchmark/profile/diff.dart` accepts the
   tracelite-generated workload summary and reports exact parity for the current
   profile workloads.
+- The `tracelite decision` command now provides the new accepted/rejected/
+  inconclusive decision gate for compare artifacts and suite manifests.
 
 ## Current deletion position
 

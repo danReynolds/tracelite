@@ -49,7 +49,7 @@ The C shim is a drop-in `libsqlite3` replacement that wraps SQLite C API calls w
 
 Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Libraries can register lightweight vocabularies of span/counter/gauge names; `package:tracelite/resqlite.dart` provides the resqlite vocabulary plus helpers for decode metrics, stream invalidation metrics, dispatcher pressure, and diagnostics so resqlite can emit semantic facts without owning report or metadata plumbing. Optional stack sampling adds per-Dart-package attribution on top.
 
-The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts with confidence-interval plus non-parametric repetition gates, run CI/production benchmark suites, and calibrate recorder overhead.
+The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts with confidence-interval plus non-parametric repetition gates, turn baseline/candidate artifacts into accepted/rejected/inconclusive decisions, run CI/production benchmark suites, and calibrate recorder overhead.
 
 The peer harness has a narrow common SQL lane and optional capability lanes. Shared SQL scenarios run across all peers; reactive scenarios currently run on `sqlite_async` and `resqlite`; the resqlite diagnostics scenario records semantic gauges from `Database.diagnostics()`. Peers that do not support a scenario are marked `unsupported` in the report and JSON artifact.
 
@@ -59,7 +59,7 @@ The peer harness has a narrow common SQL lane and optional capability lanes. Sha
 - **Apples-to-apples library comparison.** Same workload, same shim, same format. drift and Resqlite stop being a wall-time horse race; they become a structural comparison ("drift prepares per query; Resqlite caches statements").
 - **Causal chains across isolates.** A request's full lifecycle — main isolate → writer isolate → SQLite C → response → main isolate — observable as one chain.
 - **Tail-latency distributions, not just medians.** p99, histogram, distribution shape; effect-size and significance testing built in.
-- **Cross-commit regression detection.** `tracelite diff --baseline=base.json --candidate=change.json` flags actionable regressions with threshold and noise gates.
+- **Cross-commit regression detection.** `tracelite diff --baseline=base.json --candidate=change.json` explains deltas, and `tracelite decision --baseline=base.json --candidate=change.json` turns those artifacts into a trace-health, primary-metric, noise, significance, and guardrail decision.
 
 ## Status
 
@@ -76,6 +76,9 @@ The design corpus is in `doc/`, and the implementation is present in `native/`, 
 
 The latest production benchmark replacement audit is in
 [`doc/production-benchmark-readiness.md`](doc/production-benchmark-readiness.md).
+The decision standard for accepting, rejecting, or marking experiments
+inconclusive is in
+[`doc/profiling-decision-standard.md`](doc/profiling-decision-standard.md).
 The resqlite deletion/parity gate is tracked in
 [`doc/resqlite-replacement-checklist.md`](doc/resqlite-replacement-checklist.md).
 
