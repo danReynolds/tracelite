@@ -71,6 +71,10 @@ vocabulary.
   renders workload-scoped nested span and counter summaries.
 - The resqlite PR bridge now caches interned string IDs so repeated SQL strings
   do not exhaust the tracelite string pool during large profile runs.
+- `tracelite workload-summary` now exports old-compatible resqlite profile
+  summary JSON from trace regions, including raw measured sample lists,
+  noop-floor subtraction, RSS gauges, SQLite diagnostic deltas, profile counter
+  deltas, and many-streams fanout summaries.
 
 ## Evidence from this pass
 
@@ -269,9 +273,13 @@ workload-scope spans preserve the old profile workload names and sample counts,
 per-workload diagnostics now appear as correlated tracelite gauges, and the
 many-streams profile emits stream invalidation, dependency intersection, and
 dispatcher pressure counters into the trace. The remaining resqlite migration
-work is export compatibility rather than raw signal capture: old profile JSON
-fields such as noop-floor subtraction, `work_us`, RSS deltas, per-write fanout
-deltas, and existing A/B diff inputs still need a tracelite summary path.
+work was export compatibility rather than raw signal capture.
+
+The 2026-05-10 parity run added that export path. The existing resqlite
+`benchmark/profile/diff.dart` can consume a tracelite-generated
+`workload-summary` JSON and reports exact parity for current profile workload
+summaries, RSS deltas, SQLite diagnostics, noop floors, and many-streams
+fanout medians.
 
 ### 5. Portability is still macOS-first
 
@@ -281,12 +289,11 @@ be called production-quality across Dart targets.
 
 ## Recommended next iteration
 
-1. Add a tracelite workload-summary export, likely JSON first, that can replace
-   the old resqlite profile JSON fields consumed by experiment diffs.
-2. Add RSS/peak-RSS counters or explicitly keep RSS as a resqlite-local
-   profile signal.
-3. Port the many-streams fanout-delta table to tracelite-derived summaries or
-   keep that harness as a temporary specialized profile.
-4. Add a generated/table-registry-aware drift reactive adapter or document drift
+1. Wire resqlite's profile workflow to consume `tracelite workload-summary` and
+   remove the now-covered resqlite-local report/diff/storage code in a narrow
+   migration PR.
+2. Add a generated/table-registry-aware drift reactive adapter or document drift
    as unsupported for the optional reactive lane.
-5. Remove only the resqlite profile surfaces that have proven tracelite parity.
+3. Calibrate production default repetition counts, thresholds, and noise gates
+   from real artifact history before making tracelite diff the default release
+   benchmark gate.

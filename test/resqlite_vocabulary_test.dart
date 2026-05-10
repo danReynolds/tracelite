@@ -21,6 +21,10 @@ void main() {
       'resqlite.profile.workload',
     );
     expect(
+      resqliteTraceVocabulary.spanNames[ResqliteTraceSpans.profileSample],
+      'resqlite.profile.sample',
+    );
+    expect(
       resqliteTraceVocabulary.spanNames[ResqliteTraceCounters.rowsDecoded],
       'resqlite.rows_decoded',
     );
@@ -28,6 +32,14 @@ void main() {
       resqliteTraceVocabulary
           .spanNames[ResqliteTraceGauges.sqlitePageCacheBytes],
       'resqlite.sqlite_page_cache_bytes',
+    );
+    expect(
+      resqliteTraceVocabulary.spanNames[ResqliteTraceGauges.rssBeforeBytes],
+      'resqlite.rss_before_bytes',
+    );
+    expect(
+      resqliteTraceVocabulary.spanNames[ResqliteTraceCounters.fanoutTotalUs],
+      'resqlite.fanout.total_us',
     );
   });
 
@@ -208,6 +220,129 @@ void main() {
       isTrue,
     );
   });
+
+  test('workload summary exports resqlite profile-compatible fields', () async {
+    final runtime = await _ensureRuntimeLibrary();
+    final regionPath =
+        '${Directory.systemTemp.path}/tracelite-resqlite-summary-$pid.tlt';
+    addTearDown(() {
+      try {
+        File(regionPath).deleteSync();
+      } catch (_) {}
+    });
+
+    TraceRegion.createFile(regionPath);
+    final recorder = TraceRecorder.attach(
+      regionPath: regionPath,
+      runtimeLibraryPath: runtime.absolute.path,
+      processName: 'resqlite_summary_test',
+      threadName: 'main',
+    );
+    expect(recorder.isActive, isTrue);
+    recorder.registerVocabulary(resqliteTraceVocabulary);
+
+    await _recordSummaryWorkload(recorder, 'noop', correlationId: 1);
+    await _recordSummaryWorkload(recorder, 'point_query', correlationId: 2);
+    recorder.detach();
+
+    final trace = Trace.loadRegion(regionPath);
+    final artifact = traceWorkloadSummaryArtifact(trace);
+    final workloads = artifact['workloads'] as Map<String, Object?>;
+    final pointQuery = workloads['point_query'] as Map<String, Object?>;
+    final samples = pointQuery['samples'] as List<Object?>;
+    expect(samples, hasLength(2));
+    expect(samples.first, containsPair('op', 'select'));
+    final summary = pointQuery['summary'] as Map<String, Object?>;
+    final select = summary['select'] as Map<String, Object?>;
+    expect(select['count'], 1);
+    expect(select['dispatch_floor_us'], isA<int>());
+    expect(select['work_us_median'], isA<int>());
+
+    final memory = pointQuery['memory'] as Map<String, Object?>;
+    expect(memory['rss_delta_mb'], isA<double>());
+    expect(memory['diagnostics_delta'], isA<Map<String, Object?>>());
+    expect(memory['profile_counters_delta'], isA<Map<String, Object?>>());
+    expect(memory['allocation_delta'], isA<Map<String, Object?>>());
+
+    final fanout = pointQuery['fanout_summary'] as Map<String, Object?>;
+    final total = fanout['total_us'] as Map<String, Object?>;
+    expect(total['count'], 1);
+    expect(total['median'], 30);
+  });
+}
+
+Future<void> _recordSummaryWorkload(
+  TraceRecorder recorder,
+  String name, {
+  required int correlationId,
+}) async {
+  final nameId = recorder.internString(name);
+  await recorder.traceAsync<void>(
+    ResqliteTraceSpans.profileWorkload,
+    () async {
+      final selectOpId = recorder.internString('select');
+      final executeOpId = recorder.internString('execute');
+      final selectSqlId = recorder.internString('SELECT 1');
+      final executeSqlId = recorder.internString('UPDATE items SET id = id');
+      recorder.counter(
+        ResqliteTraceGauges.rssBeforeBytes,
+        1024 * 1024,
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceGauges.sqlitePageCacheBytes,
+        10,
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceCounters.profileRowsDecoded,
+        0,
+        correlationId: correlationId,
+      );
+      recorder.trace(
+        ResqliteTraceSpans.profileSample,
+        () => recorder.trace(ResqliteTraceSpans.databaseSelect, () {}),
+        beginArgs: [selectOpId, selectSqlId, 0],
+        endArgs: [5, 1],
+        correlationId: correlationId,
+      );
+      recorder.trace(
+        ResqliteTraceSpans.profileSample,
+        () => recorder.trace(ResqliteTraceSpans.databaseExecute, () {}),
+        beginArgs: [executeOpId, executeSqlId, 0],
+        endArgs: [7],
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceCounters.profileRowsDecoded,
+        7,
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceCounters.fanoutTotalUs,
+        30,
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceGauges.sqlitePageCacheBytes,
+        18,
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceGauges.rssAfterBytes,
+        2 * 1024 * 1024,
+        correlationId: correlationId,
+      );
+      recorder.counter(
+        ResqliteTraceGauges.rssPeakBytes,
+        3 * 1024 * 1024,
+        correlationId: correlationId,
+      );
+    },
+    beginArgs: [nameId, 1],
+    endArgs: [2],
+    correlationId: correlationId,
+  );
 }
 
 Future<File> _ensureRuntimeLibrary() async {

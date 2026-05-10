@@ -76,9 +76,12 @@ the same workload parameters.
 - Not a deletion target: benchmark workload definitions, public diagnostics,
   native diagnostics helpers, and the trace-enabled embedded SQLite build hook.
 
-## Latest parity run
+## Latest parity runs
 
-See [`resqlite-parity-run-2026-05-09.md`](resqlite-parity-run-2026-05-09.md).
+See:
+
+- [`resqlite-parity-run-2026-05-09.md`](resqlite-parity-run-2026-05-09.md)
+- [`resqlite-parity-run-2026-05-10.md`](resqlite-parity-run-2026-05-10.md)
 
 Summary:
 
@@ -94,6 +97,18 @@ Summary:
 - The many-streams writer profile now emits workload spans for `baseline`,
   `disjoint`, and `overlap`; the tracelite report includes stream invalidation,
   intersection, and dispatcher counters with `0/0/0` trace diagnostics.
-- No broad resqlite profiling deletion is justified yet because old profile
-  JSON/diff compatibility, RSS capture, and specialized fanout-delta summaries
-  still need a tracelite replacement/export.
+- The `tracelite workload-summary` command now exports old-compatible resqlite
+  profile JSON from traces, including raw profile sample lists, noop floors,
+  `work_us`, RSS deltas, SQLite diagnostics, profile counter deltas, and
+  many-streams fanout summaries.
+- The existing resqlite `benchmark/profile/diff.dart` accepts the
+  tracelite-generated workload summary and reports exact parity for the current
+  profile workloads.
+
+## Current deletion position
+
+The parity gate is now satisfied for the current resqlite profile surfaces.
+The next PR slice can wire resqlite's profile workflow to consume
+`tracelite workload-summary`, then delete or archive the old resqlite-local
+report/diff/storage code that is now covered. Keep the workload definitions,
+public diagnostics API, native diagnostics helpers, and tiny semantic emitters.

@@ -15,6 +15,8 @@ Future<void> main(List<String> args) async {
   switch (command) {
     case 'report':
       _report(args.skip(1).toList());
+    case 'workload-summary':
+      _workloadSummary(args.skip(1).toList());
     case 'compare':
       await _compare(args.skip(1).toList());
     case 'diff':
@@ -62,6 +64,25 @@ void _createRegion(List<String> args) {
   stdout.writeln('  max_producers: $maxProducers');
   stdout.writeln('  string_pool_bytes: $stringPoolBytes');
   stdout.writeln('  ring_data_words: $ringDataWords');
+}
+
+void _workloadSummary(List<String> args) {
+  if (args.isEmpty || args.first.startsWith('--')) {
+    stderr.writeln('workload-summary expects a region or trace path');
+    _usage();
+  }
+  final path = args.first;
+  final options = _parseOptions(args.skip(1).toList());
+  final trace = Trace.loadRegion(path);
+  final artifact = traceWorkloadSummaryArtifact(trace);
+  final outJson = options['out-json'];
+  if (outJson != null && outJson.isNotEmpty) {
+    const encoder = JsonEncoder.withIndent('  ');
+    File(outJson)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('${encoder.convert(artifact)}\n');
+  }
+  stdout.write(traceWorkloadSummaryMarkdown(artifact));
 }
 
 Future<void> _suite(List<String> args) async {
@@ -1811,6 +1832,8 @@ class _IntStats {
 Never _usage({int exitCode = 64}) {
   stderr.writeln('usage:');
   stderr.writeln('  dart run bin/tracelite.dart report <region-path>');
+  stderr.writeln('  dart run bin/tracelite.dart workload-summary <region-path> '
+      '[--out-json=summary.json]');
   stderr.writeln('  dart run bin/tracelite.dart compare '
       '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
