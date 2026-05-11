@@ -6,7 +6,7 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, CI/production suites, and recorder-overhead calibration.
+**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, and recorder-overhead calibration.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
@@ -196,6 +196,9 @@ Run both: `dart test`. Both pass.
   turns compare artifacts or suite manifests into an accepted/rejected/
   inconclusive decision using trace-health, primary-metric, noise,
   significance, and guardrail gates.
+- `bin/tracelite.dart export-graph-data --out=...` writes normalized JSON
+  datasets from compare, suite, decision, and workload-summary artifacts so
+  downstream sites can render their own charts without embedding tracelite UI.
 - `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
   repeatable scenario matrix and writes a manifest plus per-scenario artifacts
   and logs.
@@ -263,6 +266,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
 | Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
 | Benchmark decisions are machine-gated | ✓ proven | `tracelite decision` over compare JSON and suite manifests, command tests for accepted/rejected/inconclusive outcomes |
+| Benchmark artifacts can power downstream dashboards without tracelite UI | ✓ proven | `tracelite export-graph-data` emits graphable datasets from suite, decision, and workload-summary inputs |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer is implementable | ✗ designed only | no visualizer code exists |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, and outlier reporting exist; still needs calibration on real production-sized artifact history |

@@ -23,6 +23,8 @@ Future<void> main(List<String> args) async {
       _diff(args.skip(1).toList());
     case 'decision':
       _decision(args.skip(1).toList());
+    case 'export-graph-data':
+      _exportGraphData(args.skip(1).toList());
     case 'suite':
       await _suite(args.skip(1).toList());
     case 'calibrate':
@@ -385,6 +387,49 @@ void _decision(List<String> args) {
   if (!benchmarkDecisionPassed(decision)) {
     exitCode = 65;
   }
+}
+
+void _exportGraphData(List<String> args) {
+  final options = _parseOptions(args);
+  final out = options['out'];
+  if (out == null || out.isEmpty) {
+    stderr.writeln('export-graph-data requires --out=directory');
+    _usage();
+  }
+
+  final compareInputs = <GraphDataInput>[
+    for (final path in _csvOption(options['compare'])) _graphInput(path),
+    for (final path in _csvOption(options['suite'])) ..._suiteGraphInputs(path),
+  ];
+  final decisionInputs = [
+    for (final path in _csvOption(options['decision'])) _graphInput(path),
+  ];
+  final workloadInputs = [
+    for (final path in _csvOption(options['workload-summary']))
+      _graphInput(path),
+  ];
+  if (compareInputs.isEmpty &&
+      decisionInputs.isEmpty &&
+      workloadInputs.isEmpty) {
+    stderr.writeln(
+      'export-graph-data requires at least one of '
+      '--compare, --suite, --decision, or --workload-summary',
+    );
+    _usage();
+  }
+
+  final bundle = traceliteGraphDataBundle(
+    runId: options['run-id'],
+    compareArtifacts: compareInputs,
+    decisionArtifacts: decisionInputs,
+    workloadSummaries: workloadInputs,
+  );
+  final files = _writeGraphDataBundle(Directory(out), bundle);
+  _printGraphDataReport(
+    outDir: out,
+    bundle: bundle,
+    files: files,
+  );
 }
 
 Future<void> _calibrate(List<String> args) async {
@@ -1036,6 +1081,32 @@ List<Map<String, Object?>> _readSuiteCompareArtifacts(
   ];
 }
 
+GraphDataInput _graphInput(String path, {String? parentPath}) {
+  return GraphDataInput(
+    path: path,
+    parentPath: parentPath,
+    artifact: _readJsonMap(path),
+  );
+}
+
+List<GraphDataInput> _suiteGraphInputs(String manifestPath) {
+  final manifest = _readJsonMap(manifestPath);
+  if (manifest['schema'] != 'tracelite.suite.v1') {
+    throw FormatException('$manifestPath is not a tracelite suite manifest');
+  }
+  final runs = manifest['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$manifestPath has no runs list');
+  }
+  return [
+    for (final run in runs.cast<Map<String, Object?>>())
+      _graphInput(
+        _resolveManifestArtifactPath(manifestPath, run['artifact']! as String),
+        parentPath: manifestPath,
+      ),
+  ];
+}
+
 String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
   final artifact = File(artifactPath);
   if (artifact.isAbsolute || artifact.existsSync()) return artifact.path;
@@ -1049,6 +1120,69 @@ List<String> _csvOption(String? value, {List<String> defaultValue = const []}) {
       .map((part) => part.trim())
       .where((part) => part.isNotEmpty)
       .toList();
+}
+
+Map<String, String> _writeGraphDataBundle(
+  Directory outDir,
+  Map<String, Object?> bundle,
+) {
+  outDir.createSync(recursive: true);
+  final datasets = bundle['datasets'];
+  if (datasets is! Map<String, Object?>) {
+    throw const FormatException('graph data bundle has no datasets map');
+  }
+  const encoder = JsonEncoder.withIndent('  ');
+  final files = <String, String>{};
+  final counts = <String, int>{};
+  for (final entry in datasets.entries) {
+    final rows = entry.value;
+    if (rows is! List<Object?>) continue;
+    final filename = '${entry.key.replaceAll('_', '-')}.json';
+    files[entry.key] = filename;
+    counts[entry.key] = rows.length;
+    File('${outDir.path}/$filename').writeAsStringSync(
+      '${encoder.convert({
+            'schema': graphDatasetSchema,
+            'generated_at': bundle['generated_at'],
+            if (bundle['run_id'] != null) 'run_id': bundle['run_id'],
+            'dataset': entry.key,
+            'rows': rows,
+          })}\n',
+    );
+  }
+  final index = <String, Object?>{
+    'schema': bundle['schema'],
+    'generated_at': bundle['generated_at'],
+    if (bundle['run_id'] != null) 'run_id': bundle['run_id'],
+    'sources': bundle['sources'],
+    'files': files,
+    'counts': counts,
+  };
+  File('${outDir.path}/index.json')
+      .writeAsStringSync('${encoder.convert(index)}\n');
+  return files;
+}
+
+void _printGraphDataReport({
+  required String outDir,
+  required Map<String, Object?> bundle,
+  required Map<String, String> files,
+}) {
+  final datasets = bundle['datasets'] as Map<String, Object?>;
+  stdout
+    ..writeln('# tracelite graph data')
+    ..writeln()
+    ..writeln('Out dir: `$outDir`')
+    ..writeln()
+    ..writeln('| dataset | rows | file |')
+    ..writeln('|---|---:|---|');
+  for (final entry in files.entries) {
+    final rows = datasets[entry.key] as List<Object?>? ?? const [];
+    stdout.writeln('| `${entry.key}` | ${rows.length} | `${entry.value}` |');
+  }
+  stdout
+    ..writeln()
+    ..writeln('Index: `$outDir/index.json`');
 }
 
 _PeerRunMetrics _readPeerMetrics(String path) {
@@ -1951,6 +2085,11 @@ Never _usage({int exitCode = 64}) {
       '[--expect=improvement|no_regression] '
       '[--primary-peer=resqlite] [--primary-metric=elapsed_ns] '
       '[--out-json=decision.json]');
+  stderr.writeln('  dart run bin/tracelite.dart export-graph-data '
+      '--out=graph-data '
+      '[--suite=manifest.json] [--compare=compare.json] '
+      '[--decision=decision.json] '
+      '[--workload-summary=profile-summary.json] [--run-id=id]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');
   stderr.writeln('  dart run bin/tracelite.dart create-region '

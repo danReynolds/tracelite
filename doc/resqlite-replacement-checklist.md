@@ -14,6 +14,7 @@ semantic emitters and diagnostics that tracelite cannot infer generically.
 | `ProfiledDatabase` wall-time wrappers | `resqlite.database.execute`, `resqlite.database.execute_batch`, `resqlite.database.select`, and `resqlite.database.select_bytes` spans | Tracelite artifacts group by operation tag/fingerprint and match old operation counts. |
 | Markdown/JSON profile reporting | `tracelite compare`, `tracelite suite`, `tracelite workload-summary`, and `tracelite decision` artifacts | The resqlite profile matrix has a tracelite suite/workload-summary manifest and experiment logs no longer need resqlite-local reporters. |
 | A/B profile diffing | `tracelite decision` primary and guardrail gates, with `tracelite diff` as the exploratory detail view | Existing baseline/candidate examples produce accepted/rejected/inconclusive decisions with the same direction or stricter `inconclusive` outcomes where the old diff was unstable. |
+| Benchmark dashboard JSON | `tracelite export-graph-data` datasets | GitHub Pages can render scenario, peer, decision, workload, memory, and fanout rows from tracelite graph data without bespoke benchmark JSON transforms. |
 | `Timeline.startSync` worker markers | `resqlite.writer.handle`, `resqlite.reader.handle`, and `resqlite.reader_pool.dispatch` spans | Worker timing is visible in traces with correlation IDs from public operation boundary to worker handling. |
 | Stream invalidation counters | `recordResqliteStreamMetrics` plus stream spans | Invalidation count/time, intersection time, and intersection entries match the old profile counters. |
 | Reader-pool pressure counters | `recordResqliteDispatcherMetrics` | Parked total, wake retry total, current parked, and max parked concurrent match the old profile counters. |
@@ -59,8 +60,10 @@ the same workload parameters.
    direction before looking at deletion.
 4. Run `tracelite decision` over the baseline/candidate artifacts and use the
    accepted/rejected/inconclusive vocabulary in the experiment write-up.
-5. Delete only surfaces in the replacement bucket whose parity row is complete.
-6. Leave a short resqlite PR note naming the tracelite artifact path and the
+5. Run `tracelite export-graph-data` for any run that should appear in
+   resqlite's GitHub Pages benchmark views.
+6. Delete only surfaces in the replacement bucket whose parity row is complete.
+7. Leave a short resqlite PR note naming the tracelite artifact path and the
    old profile artifact path used as evidence.
 
 ## Current state
@@ -108,6 +111,8 @@ Summary:
   profile workloads.
 - The `tracelite decision` command now provides the new accepted/rejected/
   inconclusive decision gate for compare artifacts and suite manifests.
+- The `tracelite export-graph-data` command now provides graphable JSON for
+  resqlite Pages while keeping all UI ownership in resqlite.
 
 ## Current deletion position
 

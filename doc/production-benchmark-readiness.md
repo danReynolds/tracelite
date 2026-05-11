@@ -79,6 +79,9 @@ vocabulary.
   artifacts or suite manifests into an accepted/rejected/inconclusive decision
   artifact with trace-health, primary-metric, noise, significance, and
   guardrail gates.
+- `tracelite export-graph-data --out=...` now writes normalized JSON datasets
+  from compare, suite, decision, and workload-summary artifacts so resqlite
+  GitHub Pages can render its own charts without consuming tracelite UI code.
 
 ## New profiling standard
 
@@ -88,8 +91,10 @@ the benchmark output." It is:
 1. Run baseline and candidate compare artifacts or suite manifests.
 2. Preserve the raw trace regions where available.
 3. Run `tracelite decision` with the experiment policy.
-4. Accept only `accepted`.
-5. Preserve `rejected` and `inconclusive` artifacts when they teach something.
+4. Run `tracelite export-graph-data` for public dashboard data when the result
+   should appear on GitHub Pages.
+5. Accept only `accepted`.
+6. Preserve `rejected` and `inconclusive` artifacts when they teach something.
 
 The detailed policy is documented in
 [`profiling-decision-standard.md`](profiling-decision-standard.md). In short:
@@ -242,6 +247,8 @@ Ready to migrate first:
 - Timeline-style worker markers where tracelite spans already exist.
 - Experiment acceptance/rejection decisions that currently rely on manual
   reading of resqlite-local profile diffs.
+- Resqlite benchmark-dashboard data generation for covered compare, decision,
+  and workload-summary artifacts.
 
 Keep for now:
 
