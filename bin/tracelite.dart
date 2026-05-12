@@ -392,7 +392,15 @@ void _decision(List<String> args) {
 }
 
 void _exportGraphData(List<String> args) {
-  final options = _parseOptions(args);
+  final options = _parseOptions(
+    args,
+    multiValueKeys: const {
+      'compare',
+      'suite',
+      'decision',
+      'workload-summary',
+    },
+  );
   final out = options['out'];
   if (out == null || out.isEmpty) {
     stderr.writeln('export-graph-data requires --out=directory');
@@ -586,7 +594,10 @@ Future<void> _runPeer(List<String> args) async {
   }
 }
 
-Map<String, String> _parseOptions(List<String> args) {
+Map<String, String> _parseOptions(
+  List<String> args, {
+  Set<String> multiValueKeys = const {},
+}) {
   final result = <String, String>{};
   for (var i = 0; i < args.length; i++) {
     final arg = args[i];
@@ -597,17 +608,39 @@ Map<String, String> _parseOptions(List<String> args) {
     final withoutPrefix = arg.substring(2);
     final equals = withoutPrefix.indexOf('=');
     if (equals >= 0) {
-      result[withoutPrefix.substring(0, equals)] =
-          withoutPrefix.substring(equals + 1);
+      _setOptionValue(
+        result,
+        withoutPrefix.substring(0, equals),
+        withoutPrefix.substring(equals + 1),
+        multiValueKeys: multiValueKeys,
+      );
     } else {
       if (i + 1 >= args.length) {
         stderr.writeln('missing value for $arg');
         _usage();
       }
-      result[withoutPrefix] = args[++i];
+      _setOptionValue(
+        result,
+        withoutPrefix,
+        args[++i],
+        multiValueKeys: multiValueKeys,
+      );
     }
   }
   return result;
+}
+
+void _setOptionValue(
+  Map<String, String> result,
+  String key,
+  String value, {
+  required Set<String> multiValueKeys,
+}) {
+  if (multiValueKeys.contains(key) && result.containsKey(key)) {
+    result[key] = '${result[key]},$value';
+  } else {
+    result[key] = value;
+  }
 }
 
 Map<String, Object?> _compareArtifact({
@@ -813,10 +846,10 @@ void _printCompareReport(Map<String, Object?> artifact) {
     ..writeln()
     ..writeln(
       '| peer | status | reps | events avg | spans avg | sqlite3_step avg | '
-      'scenario elapsed avg | scenario cv | traced total avg | '
-      'diagnostics max |',
+      'measured elapsed avg | measured cv | scenario elapsed avg | '
+      'scenario cv | traced total avg | diagnostics max |',
     )
-    ..writeln('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
+    ..writeln('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
 
   for (final peerObj in peers) {
     final peer = peerObj! as Map<String, Object?>;
@@ -828,6 +861,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
     final spans = _metric(summary, 'spans');
     final steps = _metric(summary, 'sqlite3_step_count');
     final elapsed = _metric(summary, 'elapsed_ns');
+    final measuredElapsed = _metric(summary, 'measured_elapsed_ns');
     final total = _metric(summary, 'trace_span_total_ns');
     final dropped = _metric(summary, 'dropped_events');
     final unmatchedBegin = _metric(summary, 'unmatched_begin_events');
@@ -835,7 +869,8 @@ void _printCompareReport(Map<String, Object?> artifact) {
     stdout.writeln(
       '| `${peer['peer']}` | ${peer['status']} | $successful/$repetitions | '
       '${_formatMean(events)} | ${_formatMean(spans)} | '
-      '${_formatMean(steps)} | ${_formatDurationMean(elapsed)} | '
+      '${_formatMean(steps)} | ${_formatDurationMean(measuredElapsed)} | '
+      '${_formatCv(measuredElapsed)} | ${_formatDurationMean(elapsed)} | '
       '${_formatCv(elapsed)} | ${_formatDurationMean(total)} | '
       '${dropped.max}/${unmatchedBegin.max}/${unmatchedEnd.max} |',
     );

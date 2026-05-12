@@ -46,10 +46,14 @@ artifact handoff.
 
 Inputs are optional but at least one input must be present:
 
-- `--compare=compare.json` or comma-separated compare artifacts.
-- `--suite=manifest.json` or comma-separated suite manifests.
-- `--decision=decision.json` or comma-separated decision artifacts.
-- `--workload-summary=summary.json` or comma-separated workload summaries.
+- `--compare=compare.json`, repeated `--compare` flags, or comma-separated
+  compare artifacts.
+- `--suite=manifest.json`, repeated `--suite` flags, or comma-separated suite
+  manifests.
+- `--decision=decision.json`, repeated `--decision` flags, or comma-separated
+  decision artifacts.
+- `--workload-summary=summary.json`, repeated `--workload-summary` flags, or
+  comma-separated workload summaries.
 
 Suite manifests are expanded into their referenced compare artifacts.
 
@@ -91,7 +95,7 @@ schemas.
 | Dataset | Purpose |
 |---|---|
 | `scenario_series` | Long-form scenario/peer/metric/statistic/value rows for charts. |
-| `peer_summary` | One row per scenario and peer, with common benchmark columns. |
+| `peer_summary` | One row per scenario and peer, with common benchmark columns including measured elapsed time, scenario elapsed time, SQLite step count/time, event volume, and trace health. |
 | `decision_summary` | One row per decision artifact, including policy and gate statuses. |
 | `decision_comparisons` | Primary, guardrail, and trace-health rows for badges/tables. |
 | `workload_summary` | One row per resqlite workload in a workload-summary artifact. |

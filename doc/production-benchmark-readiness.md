@@ -82,6 +82,9 @@ vocabulary.
 - `tracelite export-graph-data --out=...` now writes normalized JSON datasets
   from compare, suite, decision, and workload-summary artifacts so resqlite
   GitHub Pages can render its own charts without consuming tracelite UI code.
+- `tracelite compare` now reports measured workload elapsed time next to
+  scenario elapsed time so setup/warmup cost does not obscure the experiment
+  metric.
 
 ## New profiling standard
 

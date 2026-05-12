@@ -35,6 +35,8 @@ void main() {
       reason: 'compare failed.\nstdout:\n${compare.stdout}\n'
           'stderr:\n${compare.stderr}',
     );
+    expect(compare.stdout.toString(), contains('measured elapsed avg'));
+    expect(compare.stdout.toString(), contains('scenario elapsed avg'));
 
     final artifact = jsonDecode(File(artifactPath).readAsStringSync())
         as Map<String, Object?>;

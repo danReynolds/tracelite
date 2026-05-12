@@ -191,13 +191,52 @@ void main() {
     expect(validate.exitCode, 65);
     expect(validate.stderr.toString(), contains('row count'));
   });
+
+  test('export-graph-data accepts repeated compare inputs', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-graph-data-repeated-compare-test-',
+    );
+    addTearDown(() => _deleteTemp(tempDir));
+
+    final compareA = '${tempDir.path}/compare-a.json';
+    final compareB = '${tempDir.path}/compare-b.json';
+    final outDir = '${tempDir.path}/graph-data';
+    _writeCompare(compareA, scenario: 'synthetic-a');
+    _writeCompare(compareB, scenario: 'synthetic-b');
+
+    final export = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'export-graph-data',
+        '--compare=$compareA',
+        '--compare=$compareB',
+        '--out=$outDir',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      export.exitCode,
+      0,
+      reason: 'export failed.\nstdout:\n${export.stdout}\n'
+          'stderr:\n${export.stderr}',
+    );
+
+    final peerSummary = _rows('$outDir/peer-summary.json');
+    expect(
+      peerSummary.map((row) => row['scenario']),
+      containsAll(['synthetic-a', 'synthetic-b']),
+    );
+    expect(peerSummary, hasLength(2));
+  });
 }
 
-void _writeCompare(String path) {
+void _writeCompare(String path, {String scenario = 'synthetic'}) {
   _writeJson(path, {
     'schema': 'tracelite.compare.v1',
     'generated_at': '2026-05-10T00:00:00Z',
-    'scenario': 'synthetic',
+    'scenario': scenario,
     'rows': 10,
     'workload': {
       'rows': 10,

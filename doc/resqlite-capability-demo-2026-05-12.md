@@ -55,12 +55,14 @@ The override points at the trace-enabled resqlite worktree for PR #109.
   --out-json=/tmp/tracelite-capability-demo-many-streams-20260512.json
 ```
 
-The combined graph-data export used a suite manifest containing both compare
-artifacts plus the resqlite workload summary:
+The original run used a suite manifest containing both compare artifacts plus
+the resqlite workload summary. Newer tracelite builds can pass repeated
+`--compare` flags directly:
 
 ```bash
 /Users/dan/Coding/flutter_arm64/bin/dart run bin/tracelite.dart export-graph-data \
-  --suite=/tmp/tracelite-capability-demo-suite-20260512.json \
+  --compare=/tmp/tracelite-capability-demo-feed-paging-20260512.json \
+  --compare=/tmp/tracelite-capability-demo-many-streams-20260512.json \
   --workload-summary=/tmp/resqlite-tracelite-capability-demo-profile-20260512/workload-summary.json \
   --run-id=capability-demo-20260512 \
   --out=/tmp/tracelite-capability-demo-graph-data-suite-20260512
@@ -190,12 +192,11 @@ For a demo or production-readiness write-up, highlight these capabilities:
 
 ## Follow-up changes suggested by this run
 
-- Make `measured_elapsed_ns` a first-class column in compare reports and
-  graph-data dashboards. Keep scenario elapsed, but treat measured elapsed as
+- Keep `measured_elapsed_ns` prominent in compare reports and graph-data
+  dashboards. Scenario elapsed remains useful context, but measured elapsed is
   the default experiment metric.
-- Improve `export-graph-data` CLI ergonomics for multiple compare artifacts.
-  The suite manifest path works, but repeated `--compare` currently keeps only
-  the last value.
+- Prefer repeated `--compare` flags for ad hoc graph-data exports that combine
+  a few compare artifacts without a suite manifest.
 - Add a named "capability demo" or "profile replacement demo" command/profile
   that runs the old-parity wrapper plus one shared SQL scenario and one
   reactive scenario.
