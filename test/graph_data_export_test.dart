@@ -123,6 +123,73 @@ void main() {
         ),
       ),
     );
+
+    final validate = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'validate-graph-data',
+        outDir,
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      validate.exitCode,
+      0,
+      reason: 'validate failed.\nstdout:\n${validate.stdout}\n'
+          'stderr:\n${validate.stderr}',
+    );
+    expect(validate.stdout.toString(), contains('graph data valid'));
+  });
+
+  test('validate-graph-data rejects malformed dataset counts', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-graph-data-invalid-test-',
+    );
+    addTearDown(() => _deleteTemp(tempDir));
+
+    final compare = '${tempDir.path}/compare.json';
+    final outDir = '${tempDir.path}/graph-data';
+    _writeCompare(compare);
+
+    final export = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'export-graph-data',
+        '--compare=$compare',
+        '--out=$outDir',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      export.exitCode,
+      0,
+      reason: 'export failed.\nstdout:\n${export.stdout}\n'
+          'stderr:\n${export.stderr}',
+    );
+
+    final indexFile = File('$outDir/index.json');
+    final index = _readJson(indexFile.path);
+    (index['counts']! as Map<String, Object?>)['peer_summary'] = 999;
+    indexFile.writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(index)}\n',
+    );
+
+    final validate = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'validate-graph-data',
+        outDir,
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(validate.exitCode, 65);
+    expect(validate.stderr.toString(), contains('row count'));
   });
 }
 

@@ -34,6 +34,16 @@ dart run bin/tracelite.dart export-graph-data \
   --out=docs/benchmarks/data/tracelite/exp-001
 ```
 
+Validate a bundle before publishing it to a downstream dashboard:
+
+```bash
+dart run bin/tracelite.dart validate-graph-data docs/benchmarks/data/tracelite/exp-001
+```
+
+`export-graph-data` runs the same validation before it returns successfully,
+so downstream repositories can treat a completed export as a schema-checked
+artifact handoff.
+
 Inputs are optional but at least one input must be present:
 
 - `--compare=compare.json` or comma-separated compare artifacts.

@@ -1,5 +1,19 @@
+import 'dart:convert';
+import 'dart:io';
+
 const String graphDataSchema = 'tracelite.graph_data.v1';
 const String graphDatasetSchema = 'tracelite.graph_dataset.v1';
+
+const List<String> graphDataDatasetNames = [
+  'scenario_series',
+  'peer_summary',
+  'decision_summary',
+  'decision_comparisons',
+  'workload_summary',
+  'workload_operations',
+  'workload_memory',
+  'workload_fanout',
+];
 
 final class GraphDataInput {
   const GraphDataInput({
@@ -89,6 +103,188 @@ Map<String, Object?> traceliteGraphDataBundle({
       'workload_fanout': workloadFanout,
     },
   };
+}
+
+List<String> validateGraphDataDirectory(String path) {
+  final errors = <String>[];
+  final dir = Directory(path);
+  if (!dir.existsSync()) {
+    return ['graph-data directory does not exist: $path'];
+  }
+
+  final indexFile = File('${dir.path}/index.json');
+  if (!indexFile.existsSync()) {
+    return ['missing graph-data index: ${indexFile.path}'];
+  }
+
+  final index = _readJsonMap(indexFile, errors);
+  if (index == null) return errors;
+
+  _expectEqual(
+    errors,
+    'index.schema',
+    index['schema'],
+    graphDataSchema,
+  );
+  _expectString(errors, 'index.generated_at', index['generated_at']);
+  final indexRunId = index['run_id'];
+  if (indexRunId != null && indexRunId is! String) {
+    errors.add('index.run_id must be a string when present');
+  }
+  final sources = index['sources'];
+  if (sources is! List<Object?>) {
+    errors.add('index.sources must be a list');
+  } else {
+    for (var i = 0; i < sources.length; i++) {
+      final source = sources[i];
+      if (source is! Map<String, Object?>) {
+        errors.add('index.sources[$i] must be an object');
+        continue;
+      }
+      _expectString(errors, 'index.sources[$i].path', source['path']);
+      _expectString(errors, 'index.sources[$i].schema', source['schema']);
+    }
+  }
+
+  final files = index['files'];
+  final counts = index['counts'];
+  final generatedAt =
+      index['generated_at'] is String ? index['generated_at'] as String : null;
+  final runId = indexRunId is String ? indexRunId : null;
+  if (files is! Map<String, Object?>) {
+    errors.add('index.files must be an object');
+    return errors;
+  }
+  if (counts is! Map<String, Object?>) {
+    errors.add('index.counts must be an object');
+    return errors;
+  }
+
+  for (final dataset in graphDataDatasetNames) {
+    final fileName = files[dataset];
+    if (fileName is! String || fileName.isEmpty) {
+      errors.add('index.files.$dataset must be a non-empty string');
+      continue;
+    }
+    final expectedCount = counts[dataset];
+    if (expectedCount is! int || expectedCount < 0) {
+      errors.add('index.counts.$dataset must be a non-negative integer');
+      continue;
+    }
+
+    final datasetFile = File('${dir.path}/$fileName');
+    if (!datasetFile.existsSync()) {
+      errors.add('missing dataset file for $dataset: ${datasetFile.path}');
+      continue;
+    }
+    final artifact = _readJsonMap(datasetFile, errors);
+    if (artifact == null) continue;
+    _validateDatasetArtifact(
+      errors: errors,
+      dataset: dataset,
+      fileName: fileName,
+      artifact: artifact,
+      expectedCount: expectedCount,
+      expectedGeneratedAt: generatedAt,
+      expectedRunId: runId,
+    );
+  }
+
+  for (final dataset in files.keys) {
+    if (!graphDataDatasetNames.contains(dataset)) {
+      errors.add('index.files contains unknown dataset: $dataset');
+    }
+  }
+  for (final dataset in counts.keys) {
+    if (!graphDataDatasetNames.contains(dataset)) {
+      errors.add('index.counts contains unknown dataset: $dataset');
+    }
+  }
+
+  return errors;
+}
+
+void _validateDatasetArtifact({
+  required List<String> errors,
+  required String dataset,
+  required String fileName,
+  required Map<String, Object?> artifact,
+  required int expectedCount,
+  required String? expectedGeneratedAt,
+  required String? expectedRunId,
+}) {
+  final prefix = '$fileName';
+  _expectEqual(
+      errors, '$prefix.schema', artifact['schema'], graphDatasetSchema);
+  _expectEqual(errors, '$prefix.dataset', artifact['dataset'], dataset);
+  _expectEqual(
+    errors,
+    '$prefix.generated_at',
+    artifact['generated_at'],
+    expectedGeneratedAt,
+  );
+  if (expectedRunId != null) {
+    _expectEqual(errors, '$prefix.run_id', artifact['run_id'], expectedRunId);
+  }
+  final rows = artifact['rows'];
+  if (rows is! List<Object?>) {
+    errors.add('$prefix.rows must be a list');
+    return;
+  }
+  if (rows.length != expectedCount) {
+    errors.add(
+      '$prefix row count ${rows.length} does not match index count '
+      '$expectedCount',
+    );
+  }
+  for (var i = 0; i < rows.length; i++) {
+    final row = rows[i];
+    if (row is! Map<String, Object?>) {
+      errors.add('$prefix.rows[$i] must be an object');
+      continue;
+    }
+    _validateGraphDataRow(errors, '$prefix.rows[$i]', dataset, row);
+  }
+}
+
+void _validateGraphDataRow(
+  List<String> errors,
+  String prefix,
+  String dataset,
+  Map<String, Object?> row,
+) {
+  switch (dataset) {
+    case 'scenario_series':
+      _expectString(errors, '$prefix.scenario', row['scenario']);
+      _expectString(errors, '$prefix.peer', row['peer']);
+      _expectString(errors, '$prefix.metric', row['metric']);
+      _expectString(errors, '$prefix.statistic', row['statistic']);
+      _expectNum(errors, '$prefix.value', row['value']);
+    case 'peer_summary':
+      _expectString(errors, '$prefix.scenario', row['scenario']);
+      _expectString(errors, '$prefix.peer', row['peer']);
+      _expectString(errors, '$prefix.peer_status', row['peer_status']);
+    case 'decision_summary':
+      _expectString(errors, '$prefix.decision', row['decision']);
+    case 'decision_comparisons':
+      _expectString(errors, '$prefix.gate', row['gate']);
+    case 'workload_summary':
+      _expectString(errors, '$prefix.workload', row['workload']);
+    case 'workload_operations':
+      _expectString(errors, '$prefix.workload', row['workload']);
+      _expectString(errors, '$prefix.operation', row['operation']);
+      _expectString(errors, '$prefix.metric', row['metric']);
+      _expectNum(errors, '$prefix.value', row['value']);
+    case 'workload_memory':
+      _expectString(errors, '$prefix.workload', row['workload']);
+      _expectString(errors, '$prefix.metric', row['metric']);
+      _expectNum(errors, '$prefix.value', row['value']);
+    case 'workload_fanout':
+      _expectString(errors, '$prefix.workload', row['workload']);
+      _expectString(errors, '$prefix.metric', row['metric']);
+      _expectString(errors, '$prefix.statistic', row['statistic']);
+      _expectNum(errors, '$prefix.value', row['value']);
+  }
 }
 
 void _addCompareRows({
@@ -377,4 +573,40 @@ String _unitForMetric(String metric) {
   if (metric.contains('bytes')) return 'bytes';
   if (metric == 'cv' || metric.endsWith('_percent')) return 'ratio';
   return 'count';
+}
+
+Map<String, Object?>? _readJsonMap(File file, List<String> errors) {
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is Map<String, Object?>) return decoded;
+    errors.add('${file.path} must contain a JSON object');
+  } on FormatException catch (error) {
+    errors.add('${file.path} is not valid JSON: ${error.message}');
+  } on IOException catch (error) {
+    errors.add('could not read ${file.path}: $error');
+  }
+  return null;
+}
+
+void _expectEqual(
+  List<String> errors,
+  String field,
+  Object? actual,
+  Object? expected,
+) {
+  if (actual != expected) {
+    errors.add('$field expected `$expected`, got `$actual`');
+  }
+}
+
+void _expectString(List<String> errors, String field, Object? value) {
+  if (value is! String || value.isEmpty) {
+    errors.add('$field must be a non-empty string');
+  }
+}
+
+void _expectNum(List<String> errors, String field, Object? value) {
+  if (value is! num) {
+    errors.add('$field must be numeric');
+  }
 }

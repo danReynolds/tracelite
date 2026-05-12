@@ -199,6 +199,9 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart export-graph-data --out=...` writes normalized JSON
   datasets from compare, suite, decision, and workload-summary artifacts so
   downstream sites can render their own charts without embedding tracelite UI.
+- `bin/tracelite.dart validate-graph-data <dir>` checks index/dataset schemas,
+  counts, files, and row shapes; `export-graph-data` runs this validation before
+  reporting success.
 - `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
   repeatable scenario matrix and writes a manifest plus per-scenario artifacts
   and logs.

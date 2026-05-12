@@ -25,6 +25,8 @@ Future<void> main(List<String> args) async {
       _decision(args.skip(1).toList());
     case 'export-graph-data':
       _exportGraphData(args.skip(1).toList());
+    case 'validate-graph-data':
+      _validateGraphData(args.skip(1).toList());
     case 'suite':
       await _suite(args.skip(1).toList());
     case 'calibrate':
@@ -425,11 +427,36 @@ void _exportGraphData(List<String> args) {
     workloadSummaries: workloadInputs,
   );
   final files = _writeGraphDataBundle(Directory(out), bundle);
+  final validationErrors = validateGraphDataDirectory(out);
+  if (validationErrors.isNotEmpty) {
+    stderr.writeln('exported graph data failed validation:');
+    for (final error in validationErrors) {
+      stderr.writeln('- $error');
+    }
+    exit(65);
+  }
   _printGraphDataReport(
     outDir: out,
     bundle: bundle,
     files: files,
   );
+}
+
+void _validateGraphData(List<String> args) {
+  if (args.length != 1) {
+    stderr.writeln('validate-graph-data expects a graph-data directory');
+    _usage();
+  }
+  final errors = validateGraphDataDirectory(args.single);
+  if (errors.isEmpty) {
+    stdout.writeln('graph data valid: ${args.single}');
+    return;
+  }
+  stderr.writeln('graph data invalid: ${args.single}');
+  for (final error in errors) {
+    stderr.writeln('- $error');
+  }
+  exit(65);
 }
 
 Future<void> _calibrate(List<String> args) async {
@@ -2090,6 +2117,9 @@ Never _usage({int exitCode = 64}) {
       '[--suite=manifest.json] [--compare=compare.json] '
       '[--decision=decision.json] '
       '[--workload-summary=profile-summary.json] [--run-id=id]');
+  stderr.writeln(
+    '  dart run bin/tracelite.dart validate-graph-data graph-data',
+  );
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');
   stderr.writeln('  dart run bin/tracelite.dart create-region '
