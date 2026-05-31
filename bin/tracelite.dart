@@ -23,12 +23,18 @@ Future<void> main(List<String> args) async {
       _diff(args.skip(1).toList());
     case 'decision':
       _decision(args.skip(1).toList());
+    case 'calibrate-policy':
+      _calibratePolicy(args.skip(1).toList());
     case 'export-graph-data':
       _exportGraphData(args.skip(1).toList());
     case 'validate-graph-data':
       _validateGraphData(args.skip(1).toList());
+    case 'visualize':
+      await _visualize(args.skip(1).toList());
     case 'suite':
       await _suite(args.skip(1).toList());
+    case 'suite-history':
+      await _suiteHistory(args.skip(1).toList());
     case 'calibrate':
       await _calibrate(args.skip(1).toList());
     case 'create-region':
@@ -101,6 +107,13 @@ Future<void> _suite(List<String> args) async {
     stderr.writeln('--profile must be ci or production');
     exit(64);
   }
+  late final List<_SuiteScenario> scenarios;
+  try {
+    scenarios = _selectedSuiteScenarios(profile, options['scenarios']);
+  } on ArgumentError catch (error) {
+    stderr.writeln(error.message);
+    exit(64);
+  }
   final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
   final outDir = Directory(options['out-dir'] ?? 'build/tracelite-suite');
   outDir.createSync(recursive: true);
@@ -117,7 +130,7 @@ Future<void> _suite(List<String> args) async {
     ..writeln('|---|---:|---:|---|---|');
 
   var failed = false;
-  for (final scenario in profile.scenarios) {
+  for (final scenario in scenarios) {
     final artifactPath = '${outDir.path}/${scenario.name}.json';
     final result = await Process.run(
       Platform.resolvedExecutable,
@@ -171,6 +184,224 @@ Future<void> _suite(List<String> args) async {
     ..writeln()
     ..writeln('Manifest: `$manifestPath`');
   if (failed) {
+    exitCode = 65;
+  }
+}
+
+Future<void> _suiteHistory(List<String> args) async {
+  final options = _parseOptions(args);
+  final profileName = options['profile'] ?? 'production';
+  late final _SuiteProfile profile;
+  try {
+    profile = _suiteProfile(profileName);
+  } on ArgumentError {
+    stderr.writeln('--profile must be ci or production');
+    exit(64);
+  }
+  late final List<_SuiteScenario> scenarios;
+  try {
+    scenarios = _selectedSuiteScenarios(profile, options['scenarios']);
+  } on ArgumentError catch (error) {
+    stderr.writeln(error.message);
+    exit(64);
+  }
+
+  final runCount = _positiveIntOption(options, 'runs', 5);
+  final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
+  final outDir = Directory(
+    options['out-dir'] ?? 'build/tracelite-$profileName-history',
+  );
+  outDir.createSync(recursive: true);
+  final strict = _boolOption(options, 'strict', true);
+  final generatedAt = DateTime.now().toUtc();
+  final metrics = _csvOption(
+    options['metrics'],
+    defaultValue: defaultPolicyCalibrationMetrics,
+  );
+  final calibrationScenarios = _csvOption(
+    options['policy-scenarios'] ?? options['scenarios'],
+  );
+  final calibrationPeers = _csvOption(
+    options['policy-peers'] ?? options['peers'],
+  );
+  final minHistoryRuns =
+      _positiveIntOptionOrNull(options, 'min-history-runs') ?? runCount;
+  final calibrationOptions = BenchmarkPolicyCalibrationOptions(
+    metrics: metrics,
+    scenarios: calibrationScenarios,
+    peers: calibrationPeers,
+    minHistoryRuns: minHistoryRuns,
+    minRepetitions: _positiveIntOption(options, 'min-repetitions', 5),
+    maxRepetitions: _positiveIntOption(options, 'max-repetitions', 30),
+    targetRelativeStandardErrorPercent: _positiveDoubleOption(
+      options,
+      'target-rse-percent',
+      2.5,
+    ),
+    withinRunNoisePercentile: _positiveDoubleOption(
+      options,
+      'within-run-noise-percentile',
+      0.75,
+    ),
+    thresholdFloorPercent: _positiveDoubleOption(
+      options,
+      'threshold-floor-percent',
+      5,
+    ),
+    guardrailFloorPercent: _positiveDoubleOption(
+      options,
+      'guardrail-floor-percent',
+      3,
+    ),
+    noiseGateFloorPercent: _positiveDoubleOption(
+      options,
+      'noise-gate-floor-percent',
+      5,
+    ),
+    noiseGateMultiplier: _positiveDoubleOption(
+      options,
+      'noise-gate-multiplier',
+      1.5,
+    ),
+    maxOutlierPercent: _positiveDoubleOption(
+      options,
+      'max-outlier-percent',
+      10,
+    ),
+    maxRunOutlierPercent: _positiveDoubleOption(
+      options,
+      'max-run-outlier-percent',
+      20,
+    ),
+    thresholdCeilingPercent: _positiveDoubleOptionOrNull(
+      options,
+      'threshold-ceiling-percent',
+    ),
+    guardrailCeilingPercent: _positiveDoubleOptionOrNull(
+      options,
+      'guardrail-ceiling-percent',
+    ),
+    noiseGateCeilingPercent: _positiveDoubleOptionOrNull(
+      options,
+      'noise-gate-ceiling-percent',
+    ),
+  );
+
+  final runs = <Map<String, Object?>>[];
+  stdout
+    ..writeln('# tracelite suite history')
+    ..writeln()
+    ..writeln('Profile: `$profileName`')
+    ..writeln('Runs: $runCount')
+    ..writeln('Interfaces: `$interfaces`')
+    ..writeln('Out dir: `${outDir.path}`')
+    ..writeln('Strict: `$strict`')
+    ..writeln()
+    ..writeln('| run | status | manifest |')
+    ..writeln('|---:|---|---|');
+
+  var suiteFailed = false;
+  for (var runIndex = 1; runIndex <= runCount; runIndex++) {
+    final runStartedAt = DateTime.now().toUtc();
+    final runName = _historyRunName(runIndex, runStartedAt);
+    final runDir = Directory('${outDir.path}/$runName')..createSync();
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'suite',
+        '--profile=$profileName',
+        '--interfaces=$interfaces',
+        if (options['scenarios'] != null)
+          '--scenarios=${scenarios.map((scenario) => scenario.name).join(',')}',
+        '--out-dir=${runDir.path}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    final logPath = '${runDir.path}/suite.log';
+    File(logPath).writeAsStringSync(
+      'stdout:\n${result.stdout}\n\nstderr:\n${result.stderr}\n',
+    );
+    final manifestPath = '${runDir.path}/manifest.json';
+    final status = result.exitCode == 0 ? 'ok' : 'failed';
+    if (result.exitCode != 0) suiteFailed = true;
+    runs.add({
+      'run': runIndex,
+      'name': runName,
+      'started_at': runStartedAt.toIso8601String(),
+      'completed_at': DateTime.now().toUtc().toIso8601String(),
+      'directory': runDir.path,
+      'manifest': manifestPath,
+      'log': logPath,
+      'exit_code': result.exitCode,
+      'status': status,
+    });
+    stdout.writeln('| $runIndex | `$status` | `$manifestPath` |');
+  }
+
+  final seen = <String>{};
+  final inputs = <BenchmarkPolicyCalibrationInput>[];
+  for (final run in runs) {
+    if (run['status'] != 'ok') continue;
+    inputs.addAll(_policyHistoryInputs(run['manifest']! as String, seen));
+  }
+
+  Map<String, Object?>? calibration;
+  if (inputs.isNotEmpty) {
+    calibration = benchmarkPolicyCalibrationArtifact(
+      compareArtifacts: inputs,
+      options: calibrationOptions,
+    );
+  }
+
+  final policyJsonPath = '${outDir.path}/policy-calibration.json';
+  final policyMarkdownPath = '${outDir.path}/policy-calibration.md';
+  const encoder = JsonEncoder.withIndent('  ');
+  if (calibration != null) {
+    File(policyJsonPath).writeAsStringSync('${encoder.convert(calibration)}\n');
+    File(policyMarkdownPath)
+        .writeAsStringSync(benchmarkPolicyCalibrationMarkdown(calibration));
+  }
+
+  final historyManifestPath = '${outDir.path}/history.json';
+  final historyManifest = {
+    'schema': 'tracelite.suite_history.v1',
+    'generated_at': generatedAt.toIso8601String(),
+    'profile': profileName,
+    'scenarios': scenarios.map((scenario) => scenario.name).toList(),
+    'interfaces': interfaces.split(',').map((name) => name.trim()).toList(),
+    'requested_runs': runCount,
+    'successful_runs':
+        runs.where((run) => run['status'] == 'ok').toList().length,
+    'strict': strict,
+    'calibration_status': calibration?['status'] ?? 'missing',
+    if (calibration != null) ...{
+      'policy_artifact': policyJsonPath,
+      'policy_markdown': policyMarkdownPath,
+    },
+    'calibration_options': calibrationOptions.toJson(),
+    'runs': runs,
+  };
+  File(historyManifestPath).writeAsStringSync(
+    '${encoder.convert(historyManifest)}\n',
+  );
+
+  stdout
+    ..writeln()
+    ..writeln('History: `$historyManifestPath`');
+  if (calibration == null) {
+    stdout.writeln('Policy calibration: `missing`');
+  } else {
+    stdout
+      ..writeln('Policy calibration: `$policyJsonPath`')
+      ..writeln('Policy status: `${calibration['status']}`');
+  }
+
+  if (strict &&
+      (suiteFailed ||
+          calibration == null ||
+          !benchmarkPolicyCalibrationPassed(calibration))) {
     exitCode = 65;
   }
 }
@@ -315,11 +546,17 @@ void _diff(List<String> args) {
     _usage();
   }
   final metric = options['metric'] ?? 'elapsed_ns';
-  final thresholdPercent = double.tryParse(
-        options['threshold-percent'] ?? '5',
-      ) ??
-      5;
-  final maxCvPercent = double.tryParse(options['max-cv-percent'] ?? '15') ?? 15;
+  final calibrationPolicy = _readPolicyOption(options);
+  final thresholdPercent = _doubleOption(
+    options,
+    'threshold-percent',
+    _policyDouble(calibrationPolicy, 'primary_threshold_percent', 5),
+  );
+  final maxCvPercent = _doubleOption(
+    options,
+    'max-cv-percent',
+    _policyDouble(calibrationPolicy, 'max_cv_percent', 15),
+  );
   final alpha = double.tryParse(options['alpha'] ?? '0.05') ?? 0.05;
 
   final baseline = _readJsonMap(baselinePath);
@@ -343,6 +580,7 @@ void _decision(List<String> args) {
     _usage();
   }
 
+  final calibrationPolicy = _readPolicyOption(options);
   final expectation = options['expect'] ?? 'improvement';
   if (expectation != 'improvement' && expectation != 'no_regression') {
     stderr.writeln('--expect must be improvement or no_regression');
@@ -365,15 +603,21 @@ void _decision(List<String> args) {
         options['guardrail-metrics'],
         defaultValue: defaultGuardrailMetrics,
       ),
-      primaryThresholdPercent: double.tryParse(
-            options['primary-threshold-percent'] ?? '5',
-          ) ??
-          5,
-      maxRegressionPercent: double.tryParse(
-            options['max-regression-percent'] ?? '3',
-          ) ??
-          3,
-      maxCvPercent: double.tryParse(options['max-cv-percent'] ?? '15') ?? 15,
+      primaryThresholdPercent: _doubleOption(
+        options,
+        'primary-threshold-percent',
+        _policyDouble(calibrationPolicy, 'primary_threshold_percent', 5),
+      ),
+      maxRegressionPercent: _doubleOption(
+        options,
+        'max-regression-percent',
+        _policyDouble(calibrationPolicy, 'max_regression_percent', 3),
+      ),
+      maxCvPercent: _doubleOption(
+        options,
+        'max-cv-percent',
+        _policyDouble(calibrationPolicy, 'max_cv_percent', 15),
+      ),
       alpha: double.tryParse(options['alpha'] ?? '0.05') ?? 0.05,
     ),
   );
@@ -391,12 +635,123 @@ void _decision(List<String> args) {
   }
 }
 
+void _calibratePolicy(List<String> args) {
+  final options = _parseOptions(
+    args,
+    multiValueKeys: const {'history'},
+  );
+  final historyPaths = _csvOption(options['history']);
+  if (historyPaths.isEmpty) {
+    stderr.writeln('calibrate-policy requires --history=path');
+    _usage();
+  }
+
+  final seen = <String>{};
+  final inputs = <BenchmarkPolicyCalibrationInput>[];
+  try {
+    for (final historyPath in historyPaths) {
+      inputs.addAll(_policyHistoryInputs(historyPath, seen));
+    }
+  } on FileSystemException catch (error) {
+    stderr.writeln('${error.message}: ${error.path}');
+    exit(66);
+  } on FormatException catch (error) {
+    stderr.writeln(error.message);
+    exit(65);
+  }
+  if (inputs.isEmpty) {
+    stderr.writeln('calibrate-policy found no compare artifacts');
+    exit(65);
+  }
+
+  final artifact = benchmarkPolicyCalibrationArtifact(
+    compareArtifacts: inputs,
+    options: BenchmarkPolicyCalibrationOptions(
+      metrics: _csvOption(
+        options['metrics'],
+        defaultValue: defaultPolicyCalibrationMetrics,
+      ),
+      scenarios: _csvOption(options['scenarios']),
+      peers: _csvOption(options['peers']),
+      minHistoryRuns: _positiveIntOption(options, 'min-history-runs', 2),
+      minRepetitions: _positiveIntOption(options, 'min-repetitions', 5),
+      maxRepetitions: _positiveIntOption(options, 'max-repetitions', 30),
+      targetRelativeStandardErrorPercent: _positiveDoubleOption(
+        options,
+        'target-rse-percent',
+        2.5,
+      ),
+      withinRunNoisePercentile: _positiveDoubleOption(
+        options,
+        'within-run-noise-percentile',
+        0.75,
+      ),
+      thresholdFloorPercent: _positiveDoubleOption(
+        options,
+        'threshold-floor-percent',
+        5,
+      ),
+      guardrailFloorPercent: _positiveDoubleOption(
+        options,
+        'guardrail-floor-percent',
+        3,
+      ),
+      noiseGateFloorPercent: _positiveDoubleOption(
+        options,
+        'noise-gate-floor-percent',
+        5,
+      ),
+      noiseGateMultiplier: _positiveDoubleOption(
+        options,
+        'noise-gate-multiplier',
+        1.5,
+      ),
+      maxOutlierPercent: _positiveDoubleOption(
+        options,
+        'max-outlier-percent',
+        10,
+      ),
+      maxRunOutlierPercent: _positiveDoubleOption(
+        options,
+        'max-run-outlier-percent',
+        20,
+      ),
+      thresholdCeilingPercent: _positiveDoubleOptionOrNull(
+        options,
+        'threshold-ceiling-percent',
+      ),
+      guardrailCeilingPercent: _positiveDoubleOptionOrNull(
+        options,
+        'guardrail-ceiling-percent',
+      ),
+      noiseGateCeilingPercent: _positiveDoubleOptionOrNull(
+        options,
+        'noise-gate-ceiling-percent',
+      ),
+    ),
+  );
+
+  final outJson = options['out-json'];
+  if (outJson != null && outJson.isNotEmpty) {
+    const encoder = JsonEncoder.withIndent('  ');
+    File(outJson)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('${encoder.convert(artifact)}\n');
+  }
+  stdout.write(benchmarkPolicyCalibrationMarkdown(artifact));
+  if (_boolOption(options, 'strict', false) &&
+      !benchmarkPolicyCalibrationPassed(artifact)) {
+    exitCode = 65;
+  }
+}
+
 void _exportGraphData(List<String> args) {
   final options = _parseOptions(
     args,
     multiValueKeys: const {
       'compare',
       'suite',
+      'suite-history',
       'decision',
       'workload-summary',
     },
@@ -410,6 +765,8 @@ void _exportGraphData(List<String> args) {
   final compareInputs = <GraphDataInput>[
     for (final path in _csvOption(options['compare'])) _graphInput(path),
     for (final path in _csvOption(options['suite'])) ..._suiteGraphInputs(path),
+    for (final path in _csvOption(options['suite-history']))
+      ..._suiteHistoryGraphInputs(path),
   ];
   final decisionInputs = [
     for (final path in _csvOption(options['decision'])) _graphInput(path),
@@ -423,7 +780,8 @@ void _exportGraphData(List<String> args) {
       workloadInputs.isEmpty) {
     stderr.writeln(
       'export-graph-data requires at least one of '
-      '--compare, --suite, --decision, or --workload-summary',
+      '--compare, --suite, --suite-history, --decision, or '
+      '--workload-summary',
     );
     _usage();
   }
@@ -465,6 +823,63 @@ void _validateGraphData(List<String> args) {
     stderr.writeln('- $error');
   }
   exit(65);
+}
+
+Future<void> _visualize(List<String> args) async {
+  var release = false;
+  var profile = false;
+  final paths = <String>[];
+  for (final arg in args) {
+    switch (arg) {
+      case '--release':
+        release = true;
+      case '--profile':
+        profile = true;
+      default:
+        paths.add(arg);
+    }
+  }
+  if (release && profile) {
+    stderr.writeln('visualize accepts only one of --release or --profile');
+    _usage();
+  }
+  if (paths.length != 1) {
+    stderr.writeln('visualize expects exactly one path');
+    _usage();
+  }
+  final appDir = Directory('tool/visualizer_app');
+  if (!appDir.existsSync()) {
+    stderr.writeln('missing visualizer app directory: ${appDir.path}');
+    exit(66);
+  }
+  final target = File(paths.single).absolute.path;
+  final device = Platform.isMacOS
+      ? 'macos'
+      : Platform.isLinux
+          ? 'linux'
+          : Platform.isWindows
+              ? 'windows'
+              : null;
+  if (device == null) {
+    stderr
+        .writeln('visualize is currently supported on desktop platforms only');
+    exit(66);
+  }
+  final child = await Process.start(
+    'flutter',
+    [
+      'run',
+      '-d',
+      device,
+      if (release) '--release',
+      if (profile) '--profile',
+      '-a',
+      target,
+    ],
+    workingDirectory: appDir.path,
+    mode: ProcessStartMode.inheritStdio,
+  );
+  exitCode = await child.exitCode;
 }
 
 Future<void> _calibrate(List<String> args) async {
@@ -1143,6 +1558,168 @@ List<Map<String, Object?>> _readSuiteCompareArtifacts(
   ];
 }
 
+List<BenchmarkPolicyCalibrationInput> _policyHistoryInputs(
+  String path,
+  Set<String> seen,
+) {
+  final directory = Directory(path);
+  if (directory.existsSync()) {
+    return _policyHistoryDirectoryInputs(directory, seen);
+  }
+
+  final file = File(path);
+  if (file.existsSync()) {
+    return _policyHistoryFileInputs(file, seen, explicit: true);
+  }
+
+  throw FileSystemException('policy history path does not exist', path);
+}
+
+List<BenchmarkPolicyCalibrationInput> _policyHistoryDirectoryInputs(
+  Directory directory,
+  Set<String> seen,
+) {
+  final files = directory
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((file) => file.path.endsWith('.json'))
+      .toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
+
+  final inputs = <BenchmarkPolicyCalibrationInput>[];
+  for (final file in files) {
+    inputs.addAll(_policyHistoryFileInputs(file, seen, explicit: false));
+  }
+  return inputs;
+}
+
+List<BenchmarkPolicyCalibrationInput> _policyHistoryFileInputs(
+  File file,
+  Set<String> seen, {
+  required bool explicit,
+}) {
+  late final Map<String, Object?> root;
+  try {
+    root = _readJsonMap(file.path);
+  } on FormatException {
+    if (explicit) rethrow;
+    return const [];
+  }
+
+  return switch (root['schema']) {
+    'tracelite.compare.v1' => _dedupPolicyInput(file.path, root, seen),
+    'tracelite.suite.v1' => _policyInputsFromSuite(file.path, root, seen),
+    'tracelite.suite_history.v1' =>
+      _policyInputsFromSuiteHistory(file.path, root, seen),
+    _ => explicit
+        ? throw FormatException(
+            '${file.path} is not a tracelite compare artifact, suite '
+            'manifest, or suite history manifest',
+          )
+        : const <BenchmarkPolicyCalibrationInput>[],
+  };
+}
+
+List<BenchmarkPolicyCalibrationInput> _policyInputsFromSuite(
+  String manifestPath,
+  Map<String, Object?> manifest,
+  Set<String> seen,
+) {
+  final runs = manifest['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$manifestPath has no runs list');
+  }
+
+  final inputs = <BenchmarkPolicyCalibrationInput>[];
+  for (final run in runs.cast<Map<String, Object?>>()) {
+    final artifactPath = _resolveManifestArtifactPath(
+      manifestPath,
+      run['artifact']! as String,
+    );
+    inputs.addAll(
+      _dedupPolicyInput(artifactPath, _readJsonMap(artifactPath), seen),
+    );
+  }
+  return inputs;
+}
+
+List<BenchmarkPolicyCalibrationInput> _policyInputsFromSuiteHistory(
+  String historyPath,
+  Map<String, Object?> history,
+  Set<String> seen,
+) {
+  final runs = history['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$historyPath has no runs list');
+  }
+
+  final inputs = <BenchmarkPolicyCalibrationInput>[];
+  for (final run in runs.cast<Map<String, Object?>>()) {
+    if (run['status'] != 'ok') continue;
+    final manifest = run['manifest'];
+    if (manifest is! String || manifest.isEmpty) continue;
+    final manifestPath = _resolveManifestArtifactPath(historyPath, manifest);
+    inputs.addAll(_policyHistoryFileInputs(
+      File(manifestPath),
+      seen,
+      explicit: true,
+    ));
+  }
+  return inputs;
+}
+
+List<BenchmarkPolicyCalibrationInput> _dedupPolicyInput(
+  String path,
+  Map<String, Object?> artifact,
+  Set<String> seen,
+) {
+  final absolutePath = File(path).absolute.path;
+  if (!seen.add(absolutePath)) return const [];
+  return [
+    BenchmarkPolicyCalibrationInput(
+      path: absolutePath,
+      artifact: artifact,
+    ),
+  ];
+}
+
+Map<String, Object?>? _readPolicyOption(Map<String, String> options) {
+  final path = options['policy'];
+  if (path == null || path.isEmpty) return null;
+  final artifact = _readJsonMap(path);
+  if (artifact['schema'] != benchmarkPolicyCalibrationSchema) {
+    stderr.writeln('$path is not a tracelite policy calibration artifact');
+    exit(65);
+  }
+  final status = artifact['status'];
+  final allowUnready = _boolOption(options, 'allow-unready-policy', false);
+  if (!allowUnready && status != 'ready') {
+    stderr.writeln(
+      '$path has policy calibration status `$status`; collect more history '
+      'or pass --allow-unready-policy=true for exploratory use',
+    );
+    exit(65);
+  }
+  final policy = artifact['policy'];
+  if (policy is! Map<String, Object?>) {
+    stderr.writeln('$path has no policy object');
+    exit(65);
+  }
+  return policy;
+}
+
+double _policyDouble(
+  Map<String, Object?>? policy,
+  String name,
+  double defaultValue,
+) {
+  if (policy == null) return defaultValue;
+  final value = policy[name];
+  if (value is num) return value.toDouble();
+  stderr.writeln('policy value `$name` must be numeric');
+  exit(65);
+}
+
 GraphDataInput _graphInput(String path, {String? parentPath}) {
   return GraphDataInput(
     path: path,
@@ -1167,6 +1744,27 @@ List<GraphDataInput> _suiteGraphInputs(String manifestPath) {
         parentPath: manifestPath,
       ),
   ];
+}
+
+List<GraphDataInput> _suiteHistoryGraphInputs(String historyPath) {
+  final history = _readJsonMap(historyPath);
+  if (history['schema'] != 'tracelite.suite_history.v1') {
+    throw FormatException('$historyPath is not a tracelite suite history');
+  }
+  final runs = history['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$historyPath has no runs list');
+  }
+
+  final inputs = <GraphDataInput>[];
+  for (final run in runs.cast<Map<String, Object?>>()) {
+    if (run['status'] != 'ok') continue;
+    final manifest = run['manifest'];
+    if (manifest is! String || manifest.isEmpty) continue;
+    final manifestPath = _resolveManifestArtifactPath(historyPath, manifest);
+    inputs.addAll(_suiteGraphInputs(manifestPath));
+  }
+  return inputs;
 }
 
 String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
@@ -1581,14 +2179,81 @@ int _positiveIntOption(
   String name,
   int defaultValue,
 ) {
+  return _positiveIntOptionOrNull(options, name) ?? defaultValue;
+}
+
+int? _positiveIntOptionOrNull(
+  Map<String, String> options,
+  String name,
+) {
   final raw = options[name];
-  if (raw == null) return defaultValue;
+  if (raw == null) return null;
   final value = int.tryParse(raw);
   if (value == null || value <= 0) {
     stderr.writeln('--$name must be a positive integer');
     exit(64);
   }
   return value;
+}
+
+double _positiveDoubleOption(
+  Map<String, String> options,
+  String name,
+  double defaultValue,
+) {
+  final value = _doubleOption(options, name, defaultValue);
+  if (value <= 0) {
+    stderr.writeln('--$name must be a positive number');
+    exit(64);
+  }
+  return value;
+}
+
+double? _positiveDoubleOptionOrNull(
+  Map<String, String> options,
+  String name,
+) {
+  final raw = options[name];
+  if (raw == null) return null;
+  final value = double.tryParse(raw);
+  if (value == null || value <= 0) {
+    stderr.writeln('--$name must be a positive number');
+    exit(64);
+  }
+  return value;
+}
+
+double _doubleOption(
+  Map<String, String> options,
+  String name,
+  double defaultValue,
+) {
+  final raw = options[name];
+  if (raw == null) return defaultValue;
+  final value = double.tryParse(raw);
+  if (value == null) {
+    stderr.writeln('--$name must be a number');
+    exit(64);
+  }
+  return value;
+}
+
+bool _boolOption(
+  Map<String, String> options,
+  String name,
+  bool defaultValue,
+) {
+  final raw = options[name];
+  if (raw == null) return defaultValue;
+  final normalized = raw.toLowerCase();
+  if (normalized == '1' || normalized == 'true' || normalized == 'yes') {
+    return true;
+  }
+  if (normalized == '0' || normalized == 'false' || normalized == 'no') {
+    return false;
+  }
+  stderr.writeln('--$name must be true or false');
+  exit(64);
 }
 
 int _positivePowerOfTwoOption(
@@ -1670,6 +2335,15 @@ String _runtimeBuildCommand() {
     _ => '  cc -shared -fPIC -O2 -Inative native/tracelite_runtime.c '
         '-o $output',
   };
+}
+
+String _historyRunName(int runIndex, DateTime timestamp) {
+  final compact = timestamp
+      .toIso8601String()
+      .replaceAll('-', '')
+      .replaceAll(':', '')
+      .replaceFirst(RegExp(r'\.\d+Z$'), 'Z');
+  return 'run-${runIndex.toString().padLeft(3, '0')}-$compact';
 }
 
 _IntStats _perIterationStats(List<int> values, int iterations) {
@@ -1894,7 +2568,7 @@ _SuiteProfile _suiteProfile(String profileName) {
         scenarios: [
           _SuiteScenario(
             name: narrowBatchInsertScenario,
-            rows: 100,
+            rows: 500,
             repetitions: 7,
           ),
           _SuiteScenario(
@@ -1904,7 +2578,7 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
           _SuiteScenario(
             name: feedPagingScenario,
-            rows: 100,
+            rows: 1000,
             repetitions: 7,
           ),
           _SuiteScenario(
@@ -1914,12 +2588,12 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
           _SuiteScenario(
             name: chatSimScenario,
-            rows: 100,
-            repetitions: 7,
+            rows: 200,
+            repetitions: 11,
           ),
           _SuiteScenario(
             name: largeWorkingSetScenario,
-            rows: 500,
+            rows: 2500,
             repetitions: 7,
           ),
           _SuiteScenario(
@@ -1929,8 +2603,8 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
           _SuiteScenario(
             name: highCardinalityFanoutScenario,
-            rows: 20,
-            repetitions: 7,
+            rows: 40,
+            repetitions: 11,
           ),
           _SuiteScenario(
             name: manyStreamsWriterThroughputScenario,
@@ -1950,6 +2624,30 @@ _SuiteProfile _suiteProfile(String profileName) {
         'expected ci or production',
       ),
   };
+}
+
+List<_SuiteScenario> _selectedSuiteScenarios(
+  _SuiteProfile profile,
+  String? scenarioOption,
+) {
+  final selectedNames = _csvOption(scenarioOption);
+  if (selectedNames.isEmpty) return profile.scenarios;
+
+  final scenariosByName = {
+    for (final scenario in profile.scenarios) scenario.name: scenario,
+  };
+  final unknown = selectedNames
+      .where((scenarioName) => !scenariosByName.containsKey(scenarioName))
+      .toList();
+  if (unknown.isNotEmpty) {
+    throw ArgumentError(
+      'unknown suite scenario(s): ${unknown.join(', ')}',
+    );
+  }
+
+  return [
+    for (final scenarioName in selectedNames) scenariosByName[scenarioName]!,
+  ];
 }
 
 class _DoubleSample {
@@ -2138,22 +2836,46 @@ Never _usage({int exitCode = 64}) {
       '[--repetitions=5] [--out-json=compare.json]');
   stderr.writeln('  dart run bin/tracelite.dart suite '
       '[--profile=ci|production] [--interfaces=sqlite3,drift,...] '
+      '[--scenarios=narrow-batch-insert,...] '
       '[--out-dir=build/tracelite-suite]');
+  stderr.writeln('  dart run bin/tracelite.dart suite-history '
+      '[--profile=production] [--runs=5] [--interfaces=sqlite3,drift,...] '
+      '[--scenarios=narrow-batch-insert,...] '
+      '[--metrics=elapsed_ns,...] [--target-rse-percent=2.5] '
+      '[--within-run-noise-percentile=0.75] '
+      '[--policy-peers=resqlite] [--policy-scenarios=feed-paging,...] '
+      '[--threshold-ceiling-percent=50] '
+      '[--max-outlier-percent=10] [--max-run-outlier-percent=20] '
+      '[--out-dir=build/tracelite-production-history]');
   stderr.writeln('  dart run bin/tracelite.dart diff '
       '--baseline=base.json --candidate=change.json '
-      '[--metric=elapsed_ns] [--max-cv-percent=15] [--alpha=0.05]');
+      '[--metric=elapsed_ns] [--policy=policy-calibration.json] '
+      '[--max-cv-percent=15] [--alpha=0.05]');
   stderr.writeln('  dart run bin/tracelite.dart decision '
       '--baseline=base.json --candidate=change.json '
       '[--expect=improvement|no_regression] '
       '[--primary-peer=resqlite] [--primary-metric=elapsed_ns] '
-      '[--out-json=decision.json]');
+      '[--policy=policy-calibration.json] [--out-json=decision.json]');
+  stderr.writeln('  dart run bin/tracelite.dart calibrate-policy '
+      '--history=manifest-or-directory '
+      '[--metrics=elapsed_ns,measured_elapsed_ns] '
+      '[--peers=resqlite] [--scenarios=feed-paging,...] [--strict=true] '
+      '[--within-run-noise-percentile=0.75] '
+      '[--threshold-ceiling-percent=50] '
+      '[--max-outlier-percent=10] [--max-run-outlier-percent=20] '
+      '[--out-json=policy-calibration.json]');
   stderr.writeln('  dart run bin/tracelite.dart export-graph-data '
       '--out=graph-data '
-      '[--suite=manifest.json] [--compare=compare.json] '
+      '[--suite=manifest.json] [--suite-history=history.json] '
+      '[--compare=compare.json] '
       '[--decision=decision.json] '
       '[--workload-summary=profile-summary.json] [--run-id=id]');
   stderr.writeln(
     '  dart run bin/tracelite.dart validate-graph-data graph-data',
+  );
+  stderr.writeln(
+    '  dart run bin/tracelite.dart visualize [--release|--profile] '
+    '<trace-or-artifact-path>',
   );
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');

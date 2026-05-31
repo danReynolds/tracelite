@@ -279,7 +279,7 @@ Span IDs partition into ranges:
 - `0x3000–0x3FFF` reserved for the FFI bridge
 - `0x4000–0xFFFF` available for user/library spans
 
-Reserved IDs and their schemas are enumerated in `tools/spans.yaml`; the format-spec appendix and `span-registry.md` are generated from that source-of-truth file. Hand-edits to ID/name/schema in those generated tables will be lost on regeneration.
+Reserved IDs and their schemas are enumerated in `tool/spans.yaml`; the format-spec appendix and `span-registry.md` are generated from that source-of-truth file. Hand-edits to ID/name/schema in those generated tables will be lost on regeneration.
 
 ### String pool (Section 3)
 

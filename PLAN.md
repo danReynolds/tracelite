@@ -6,11 +6,11 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (6 specs, ~3,700 LOC, all reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, and the peer harness are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, and recorder-overhead calibration.
+**Status:** Design corpus complete (7 specs, ~4,000 LOC, first 6 reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, the peer harness, and the first desktop visualizer slice are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events when the local resqlite trace hook is available. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, recorder-overhead calibration, artifact-history policy calibration, and a development `visualize` launcher.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — calibrate decision thresholds on production-sized history, wire resqlite's profile workflow to tracelite artifacts, then finish packaging and Linux/Windows shim validation.
+**Next bottleneck:** production benchmark replacement hardening — reduce production workload noise until a ceiling-capped `calibrate-policy --strict=true` passes, wire resqlite's profile workflow to tracelite artifacts, then finish packaging and Linux/Windows shim validation.
 
 ---
 
@@ -29,7 +29,8 @@ Layered on top:
 - **Cross-isolate causal chains** linking a request's full lifecycle (main → writer → reader-pool → response).
 - **Aggregator** that produces statistical reports, regression diffs, and live queries.
 - **Peer-comparison harness** so `tracelite compare --interfaces=drift,sqlite_async,sqlite3,resqlite --scenario=batch-insert` is one command.
-- **Visualizer** (Flutter web) for interactive trace exploration.
+- **Visualizer** (desktop-first Flutter app) for local trace exploration, peer
+  comparison, experiment review, and artifact forensics.
 
 ---
 
@@ -74,7 +75,7 @@ harness drains the mmap region → finalized .tlt file →
   ↓
   ├── markdown reports
   ├── regression diffs (TraceDiff over repetitions)
-  ├── visualizer (Flutter web)
+  ├── visualizer (desktop-first Flutter app)
   └── Perfetto-format export (optional)
 ```
 
@@ -84,7 +85,8 @@ Every layer above is contractually defined in `doc/`.
 
 ## The design corpus
 
-Six specs, all v0.1 drafts after one external review pass:
+Seven specs, six of them after one external review pass and the visualizer
+product design added after the May 2026 artifact workflow work:
 
 | Spec | Lines | Defines |
 |---|---|---|
@@ -93,12 +95,13 @@ Six specs, all v0.1 drafts after one external review pass:
 | [`span-registry.md`](doc/span-registry.md) | 130 (rules) + generated tables | Reserved span ID ranges, stability rules, naming, deprecation cycle, hook registration vs invocation distinction |
 | [`aggregator-api.md`](doc/aggregator-api.md) | 815 | Loading (4 explicit modes), selection, filtering, aggregation, grouping, chains, CPU attribution (renamed from "wall attribution"), diff over repetitions, live queries |
 | [`visualizer-binding.md`](doc/visualizer-binding.md) | 880 | Probes (typed reactive nodes), scope, derivation, frame coalescing via `ProbeScheduler` abstraction, isolate offload via `TraceHandle`, Flutter widget integration, diff mode with cycle-guarded range linking |
+| [`visualizer-product-design.md`](doc/visualizer-product-design.md) | 334 | Desktop-first product architecture, core screens, artifact/query model, implementation milestones |
 | [`peer-interface-contract.md`](doc/peer-interface-contract.md) | 760 | `SqliteInterface` API, `SqliteRow`, `ExecutionResult`, two `LifecycleMode` state machines, `BatchingMode` enum, `RequiredCapability` set, fairness rules |
 
 Plus the source-of-truth file:
 
-- [`tools/spans.yaml`](tools/spans.yaml) — every reserved span ID with begin/end/instant arg schemas. Generator emits Dart constants, C `#define`s, and Markdown tables in lockstep.
-- [`tools/generate.dart`](tools/generate.dart) — runs `tools/spans.yaml` → 4 derived files. CI uses `--check` to fail on drift.
+- [`tool/spans.yaml`](tool/spans.yaml) — every reserved span ID with begin/end/instant arg schemas. Generator emits Dart constants, C `#define`s, and Markdown tables in lockstep.
+- [`tool/generate.dart`](tool/generate.dart) — runs `tool/spans.yaml` → 4 derived files. CI uses `--check` to fail on drift.
 
 Per-spec feedback files (`*.feedback.md`) capture the external review and are retained as the documented review history.
 
@@ -108,9 +111,9 @@ Per-spec feedback files (`*.feedback.md`) capture the external review and are re
 
 ### Schema generator (working)
 
-- `tools/spans.yaml` defines 30+ built-in spans across `tracelite`, `sqlite_c`, `dart_recorder`, `ffi_bridge` categories.
-- `tools/generate.dart` validates the YAML (range membership, schema phase exclusivity, list-arg position) and emits four derived files.
-- `dart run tools/generate.dart --check` exits non-zero if any output is stale relative to the YAML.
+- `tool/spans.yaml` defines 30+ built-in spans across `tracelite`, `sqlite_c`, `dart_recorder`, `ffi_bridge` categories.
+- `tool/generate.dart` validates the YAML (range membership, schema phase exclusivity, list-arg position) and emits four derived files.
+- `dart run tool/generate.dart --check` exits non-zero if any output is stale relative to the YAML.
 
 ```
 lib/src/builtin_spans.g.dart       Dart constants for every span ID
@@ -196,6 +199,13 @@ Run both: `dart test`. Both pass.
   turns compare artifacts or suite manifests into an accepted/rejected/
   inconclusive decision using trace-health, primary-metric, noise,
   significance, and guardrail gates.
+- `bin/tracelite.dart calibrate-policy --history=...` scans compare artifacts,
+  suite manifests, or history directories and emits recommended repetition
+  counts, primary/guardrail thresholds, and CV noise gates. `--strict=true`
+  fails unless the covered groups have enough independent historical runs.
+- `diff` and `decision` accept `--policy=policy-calibration.json` and reject
+  non-ready policy artifacts by default; explicit threshold flags remain
+  overrides for one-off investigation.
 - `bin/tracelite.dart export-graph-data --out=...` writes normalized JSON
   datasets from compare, suite, decision, and workload-summary artifacts so
   downstream sites can render their own charts without embedding tracelite UI.
@@ -205,6 +215,10 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
   repeatable scenario matrix and writes a manifest plus per-scenario artifacts
   and logs.
+- `bin/tracelite.dart suite-history --profile=production --runs=5 --out-dir=...`
+  runs independent suites into timestamped run directories, writes a
+  `tracelite.suite_history.v1` manifest, and emits policy-calibration JSON and
+  markdown sidecars.
 - `bin/tracelite.dart calibrate` measures body-only, disabled-recorder, and
   active-recorder overhead for Dart producer spans.
 
@@ -239,7 +253,7 @@ tracelite/
 ├── .gitignore
 ├── pubspec.yaml                 package metadata + peer dependencies
 ├── doc/                         design specs + per-spec feedback
-├── tools/                       spans.yaml + generator
+├── tool/                       spans.yaml + generator
 ├── native/                      C runtime + shim + generated header
 ├── lib/src/                     trace decoder, peer harness, generated Dart constants
 ├── example/                     example consumer programs
@@ -269,10 +283,11 @@ A clear-eyed accounting. Designed ≠ proven.
 | Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
 | Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
 | Benchmark decisions are machine-gated | ✓ proven | `tracelite decision` over compare JSON and suite manifests, command tests for accepted/rejected/inconclusive outcomes |
+| Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader workload noise | `tracelite calibrate-policy` produces policy artifacts and strict history validation; a ceiling-capped resqlite measured-elapsed release scope passes on the 5-run history, while broader diagnostic metrics and two micro workloads remain too noisy |
 | Benchmark artifacts can power downstream dashboards without tracelite UI | ✓ proven | `tracelite export-graph-data` emits graphable datasets from suite, decision, and workload-summary inputs |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
-| Visualizer is implementable | ✗ designed only | no visualizer code exists |
-| Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, and outlier reporting exist; still needs calibration on real production-sized artifact history |
+| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `flutter test`, `flutter analyze`, and `flutter build macos` pass |
+| Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux LD_PRELOAD shim works | ✗ designed only | macOS-only validation today |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
@@ -590,7 +605,13 @@ Work:
   dispatch, worker handling, stream invalidation, decode, and SQLite C spans.
 - Improve counter/gauge reports for semantic resqlite signals.
 - Add trace export paths for external inspection, likely Perfetto first.
-- Build a visualizer after the query/artifact layer is stable.
+- Done first slice: desktop-first Flutter visualizer in `tool/visualizer_app`
+  opens raw `.tlt-region` traces, compare artifacts, suite manifests, decision
+  artifacts, workload summaries, and graph-data directories. It renders a
+  workspace browser, trace timeline, span aggregation table, peer-comparison
+  table, graph-data validation rows, and workload tables.
+- Add true visible-range query reaggregation after the initial custom timeline
+  and table views have settled.
 - Consider stack sampling for CPU attribution only after wall/span attribution
   is solid.
 
@@ -661,7 +682,7 @@ Dart's `Stopwatch` doesn't promise the same epoch or backing clock as the native
 
 ### 6. Schema generator is load-bearing
 
-After one review pass, span IDs in `aggregator-api.md` examples disagreed with `span-registry.md`. The fix wasn't more careful editing — it was making spec drift mechanically impossible by deriving everything from `tools/spans.yaml`. CI's `--check` mode is the load-bearing protection. **Never edit generated files by hand; the generator overwrites them on next run.**
+After one review pass, span IDs in `aggregator-api.md` examples disagreed with `span-registry.md`. The fix wasn't more careful editing — it was making spec drift mechanically impossible by deriving everything from `tool/spans.yaml`. CI's `--check` mode is the load-bearing protection. **Never edit generated files by hand; the generator overwrites them on next run.**
 
 ### 7. CPU attribution, not "wall attribution"
 
@@ -693,10 +714,10 @@ If you're a new contributor, future-self after a break, or an LLM session contin
 
 ```bash
 # Regenerate from spans.yaml after editing
-dart run tools/generate.dart
+dart run tool/generate.dart
 
 # Verify generated files match spans.yaml (CI-shape check)
-dart run tools/generate.dart --check
+dart run tool/generate.dart --check
 
 # Build the native runtime + test_producer
 cc -std=c11 -O2 -Wall -Wextra -Inative \
@@ -727,7 +748,7 @@ dart run bin/tracelite.dart suite \
 
 ### Common gotchas
 
-- **Generated files** (`*.g.dart`, `*.g.h`, `*.generated.md`, `*.appendix.md`) regenerate on every `dart run tools/generate.dart`. Hand edits are lost. Edit `tools/spans.yaml` and the generator instead.
+- **Generated files** (`*.g.dart`, `*.g.h`, `*.generated.md`, `*.appendix.md`) regenerate on every `dart run tool/generate.dart`. Hand edits are lost. Edit `tool/spans.yaml` and the generator instead.
 - **Ring data words must be a power of 2.** The producer's `& mask` math depends on it. The smoke test caught this once; the runtime header docs it.
 - **macOS `-Wl,-reexport-lsqlite3`** is the load-bearing flag for the shim. Without it, the shim only exposes explicitly wrapped symbols and `package:sqlite3` fails on first dlsym for an unwrapped function.
 - **resqlite needs embedded tracing, not dynamic interposition.** Its native asset compiles sqlite3mc into `libresqlite`, so the trace build renames selected sqlite3mc API symbols to `tlt_sqlite3_*` and embeds tracelite's wrappers under the public `sqlite3_*` names.
@@ -769,7 +790,7 @@ dart run bin/tracelite.dart suite \
 
 | Path | Purpose | Lines |
 |---|---|---|
-| `README.md` | Project pitch | 87 |
+| `README.md` | Project pitch | 106 |
 | `PLAN.md` | This file | — |
 | `LICENSE` | MIT | 21 |
 | `pubspec.yaml` | Package metadata + peer dependencies | 31 |
@@ -779,11 +800,13 @@ dart run bin/tracelite.dart suite \
 | `doc/span-registry.generated.md` | (generated) full schemas | 69 |
 | `doc/aggregator-api.md` | Query API spec | 866 |
 | `doc/visualizer-binding.md` | Reactive UI binding spec | 904 |
+| `doc/visualizer-product-design.md` | Desktop-first visualizer product design | 334 |
+| `tool/visualizer_app/` | Flutter desktop visualizer app | — |
 | `doc/peer-interface-contract.md` | `SqliteInterface` + scenarios + adapters | 798 |
 | `doc/format-spec.appendix.md` | (generated) compact ID table | 51 |
 | `doc/*.feedback.md` (6 files) | External review history | ~5,800 total |
-| `tools/spans.yaml` | SOURCE OF TRUTH for span IDs | 466 |
-| `tools/generate.dart` | Schema generator | 359 |
+| `tool/spans.yaml` | SOURCE OF TRUTH for span IDs | 466 |
+| `tool/generate.dart` | Schema generator | 359 |
 | `lib/src/builtin_spans.g.dart` | (generated) Dart constants | 198 |
 | `native/tracelite_runtime.h` | Runtime header (region, registry, ring layouts) | 167 |
 | `native/tracelite_runtime.c` | Runtime implementation | 269 |
@@ -796,9 +819,9 @@ dart run bin/tracelite.dart suite \
 | `test/cli_report_test.dart` | CLI markdown report smoke test | 45 |
 
 Total hand-written code: ~3,200 LOC.
-Total design specs: ~3,700 LOC of markdown.
+Total design specs: ~4,000 LOC of markdown.
 Total review feedback: ~5,800 LOC of markdown (preserved as *.feedback.md).
 
 ---
 
-*Last updated: 2026-05-09 — after the production benchmark/profiling roadmap was expanded around resqlite semantic parity, workload coverage, statistical gates, profiling depth, and portability.*
+*Last updated: 2026-05-12 — after the visualizer product direction moved to a desktop-first inspector for trace inspection, peer comparison, experiment review, and artifact forensics.*

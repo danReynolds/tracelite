@@ -1,6 +1,6 @@
 // GENERATED FILE — DO NOT EDIT.
-// Source: tools/spans.yaml
-// Regenerate with: dart run tools/generate.dart
+// Source: tool/spans.yaml
+// Regenerate with: dart run tool/generate.dart
 
 // ignore_for_file: constant_identifier_names, public_member_api_docs
 

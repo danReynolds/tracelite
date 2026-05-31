@@ -3,6 +3,8 @@
 .packages
 build/
 pubspec.lock
+pubspec_overrides.yaml
+!tool/visualizer_app/pubspec.lock
 
 # Flutter (visualizer)
 .flutter-plugins

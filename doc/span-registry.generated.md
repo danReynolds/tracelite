@@ -1,6 +1,6 @@
 # Span registry — full schemas
 
-GENERATED FROM `tools/spans.yaml` — do not edit by hand.
+GENERATED FROM `tool/spans.yaml` — do not edit by hand.
 
 ## tracelite
 

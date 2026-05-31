@@ -4,20 +4,20 @@
 **Companion to:** `format-spec.md`, `runtime-protocol.md`
 **Audience:** Design review for the cross-library SQLite tracing package
 
-The format spec reserves 16-bit span IDs across four ranges. This doc defines the *rules* for those ranges (allocation, stability, naming) and points at the **single source of truth** for span definitions: [`tools/spans.yaml`](../tools/spans.yaml).
+The format spec reserves 16-bit span IDs across four ranges. This doc defines the *rules* for those ranges (allocation, stability, naming) and points at the **single source of truth** for span definitions: [`tool/spans.yaml`](../tool/spans.yaml).
 
 ## What's where
 
 | Artifact | Maintained how |
 |---|---|
-| **`tools/spans.yaml`** | **Hand-authored. The source of truth.** |
-| `tools/generate.dart` | Hand-authored. The generator that reads `spans.yaml`. |
+| **`tool/spans.yaml`** | **Hand-authored. The source of truth.** |
+| `tool/generate.dart` | Hand-authored. The generator that reads `spans.yaml`. |
 | `lib/src/builtin_spans.g.dart` | Generated. Dart constants. |
 | `native/builtin_spans.g.h` | Generated. C `#define`s. |
 | `doc/format-spec.appendix.md` | Generated. Compact ID table. |
 | `doc/span-registry.generated.md` | Generated. Full per-category schemas with arg lists. |
 
-CI runs `dart run tools/generate.dart --check`. If any generated file is out of date relative to `spans.yaml`, CI fails. This means span IDs, names, and arg schemas cannot drift across docs and code — they all derive from one file.
+CI runs `dart run tool/generate.dart --check`. If any generated file is out of date relative to `spans.yaml`, CI fails. This means span IDs, names, and arg schemas cannot drift across docs and code — they all derive from one file.
 
 ## 1. ID space allocation
 
@@ -132,8 +132,8 @@ User-span schemas use the same `begin_args` / `end_args` / `instant_args` model 
 
 ## 6. Adding a new built-in span
 
-1. Edit [`tools/spans.yaml`](../tools/spans.yaml). Pick a free ID in the appropriate sub-range; declare `begin_args`, `end_args`, or `instant_args` per the call's reality.
-2. Run `dart run tools/generate.dart`. This regenerates the four output files.
+1. Edit [`tool/spans.yaml`](../tool/spans.yaml). Pick a free ID in the appropriate sub-range; declare `begin_args`, `end_args`, or `instant_args` per the call's reality.
+2. Run `dart run tool/generate.dart`. This regenerates the four output files.
 3. Commit `spans.yaml`, the generated files, and any C/Dart code that emits the new span.
 4. CI's `--check` step verifies all generated files are consistent with `spans.yaml` on every PR.
 

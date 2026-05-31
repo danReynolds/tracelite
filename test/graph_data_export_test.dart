@@ -230,6 +230,60 @@ void main() {
     );
     expect(peerSummary, hasLength(2));
   });
+
+  test('export-graph-data expands suite-history manifests', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-graph-data-suite-history-test-',
+    );
+    addTearDown(() => _deleteTemp(tempDir));
+
+    final runDir = Directory('${tempDir.path}/run-001')..createSync();
+    final compare = '${runDir.path}/compare.json';
+    final manifest = '${runDir.path}/manifest.json';
+    final history = '${tempDir.path}/history.json';
+    final outDir = '${tempDir.path}/graph-data';
+    _writeCompare(compare, scenario: 'history-scenario');
+    _writeManifest(manifest, compare);
+    _writeJson(history, {
+      'schema': 'tracelite.suite_history.v1',
+      'generated_at': '2026-05-14T00:00:00Z',
+      'profile': 'production',
+      'requested_runs': 1,
+      'successful_runs': 1,
+      'runs': [
+        {
+          'run': 1,
+          'name': 'run-001',
+          'manifest': manifest,
+          'status': 'ok',
+        },
+      ],
+    });
+
+    final export = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'export-graph-data',
+        '--suite-history=$history',
+        '--out=$outDir',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      export.exitCode,
+      0,
+      reason: 'export failed.\nstdout:\n${export.stdout}\n'
+          'stderr:\n${export.stderr}',
+    );
+
+    final peerSummary = _rows('$outDir/peer-summary.json');
+    expect(peerSummary.single['scenario'], 'history-scenario');
+    final index = _readJson('$outDir/index.json');
+    final sources = index['sources']! as List<Object?>;
+    expect(sources.single, containsPair('parent_path', manifest));
+  });
 }
 
 void _writeCompare(String path, {String scenario = 'synthetic'}) {

@@ -782,7 +782,7 @@ The C and Dart sides of the protocol must agree byte-for-byte on:
 | Ring header size = 64 bytes | `tracelite_runtime.h` `_Static_assert` | Same. |
 | Endianness of multi-byte fields | Region header `endianness` byte | Test reads back fields the C side wrote and compares. |
 | Atomic widths and alignment | `<stdatomic.h>` types in C; `dart:ffi` widths on Dart | Smoke test produces events from C, parses from Dart, checks values match. |
-| Span IDs and arg schemas | `tools/spans.yaml` → generator | CI's `dart run tools/generate.dart --check`. |
+| Span IDs and arg schemas | `tool/spans.yaml` → generator | CI's `dart run tool/generate.dart --check`. |
 
 These checks live in `test/runtime_smoke_test.dart` and the C `_Static_assert`s. Any divergence fails build / test before any release goes out. The smoke test is the load-bearing protection here — it's the only test that exercises both sides of the runtime simultaneously.
 

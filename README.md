@@ -1,6 +1,6 @@
 # tracelite
 
-> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, and peer harness are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for baseline plus initial resqlite-derived feed-paging, sync-burst, chat-sim, and large-working-set scenarios. Capability-aware reactive and diagnostic scenarios now report unsupported peers explicitly instead of forcing every library into the same feature model.
+> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, peer harness, and first desktop visualizer slice are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for baseline plus initial resqlite-derived feed-paging, sync-burst, chat-sim, and large-working-set scenarios when the local trace hook is available. Capability-aware reactive and diagnostic scenarios now report unsupported peers explicitly instead of forcing every library into the same feature model.
 
 Cross-library SQLite profiling and tracing for the Dart ecosystem. Point it at any Dart program that uses SQLite — Resqlite, drift, sqlite_async, the raw `sqlite3` package, anything — and see the full call timeline: into FFI, through SQLite's C internals, and back. On a single shared clock, with no instrumentation in the libraries being measured.
 
@@ -41,7 +41,7 @@ tracelite is a profiling system designed around three observations about Dart's 
 │       ┌──────────┬──────────┼──────────┬───────────┐                      │
 │       ▼          ▼          ▼          ▼           ▼                      │
 │    JSONL     Markdown   Diff/CI    Visualizer   Perfetto                  │
-│    on disk    report     check     (Flutter web) export                   │
+│    on disk    report     check     (desktop)    export                    │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,10 +49,25 @@ The C shim is a drop-in `libsqlite3` replacement that wraps SQLite C API calls w
 
 Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Libraries can register lightweight vocabularies of span/counter/gauge names; `package:tracelite/resqlite.dart` provides the resqlite vocabulary plus helpers for decode metrics, stream invalidation metrics, dispatcher pressure, and diagnostics so resqlite can emit semantic facts without owning report or metadata plumbing. Optional stack sampling adds per-Dart-package attribution on top.
 
-The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts with confidence-interval plus non-parametric repetition gates, turn baseline/candidate artifacts into accepted/rejected/inconclusive decisions, export graph-ready JSON for downstream dashboards, run CI/production benchmark suites, and calibrate recorder overhead.
+The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts with confidence-interval plus non-parametric repetition gates, turn baseline/candidate artifacts into accepted/rejected/inconclusive decisions, export graph-ready JSON for downstream dashboards, run CI/production benchmark suites, calibrate recorder overhead, and calibrate benchmark decision policy from artifact history.
 Graph-data exports are schema-validated before the command succeeds, and
 `tracelite validate-graph-data <dir>` can re-check a bundle before publishing it
 to a downstream site.
+`tracelite calibrate-policy --history=<manifest-or-dir>` scans compare and suite
+history, recommends repetition counts, primary/guardrail thresholds, and CV noise
+gates, and can fail closed with `--strict=true` when the history is too thin for
+production use. Ceiling flags such as `--threshold-ceiling-percent=50` reject
+policies whose recommended gates are too loose to be useful.
+`--peers` and `--scenarios` scope the release gate explicitly, while broad suite
+artifacts can still retain unsupported peers, optional workloads, and diagnostic
+metrics for investigation.
+`tracelite decision --policy=<policy-calibration.json>` and
+`tracelite diff --policy=<policy-calibration.json>` then apply those calibrated
+thresholds; non-ready policy artifacts are rejected unless explicitly allowed for
+exploratory analysis.
+`tracelite suite-history --profile=production --runs=5` automates that evidence
+loop by running independent suites into timestamped run directories, writing a
+history manifest, and generating the policy-calibration JSON/markdown sidecars.
 
 The peer harness has a narrow common SQL lane and optional capability lanes. Shared SQL scenarios run across all peers; reactive scenarios currently run on `sqlite_async` and `resqlite`; the resqlite diagnostics scenario records semantic gauges from `Database.diagnostics()`. Peers that do not support a scenario are marked `unsupported` in the report and JSON artifact.
 
@@ -66,24 +81,31 @@ The peer harness has a narrow common SQL lane and optional capability lanes. Sha
 
 ## Status
 
-The design corpus is in `doc/`, and the implementation is present in `native/`, `tools/`, `lib/src/`, `bin/`, `example/`, and `test/`. `PLAN.md` is the canonical implementation and status tracker.
+The design corpus is in `doc/`, and the implementation is present in `native/`, `tool/`, `lib/src/`, `bin/`, `example/`, and `test/`. `PLAN.md` is the canonical implementation and status tracker.
 
 | Spec | Status | What it defines |
 |---|---|---|
 | [Trace format](doc/format-spec.md) | Draft v0.1 | Wire format, file format, JSONL archival, tags, tracks, spans, args, correlation IDs |
 | [Aggregator API](doc/aggregator-api.md) | Draft v0.1 | Loading, selection, filtering, aggregation, grouping, chains, attribution, diff, live queries |
 | [Visualizer binding](doc/visualizer-binding.md) | Draft v0.1 | Probes, scope, derivation, frame coalescing, isolate offload, Flutter widget integration |
+| [Visualizer product design](doc/visualizer-product-design.md) | Draft v0.1 | Desktop-first inspector, peer comparison, experiment review, artifact forensics, implementation milestones |
 | [Runtime mmap protocol](doc/runtime-protocol.md) | Draft v0.1 | Cross-language shared buffer, slot reservation, drainage, crash safety, lifecycle |
 | [Span ID registry](doc/span-registry.md) | Draft v0.2 | Reserved span IDs across SQLite C, Dart recorder, FFI bridge, user ranges |
 | [Peer interface contract](doc/peer-interface-contract.md) | Draft v0.1 | The `SqliteInterface` API, scenarios, adapters, fairness rules, standard scenario library |
 
 The latest production benchmark replacement audit is in
 [`doc/production-benchmark-readiness.md`](doc/production-benchmark-readiness.md).
+The acceptance gate for making tracelite resqlite's sole regular profiling
+framework is in
+[`doc/resqlite-sole-profiling-gate.md`](doc/resqlite-sole-profiling-gate.md).
 The decision standard for accepting, rejecting, or marking experiments
 inconclusive is in
 [`doc/profiling-decision-standard.md`](doc/profiling-decision-standard.md).
 The graph-data contract for downstream dashboards is in
 [`doc/graph-data-export.md`](doc/graph-data-export.md).
+The desktop visualizer app lives in [`tool/visualizer_app`](tool/visualizer_app)
+and can be launched in development with
+`dart run bin/tracelite.dart visualize <path>`.
 The resqlite deletion/parity gate is tracked in
 [`doc/resqlite-replacement-checklist.md`](doc/resqlite-replacement-checklist.md).
 

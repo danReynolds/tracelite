@@ -1,11 +1,17 @@
 # resqlite profiling replacement checklist
 
-Status: production-readiness checklist, 2026-05-09
+Status: production-readiness checklist, updated 2026-05-31
 
 This is the deletion gate for moving profiling weight out of resqlite and into
 tracelite. The goal is not to delete every resqlite signal. The goal is to
 delete report/storage/timing machinery from resqlite while keeping only narrow
 semantic emitters and diagnostics that tracelite cannot infer generically.
+
+This checklist is narrower than accepting tracelite as resqlite's sole regular
+profiling framework. Sole-framework acceptance is tracked separately in
+[`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md) and also
+requires current production calibration, real baseline/candidate validation,
+and reproducible PR evidence.
 
 ## Replacement buckets
 
@@ -72,12 +78,11 @@ the same workload parameters.
   storage, workload-scoped span summaries, low-value wall-time wrappers, and
   Timeline-style worker markers once the resqlite PR adopts the tracelite
   report/export path.
-- Not ready to delete yet: old profile JSON/diff compatibility,
-  `ProfiledDatabase` sample storage, custom many-streams fanout-delta JSON, and
-  RSS memory capture. Tracelite now captures the underlying spans, diagnostics,
-  decode counters, stream invalidation counters, and dispatcher counters, but
-  it still needs an export that matches the fields consumed by resqlite
-  experiments.
+- Not ready to delete yet without a final migration PR: old profile JSON/diff
+  call sites, `ProfiledDatabase` sample storage, custom many-streams
+  fanout-delta JSON, and RSS memory capture. Tracelite now captures and exports
+  compatible summaries for the current surfaces, but resqlite still needs to
+  consume those artifacts directly before the old code is removed.
 - Not a deletion target: benchmark workload definitions, public diagnostics,
   native diagnostics helpers, and the trace-enabled embedded SQLite build hook.
 
@@ -116,8 +121,13 @@ Summary:
 
 ## Current deletion position
 
-The parity gate is now satisfied for the current resqlite profile surfaces.
-The next PR slice can wire resqlite's profile workflow to consume
-`tracelite workload-summary`, then delete or archive the old resqlite-local
-report/diff/storage code that is now covered. Keep the workload definitions,
-public diagnostics API, native diagnostics helpers, and tiny semantic emitters.
+The parity gate is satisfied for the current resqlite profile surfaces, so the
+next PR slice can wire resqlite's profile workflow to consume `tracelite
+workload-summary`, then delete or archive the old resqlite-local
+report/diff/storage code that is now covered. That is not the same as declaring
+tracelite the sole regular profiling framework: the production release gate now
+passes, the routine no-regression decision path has been validated, and a known
+read-path regression was rejected through the same artifacts. PR #109 should
+stay draft until resqlite pins a stable tracelite source state. Keep the
+workload definitions, public diagnostics API, native diagnostics helpers, and
+tiny semantic emitters.

@@ -1,6 +1,6 @@
 # tracelite profiling decision standard
 
-Status: first implementation-backed standard, 2026-05-10
+Status: implementation-backed standard, updated 2026-05-31
 
 This document defines how tracelite artifacts should be used to accept,
 reject, or mark performance experiments as inconclusive. The standard applies
@@ -14,6 +14,8 @@ Every production-quality experiment should preserve:
 - The baseline compare artifact or suite manifest.
 - The candidate compare artifact or suite manifest.
 - The `tracelite decision` JSON artifact.
+- The `tracelite calibrate-policy` artifact or the named policy values used for
+  thresholds, repetitions, and noise gates.
 - The markdown decision report.
 - The raw `.tlt-region` files when the run includes external workload traces
   such as resqlite profile regions.
@@ -33,10 +35,8 @@ dart run bin/tracelite.dart decision \
   --candidate=build/candidate/manifest.json \
   --expect=improvement \
   --primary-peer=resqlite \
-  --primary-metric=elapsed_ns \
-  --primary-threshold-percent=5 \
-  --max-regression-percent=3 \
-  --max-cv-percent=15 \
+  --primary-metric=measured_elapsed_ns \
+  --policy=build/policy-calibration.json \
   --out-json=build/decision.json \
   > build/decision.md
 ```
@@ -49,12 +49,57 @@ dart run bin/tracelite.dart decision \
   --candidate=build/pr/manifest.json \
   --expect=no_regression \
   --primary-peer=resqlite \
-  --primary-metric=elapsed_ns
+  --primary-metric=measured_elapsed_ns \
+  --guardrail-metrics=measured_elapsed_ns \
+  --policy=build/policy-calibration.json
 ```
 
 The command accepts either single `tracelite.compare.v1` artifacts or
 `tracelite.suite.v1` manifests. It exits `0` only for an accepted decision.
 Rejected and inconclusive decisions exit non-zero.
+
+Before promoting a new production benchmark lane, calibrate the policy from
+artifact history:
+
+```bash
+dart run bin/tracelite.dart suite-history \
+  --profile=production \
+  --runs=5 \
+  --out-dir=build/tracelite-production-history
+```
+
+Or calibrate an existing history directory explicitly:
+
+```bash
+dart run bin/tracelite.dart calibrate-policy \
+  --history=build/tracelite-production-history \
+  --metrics=measured_elapsed_ns \
+  --peers=resqlite \
+  --scenarios=chat-sim,feed-paging,large-working-set,sync-burst \
+  --within-run-noise-percentile=0.75 \
+  --threshold-ceiling-percent=50 \
+  --max-outlier-percent=10 \
+  --max-run-outlier-percent=20 \
+  --strict=true \
+  --out-json=build/policy-calibration.json \
+  > build/policy-calibration.md
+```
+
+Strict mode requires enough independent historical compare artifacts per covered
+scenario/peer/metric group. A single compare artifact with many repetitions is
+not enough to prove run-to-run stability. Ceiling flags such as
+`--threshold-ceiling-percent`, `--guardrail-ceiling-percent`, and
+`--noise-gate-ceiling-percent` prevent a policy from becoming "ready" merely by
+accepting thresholds that are too loose to catch meaningful regressions.
+`--peers` and `--scenarios` make the release-gate scope explicit; unselected
+peers, optional workloads, and diagnostic timing metrics should still be kept in
+the suite artifacts, but they should not silently widen the release gate.
+`suite-history` exposes the same separation as `--policy-peers` and
+`--policy-scenarios` so the suite can collect broad evidence while calibrating a
+specific release policy.
+`decision` and `diff` reject a non-ready policy artifact by default; pass
+`--allow-unready-policy=true` only for exploratory analysis. Explicit threshold
+flags still override policy values for one-off checks.
 
 ## Gates
 
@@ -93,6 +138,13 @@ Guardrail metrics default to:
 Guardrails reject clear regressions larger than `--max-regression-percent`.
 Noisy or undersampled guardrails make the decision inconclusive. Unsupported or
 missing optional guardrail metrics are skipped; missing primary evidence is not.
+
+The default CLI guardrail list is intentionally broad for exploratory
+experiments. A release gate should only use guardrail metrics that are covered
+by a ready policy artifact. For resqlite's current release lane, prefer
+`benchmark/decide_tracelite.dart`; it pins primary and guardrail checks to
+`measured_elapsed_ns` for the calibrated release scenarios while lower-level
+timing totals remain diagnostic evidence.
 
 ## Outcomes
 

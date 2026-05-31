@@ -2,7 +2,7 @@
 #
 # This file is the canonical definition of every reserved span ID,
 # every arg schema, and every category. The generator at
-# tools/generate.dart reads this file and emits:
+# tool/generate.dart reads this file and emits:
 #
 #   - lib/src/builtin_spans.g.dart    Dart constants
 #   - native/builtin_spans.g.h        C #defines

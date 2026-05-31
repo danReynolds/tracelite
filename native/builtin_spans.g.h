@@ -1,6 +1,6 @@
 /* GENERATED FILE — DO NOT EDIT. */
-/* Source: tools/spans.yaml */
-/* Regenerate with: dart run tools/generate.dart */
+/* Source: tool/spans.yaml */
+/* Regenerate with: dart run tool/generate.dart */
 
 #ifndef TRACELITE_BUILTIN_SPANS_G_H
 #define TRACELITE_BUILTIN_SPANS_G_H
