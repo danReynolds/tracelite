@@ -50,6 +50,7 @@ void main() {
     expect(find.text('Pan'), findsOneWidget);
     expect(find.text('Preview'), findsOneWidget);
     expect(find.text('Timeline'), findsOneWidget);
+    expect(find.byIcon(Icons.center_focus_strong), findsOneWidget);
     expect(find.text('No span selected'), findsOneWidget);
 
     await tester.tap(find.text('Compare'));
@@ -86,6 +87,15 @@ void main() {
     expect(find.text('Span Index'), findsOneWidget);
     expect(find.text('12000 matches'), findsOneWidget);
 
+    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Visible Span Aggregation', skipOffstage: false),
+      findsOneWidget,
+    );
+
+    await tester.drag(find.byType(ListView).last, const Offset(0, 700));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
     await tester.pumpAndSettle();
     expect(find.text('sqlite3_step'), findsWidgets);

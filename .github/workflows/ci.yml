@@ -32,7 +32,7 @@ jobs:
 
       - name: Verify generated span outputs
         working-directory: tracelite
-        run: dart run tools/generate.dart --check
+        run: dart run tool/generate.dart --check
 
       - name: Build native runtime and SQLite shim
         working-directory: tracelite

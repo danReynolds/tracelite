@@ -386,6 +386,7 @@ class _TracePageState extends State<TracePage> {
   final TextEditingController _spanFilterController = TextEditingController();
   int _selectedIndex = 0;
   TraceSpan? _selectedSpan;
+  _VisibleRange? _visibleRange;
   String _spanFilter = '';
 
   @override
@@ -402,6 +403,7 @@ class _TracePageState extends State<TracePage> {
     }
     if (oldWidget.workspace != widget.workspace) {
       _selectedSpan = null;
+      _visibleRange = null;
     }
   }
 
@@ -410,6 +412,13 @@ class _TracePageState extends State<TracePage> {
     final traces = widget.workspace.traces;
     final trace = traces.isEmpty ? null : traces[_selectedIndex];
     final matchingSpans = trace == null ? <TraceSpan>[] : _matchingSpans(trace);
+    final visibleRange = trace == null ? null : _visibleRangeFor(trace);
+    final visibleSpans = trace == null || visibleRange == null
+        ? <TraceSpan>[]
+        : _visibleSpans(trace, visibleRange);
+    final visibleGroups = trace == null
+        ? <SpanGroupStats>[]
+        : _spanGroupsFor(trace, visibleSpans);
     return _PageScaffold(
       title: 'Trace Inspector',
       subtitle: trace?.path ?? 'Open a .tlt-region trace to inspect spans',
@@ -433,6 +442,7 @@ class _TracePageState extends State<TracePage> {
                       setState(() {
                         _selectedIndex = index;
                         _selectedSpan = null;
+                        _visibleRange = null;
                       });
                     },
                   ),
@@ -516,6 +526,7 @@ class _TracePageState extends State<TracePage> {
                       onSelected: (span) {
                         setState(() => _selectedSpan = span);
                       },
+                      onViewportChanged: _handleViewportChanged,
                     ),
                   ),
                 ),
@@ -537,8 +548,8 @@ class _TracePageState extends State<TracePage> {
                 ),
                 const SizedBox(height: 16),
                 _Section(
-                  title: 'Visible Span Aggregation',
-                  child: SpanAggregationTable(groups: trace.spanGroups),
+                  title: 'Visible Span Aggregation (${visibleSpans.length})',
+                  child: SpanAggregationTable(groups: visibleGroups),
                 ),
               ],
             ),
@@ -561,6 +572,60 @@ class _TracePageState extends State<TracePage> {
         });
     return spans;
   }
+
+  _VisibleRange _visibleRangeFor(TraceDocument trace) {
+    final full = _fullTraceRange(trace);
+    final current = _visibleRange;
+    if (current == null) return full;
+    final start = current.startNs.clamp(full.startNs, full.endNs - 1).toInt();
+    final end = current.endNs.clamp(start + 1, full.endNs).toInt();
+    return _VisibleRange(start, end);
+  }
+
+  void _handleViewportChanged(int startNs, int endNs) {
+    if (!mounted) return;
+    final current = _visibleRange;
+    if (current != null &&
+        current.startNs == startNs &&
+        current.endNs == endNs) {
+      return;
+    }
+    setState(() {
+      _visibleRange = _VisibleRange(startNs, endNs);
+    });
+  }
+
+  List<TraceSpan> _visibleSpans(
+    TraceDocument trace,
+    _VisibleRange visibleRange,
+  ) {
+    return trace.completeSpans.where((span) {
+      final end = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+      return span.startNs < visibleRange.endNs && end > visibleRange.startNs;
+    }).toList();
+  }
+
+  List<SpanGroupStats> _spanGroupsFor(
+    TraceDocument trace,
+    Iterable<TraceSpan> spans,
+  ) {
+    return spans
+        .groupStatsByType(spanNames: trace.trace.spanNames)
+        .where((group) => group.stats.count > 0)
+        .toList()
+      ..sort((a, b) {
+        final byTotal = b.stats.totalNs.compareTo(a.stats.totalNs);
+        if (byTotal != 0) return byTotal;
+        return a.spanName.compareTo(b.spanName);
+      });
+  }
+}
+
+final class _VisibleRange {
+  const _VisibleRange(this.startNs, this.endNs);
+
+  final int startNs;
+  final int endNs;
 }
 
 class ComparePage extends StatefulWidget {
@@ -777,26 +842,36 @@ int _traceStartNs(TraceDocument trace) {
   return events.isEmpty ? 0 : events.first.timestampNs;
 }
 
+_VisibleRange _fullTraceRange(TraceDocument trace) {
+  final start = _traceStartNs(trace);
+  return _VisibleRange(start, start + math.max(1, trace.durationNs));
+}
+
 class TraceTimeline extends StatefulWidget {
   const TraceTimeline({
     super.key,
     required this.trace,
     required this.selected,
     required this.onSelected,
+    required this.onViewportChanged,
   });
 
   final TraceDocument trace;
   final TraceSpan? selected;
   final ValueChanged<TraceSpan?> onSelected;
+  final void Function(int startNs, int endNs) onViewportChanged;
 
   @override
   State<TraceTimeline> createState() => _TraceTimelineState();
 }
 
 class _TraceTimelineState extends State<TraceTimeline> {
+  static const double _minimumFocusedSpanPixels = 18;
+
   TraceSpan? _hoveredSpan;
   late int _viewStartNs;
   late int _viewEndNs;
+  double _lastTimelineWidth = 1000;
 
   @override
   void initState() {
@@ -812,7 +887,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
       _fitToTrace(notify: false);
     } else if (!identical(oldWidget.selected, widget.selected) &&
         widget.selected != null) {
-      _ensureSpanVisible(widget.selected!);
+      _focusSpan(widget.selected!);
     }
   }
 
@@ -829,6 +904,8 @@ class _TraceTimelineState extends State<TraceTimeline> {
               ? '${trace.spans.length} spans'
               : trace.spanName(activeSpan.spanId),
           onFit: () => _fitToTrace(),
+          canFocusSelection: activeSpan != null,
+          onFocusSelection: _focusActiveSpan,
           onZoomIn: () => _zoomAtFraction(0.5, 0.55),
           onZoomOut: () => _zoomAtFraction(0.5, 1.8),
         ),
@@ -848,6 +925,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
+              _lastTimelineWidth = constraints.maxWidth;
               final size = Size(constraints.maxWidth, constraints.maxHeight);
               return DecoratedBox(
                 decoration: BoxDecoration(
@@ -932,6 +1010,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
 
     if (notify) {
       setState(update);
+      widget.onViewportChanged(_traceStartNs, _traceEndNs);
     } else {
       update();
     }
@@ -948,11 +1027,12 @@ class _TraceTimelineState extends State<TraceTimeline> {
   }
 
   void _zoomAtFraction(double fraction, double factor) {
-    final leftGutter = _timelineLeftGutter(1000);
-    final timelineWidth = _timelineWidthFor(1000);
+    final width = _lastTimelineWidth;
+    final leftGutter = _timelineLeftGutter(width);
+    final timelineWidth = _timelineWidthFor(width);
     _zoomAt(
       Offset(leftGutter + timelineWidth * fraction, _timelineTop),
-      1000,
+      width,
       factor,
     );
   }
@@ -992,22 +1072,44 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final maxStart = fullEnd - duration;
     final start = startNs.clamp(fullStart, maxStart).toInt();
     final end = start + duration;
+    if (_viewStartNs == start && _viewEndNs == end) return;
     setState(() {
       _viewStartNs = start;
       _viewEndNs = end;
     });
+    widget.onViewportChanged(start, end);
   }
 
-  void _ensureSpanVisible(TraceSpan span) {
+  void _focusActiveSpan() {
+    final span = widget.selected ?? _hoveredSpan;
+    if (span == null) return;
+    _focusSpan(span, force: true);
+  }
+
+  void _focusSpan(TraceSpan span, {bool force = false}) {
     final endNs = span.endNs ?? span.startNs;
-    if (span.startNs >= _viewStartNs && endNs <= _viewEndNs) return;
     final fullStart = _traceStartNs;
     final fullEnd = _traceEndNs;
     final fullDuration = math.max(1, fullEnd - fullStart);
     final spanDuration = math.max(1, endNs - span.startNs);
+    final timelineWidth = _timelineWidthFor(_lastTimelineWidth);
+    final currentDuration = math.max(1, _viewEndNs - _viewStartNs);
+    final currentVisualWidth = (spanDuration / currentDuration) * timelineWidth;
+    final fullyVisible = span.startNs >= _viewStartNs && endNs <= _viewEndNs;
+    if (!force &&
+        fullyVisible &&
+        currentVisualWidth >= _minimumFocusedSpanPixels) {
+      return;
+    }
+    final targetWindow = math.max(
+      spanDuration,
+      ((spanDuration * timelineWidth) / _minimumFocusedSpanPixels).round(),
+    );
+    final contextWindow = spanDuration * 24;
+    final minWindow = math.max(1000, spanDuration);
     final window = math.min(
       fullDuration,
-      math.max(spanDuration * 12, (fullDuration / 20).round()),
+      math.max(minWindow, math.min(contextWindow, targetWindow)),
     );
     final center = span.startNs + (spanDuration / 2).round();
     _setViewport(center - (window / 2).round(), center + (window / 2).round());
@@ -1069,6 +1171,8 @@ class _TimelineToolbar extends StatelessWidget {
     required this.visibleLabel,
     required this.selectedLabel,
     required this.onFit,
+    required this.canFocusSelection,
+    required this.onFocusSelection,
     required this.onZoomIn,
     required this.onZoomOut,
   });
@@ -1076,6 +1180,8 @@ class _TimelineToolbar extends StatelessWidget {
   final String visibleLabel;
   final String selectedLabel;
   final VoidCallback onFit;
+  final bool canFocusSelection;
+  final VoidCallback onFocusSelection;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
 
@@ -1096,6 +1202,14 @@ class _TimelineToolbar extends StatelessWidget {
             ),
           ),
         ),
+        Tooltip(
+          message: 'Focus selected span',
+          child: IconButton.filledTonal(
+            onPressed: canFocusSelection ? onFocusSelection : null,
+            icon: const Icon(Icons.center_focus_strong),
+          ),
+        ),
+        const SizedBox(width: 6),
         Tooltip(
           message: 'Zoom out',
           child: IconButton.filledTonal(
@@ -1224,6 +1338,10 @@ class _MinimapPainter extends CustomPainter {
       ..color = colorScheme.primary
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
+    final brushHandlePaint = Paint()
+      ..color = colorScheme.primary
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.square;
 
     final laneHeight = math.max(3.0, (size.height - 10) / trackCount);
     const maxMinimapMarks = 12000;
@@ -1264,6 +1382,16 @@ class _MinimapPainter extends CustomPainter {
     );
     canvas.drawRect(brush, brushPaint);
     canvas.drawRect(brush, brushBorderPaint);
+    canvas.drawLine(
+      Offset(brush.left, 8),
+      Offset(brush.left, size.height - 8),
+      brushHandlePaint,
+    );
+    canvas.drawLine(
+      Offset(brush.right, 8),
+      Offset(brush.right, size.height - 8),
+      brushHandlePaint,
+    );
   }
 
   @override
@@ -1607,6 +1735,7 @@ class SpanIndexPanel extends StatelessWidget {
     final visibleRows = spans.take(300).toList();
     final omitted = spans.length - visibleRows.length;
     final colors = Theme.of(context).colorScheme;
+    final tableHeight = math.min(420.0, 42.0 + visibleRows.length * 42.0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1635,49 +1764,54 @@ class SpanIndexPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowHeight: 34,
-            dataRowMinHeight: 34,
-            dataRowMaxHeight: 42,
-            columns: const [
-              DataColumn(label: Text('span')),
-              DataColumn(label: Text('start'), numeric: true),
-              DataColumn(label: Text('duration'), numeric: true),
-              DataColumn(label: Text('track'), numeric: true),
-              DataColumn(label: Text('correlation'), numeric: true),
-              DataColumn(label: Text('args')),
-            ],
-            rows: [
-              for (final (index, span) in visibleRows.indexed)
-                DataRow(
-                  key: ValueKey('span-row-$index'),
-                  selected: identical(span, selected),
-                  onSelectChanged: (_) => onSelected(span),
-                  cells: [
-                    DataCell(
-                      Text(
-                        trace.trace.spanName(span.spanId),
-                        key: ValueKey('span-row-$index-name'),
-                      ),
-                    ),
-                    DataCell(Text(formatNs(_startOffsetNs(span)))),
-                    DataCell(Text(formatNs(span.durationNs))),
-                    DataCell(Text('${span.trackId}')),
-                    DataCell(Text('${span.begin.correlationId ?? '-'}')),
-                    DataCell(
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 340),
-                        child: Text(
-                          _argsSummary(span),
-                          overflow: TextOverflow.ellipsis,
+        SizedBox(
+          height: tableHeight,
+          child: SingleChildScrollView(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowHeight: 34,
+                dataRowMinHeight: 34,
+                dataRowMaxHeight: 42,
+                columns: const [
+                  DataColumn(label: Text('span')),
+                  DataColumn(label: Text('start'), numeric: true),
+                  DataColumn(label: Text('duration'), numeric: true),
+                  DataColumn(label: Text('track'), numeric: true),
+                  DataColumn(label: Text('correlation'), numeric: true),
+                  DataColumn(label: Text('args')),
+                ],
+                rows: [
+                  for (final (index, span) in visibleRows.indexed)
+                    DataRow(
+                      key: ValueKey('span-row-$index'),
+                      selected: identical(span, selected),
+                      onSelectChanged: (_) => onSelected(span),
+                      cells: [
+                        DataCell(
+                          Text(
+                            trace.trace.spanName(span.spanId),
+                            key: ValueKey('span-row-$index-name'),
+                          ),
                         ),
-                      ),
+                        DataCell(Text(formatNs(_startOffsetNs(span)))),
+                        DataCell(Text(formatNs(span.durationNs))),
+                        DataCell(Text('${span.trackId}')),
+                        DataCell(Text('${span.begin.correlationId ?? '-'}')),
+                        DataCell(
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 340),
+                            child: Text(
+                              _argsSummary(span),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
         if (omitted > 0) ...[

@@ -28,9 +28,11 @@ flutter run -d macos -a ../../build/visualizer-demo
 
 - Overview inventories loaded artifacts and load issues.
 - Trace inspects raw `.tlt-region` spans. Use the minimap brush to jump through
-  the run, scroll over the timeline or use `+`/`-` to zoom, drag horizontally to
-  pan, hover a span to preview it, and click a span or span-index row to pin its
-  details.
+  the run, scroll over the timeline or use `+`/`-` to zoom, use the focus
+  button to center a selected or hovered span, drag horizontally to pan, hover a
+  span to preview it, and click a span or span-index row to pin its details.
+  The span index scrolls internally so visible-window aggregation stays close to
+  the timeline while investigating dense traces.
 - Compare ranks peers by measured elapsed time, scenario elapsed time, SQLite
   call volume, and trace health.
 - Artifacts lists the raw trace, suite, decision, workload, and graph-data
