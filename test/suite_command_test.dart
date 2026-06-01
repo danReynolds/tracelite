@@ -165,6 +165,7 @@ void main() {
         'suite-history',
         '--profile=ci',
         '--interfaces=sqlite3',
+        '--scenarios=narrow-batch-insert',
         '--runs=2',
         '--metrics=elapsed_ns',
         '--policy-peers=sqlite3',

@@ -101,6 +101,10 @@ dart run bin/tracelite.dart compare \
 
 # Source-checkout desktop visualizer launcher.
 dart run bin/tracelite.dart visualize build/graph-data
+
+# Source-checkout visualizer readiness check; add --build=host for local
+# release-bundle evidence on the current desktop platform.
+dart run bin/tracelite.dart visualizer-check --build=host
 ```
 
 ## Benchmark Profiles
@@ -148,6 +152,13 @@ behavior.
 For release hygiene, run `dart run tool/publish_check.dart` from a clean commit.
 It validates a clean git archive, so ignored local overrides used for sibling
 checkout testing do not affect the publish dry-run.
+
+For visualizer release hygiene, run
+`dart run bin/tracelite.dart visualizer-check --build=host`. It resolves the
+Flutter app dependencies, runs `flutter analyze`, runs `flutter test`, builds
+the host release bundle, and verifies that the expected desktop artifact exists.
+This proves local app health; signed/notarized distribution is still a separate
+release-packaging step.
 
 ## Architecture
 

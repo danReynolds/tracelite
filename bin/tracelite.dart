@@ -3,7 +3,13 @@ import 'dart:io';
 
 import 'package:tracelite/src/core_cli.dart';
 
-const _peerCommands = {'compare', 'suite', 'suite-history', '_run-peer'};
+const _peerCommands = {
+  'compare',
+  'suite',
+  'suite-history',
+  'visualizer-check',
+  '_run-peer',
+};
 
 Future<void> main(List<String> args) async {
   final root = _checkoutRoot();

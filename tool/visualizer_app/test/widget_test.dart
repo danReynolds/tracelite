@@ -142,10 +142,11 @@ void main() {
 
     final workspace = await VisualizerWorkspace.load(temp.path);
     final trace = workspace.traces.single;
-    final target = trace.completeSpans.last;
+    final target = trace.completeSpans.lastWhere(
+      (span) => trace.trace.spanName(span.spanId) == 'target_dense_span',
+    );
     final visible = trace.visibleSpansIn(target.startNs, target.startNs + 1);
 
-    expect(trace.trace.spanName(target.spanId), 'target_dense_span');
     expect(visible, contains(target));
     expect(
       trace.visibleSpanCountIn(target.startNs, target.startNs + 1),

@@ -30,3 +30,14 @@ be prepared before a suite starts.
 The JSON artifact uses schema `tracelite.doctor.v1` and records every check with
 `ok`, `warn`, or `fail` status plus an action for non-ok checks. Store it next
 to benchmark artifacts when diagnosing CI or machine-specific setup failures.
+
+Doctor only checks whether a Flutter runtime is reachable. To verify the
+visualizer itself, run:
+
+```bash
+dart run bin/tracelite.dart visualizer-check --build=host
+```
+
+That command resolves the visualizer app dependencies, runs `flutter analyze`,
+runs `flutter test`, builds the current host release bundle, and verifies that
+the bundle was produced.

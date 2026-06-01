@@ -43,6 +43,19 @@ flutter run -d macos -a ../../build/visualizer-demo
 
 ## Test
 
+From the repository root:
+
+```bash
+dart run bin/tracelite.dart visualizer-check
+dart run bin/tracelite.dart visualizer-check --build=host
+```
+
+The first command resolves app dependencies, analyzes, and runs the widget/unit
+tests. The second command also builds the release bundle for the current desktop
+host and verifies that the expected artifact exists.
+
+During app development:
+
 ```bash
 flutter analyze
 flutter test

@@ -17,6 +17,7 @@ void main() {
           'stderr:\n${result.stderr}',
     );
     expect(result.stderr.toString(), contains('dart run bin/tracelite.dart'));
+    expect(result.stderr.toString(), contains('visualizer-check'));
   });
 
   test('source-checkout subcommand help exits before command validation',

@@ -24,7 +24,9 @@ trace-health, noise, peer-spread, and bottleneck findings before users drill
 into raw tables.
 
 Production readiness checkpoint: the app is suitable for local developer
-dogfooding and release-mode smoke testing. External distribution still requires
+dogfooding and release-mode smoke testing. `tracelite visualizer-check` resolves
+the Flutter app, runs analyze/tests, and can build plus verify the current host
+release bundle with `--build=host`. External distribution still requires
 signed/notarized packaging and a published release process. The product should
 not be advertised as a hosted dashboard; downstream public pages should continue
 to consume graph-ready JSON rather than embed this local deep-inspection UI.

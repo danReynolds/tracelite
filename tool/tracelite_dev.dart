@@ -34,6 +34,8 @@ Future<void> main(List<String> args) async {
       await _compare(args.skip(1).toList());
     case 'visualize':
       await _visualize(args.skip(1).toList());
+    case 'visualizer-check':
+      await _visualizerCheck(args.skip(1).toList());
     case 'suite':
       await _suite(args.skip(1).toList());
     case 'suite-history':
@@ -925,6 +927,22 @@ Future<void> _visualize(List<String> args) async {
       target,
     ],
     workingDirectory: appDir.path,
+    mode: ProcessStartMode.inheritStdio,
+  );
+  exitCode = await child.exitCode;
+}
+
+Future<void> _visualizerCheck(List<String> args) async {
+  final root = Directory(_checkoutRootPath());
+  final script = File(_joinPath(root.path, 'tool/visualizer_check.dart'));
+  if (!script.existsSync()) {
+    stderr.writeln('missing visualizer check script: ${script.path}');
+    exit(66);
+  }
+  final child = await Process.start(
+    Platform.resolvedExecutable,
+    [script.path, ...args],
+    workingDirectory: root.path,
     mode: ProcessStartMode.inheritStdio,
   );
   exitCode = await child.exitCode;
@@ -1880,6 +1898,13 @@ String _canonicalDirectoryPath(String path) {
   }
 }
 
+String _checkoutRootPath() {
+  if (Platform.script.scheme == 'file') {
+    return File.fromUri(Platform.script).parent.parent.absolute.path;
+  }
+  return Directory.current.absolute.path;
+}
+
 Future<String?> _commandVersion(String executable, List<String> args) async {
   try {
     final result = await Process.run(executable, args);
@@ -2522,6 +2547,8 @@ Never _usage({int exitCode = 64}) {
     '  dart run bin/tracelite.dart visualize [--release|--profile] '
     '<trace-or-artifact-path>',
   );
+  stderr.writeln('  dart run bin/tracelite.dart visualizer-check '
+      '[--flutter=/path/to/flutter] [--build=none|host]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] '
       '[--require-clean-source=true] [--out-json=calibration.json]');
