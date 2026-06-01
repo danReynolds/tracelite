@@ -3,6 +3,7 @@ libsqlite_traced.dylib
 pubspec_overrides.yaml
 tool/visualizer_app/
 tool/visualizer_check.dart
+tool/verify_resqlite_source.dart
 tool/src/
 tool/tracelite_dev.dart
 tools/

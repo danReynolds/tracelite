@@ -337,7 +337,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
-| Linux native-hook shim smoke works | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane; full production peer suite remains macOS-only until broader peers are promoted |
+| Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
 | Windows core artifact surface works | △ CI-configured | `.github/workflows/ci.yml` runs generated-output, analysis, and platform-independent core artifact tests on Windows; native runtime/shim tracing remains unsupported until the runtime is ported off POSIX-only mmap/open/clock APIs |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
 | resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the pinned trace-enabled sibling checkout before peer tests |
@@ -349,10 +349,12 @@ Things validated by build but not runtime:
 - The schema generator's `--check` mode catches drift between `spans.yaml` and
   any of its 4 outputs. `.github/workflows/ci.yml` runs that check, builds the
   macOS runtime/shim, runs analysis/tests, and runs
-  `tracelite suite --profile=ci` against the four-peer matrix. The workflow
-  assumes a sibling `${{ github.repository_owner }}/resqlite` repository because
-  local validation uses `dependency_overrides: resqlite: ../resqlite`; private
-  installs should provide `CROSS_REPO_READ_TOKEN`.
+  `tracelite suite --profile=ci` against the four-peer matrix. The Linux lane
+  builds the `.so` runtime/shim, runs native smoke tests, and runs the same
+  pinned four-peer `ci` suite. The workflow assumes a sibling
+  `${{ github.repository_owner }}/resqlite` repository because local validation
+  uses `dependency_overrides: resqlite: ../resqlite`; private installs should
+  provide `CROSS_REPO_READ_TOKEN`.
 
 ---
 

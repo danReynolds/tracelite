@@ -49,4 +49,18 @@ void main() {
     expect(devCli, contains('--package=none|host'));
     expect(devCli, contains('--require-clean-source=true'));
   });
+
+  test('docs reflect Linux pinned peer suite coverage', () {
+    final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+    final readme = File('README.md').readAsStringSync();
+    final plan = File('PLAN.md').readAsStringSync();
+    final productionReadiness =
+        File('doc/production-benchmark-readiness.md').readAsStringSync();
+
+    expect(workflow, contains('Linux CI benchmark suite'));
+    expect(workflow, contains('--out-dir=build/tracelite-linux-ci-suite'));
+    for (final text in [readme, plan, productionReadiness]) {
+      expect(text, contains('pinned four-peer `ci` suite'));
+    }
+  });
 }

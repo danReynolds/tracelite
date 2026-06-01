@@ -18,10 +18,11 @@ because tracelite's runtime or artifact model depends on resqlite.
 
 This is not a universal, language-agnostic SQLite profiler or a finalized
 multi-package distribution yet. macOS and the Dart SQLite package ecosystem are
-the validated production path. Linux has focused shim smoke coverage for
-`package:sqlite3`; Windows now validates the platform-independent Dart artifact
-surface in CI, but native runtime/shim validation and non-Dart bindings are
-future work.
+the calibrated production path. Linux has native shim smoke coverage and a
+pinned four-peer `ci` suite for the same Dart SQLite lanes, but production
+profile history is still macOS-validated. Windows now validates the
+platform-independent Dart artifact surface in CI, but native runtime/shim
+validation and non-Dart bindings are future work.
 
 ## What It Does
 

@@ -45,36 +45,10 @@ jobs:
 
       - name: Verify resqlite source override
         working-directory: tracelite
-        run: |
-          python3 - <<'PY'
-          import json
-          import pathlib
-          import subprocess
-          import sys
-          import urllib.parse
-
-          expected_sha = 'a2e684c6861980e2fbbbc437dd7a4797ae984f2f'
-          config = json.loads(pathlib.Path('.dart_tool/package_config.json').read_text())
-          packages = {package['name']: package for package in config['packages']}
-          resqlite = packages.get('resqlite')
-          if resqlite is None:
-              sys.exit('resqlite is missing from package_config.json')
-          root_uri = resqlite['rootUri']
-          parsed = urllib.parse.urlparse(root_uri)
-          actual = pathlib.Path(urllib.parse.unquote(parsed.path)).resolve()
-          hook = actual / 'hook' / 'build.dart'
-          if not hook.exists():
-              sys.exit(f'resqlite source {actual} has no hook/build.dart')
-          if 'trace_sqlite' not in hook.read_text():
-              sys.exit(f'resqlite source {actual} does not expose trace_sqlite')
-          sha = subprocess.check_output(
-              ['git', '-C', str(actual), 'rev-parse', 'HEAD'],
-              text=True,
-          ).strip()
-          if sha != expected_sha:
-              sys.exit(f'resqlite resolved to {sha}, expected {expected_sha}')
-          print(f'resqlite source: {actual} @ {sha}')
-          PY
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/verify_resqlite_source.dart
+          --revision=a2e684c6861980e2fbbbc437dd7a4797ae984f2f
 
       - name: Verify generated span outputs
         working-directory: tracelite
@@ -117,6 +91,16 @@ jobs:
     steps:
       - name: Check out tracelite
         uses: actions/checkout@v6.0.2
+        with:
+          path: tracelite
+
+      - name: Check out resqlite sibling
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/resqlite
+          ref: a2e684c6861980e2fbbbc437dd7a4797ae984f2f
+          path: resqlite
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN || github.token }}
 
       - name: Install native dependencies
         run: |
@@ -126,13 +110,32 @@ jobs:
       - name: Set up Dart
         uses: dart-lang/setup-dart@v1
 
+      - name: Pin resqlite sibling dependency
+        working-directory: tracelite
+        run: |
+          cat > pubspec_overrides.yaml <<YAML
+          dependency_overrides:
+            resqlite:
+              path: $GITHUB_WORKSPACE/resqlite
+          YAML
+
       - name: Install dependencies
+        working-directory: tracelite
         run: dart pub get
 
+      - name: Verify resqlite source override
+        working-directory: tracelite
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/verify_resqlite_source.dart
+          --revision=a2e684c6861980e2fbbbc437dd7a4797ae984f2f
+
       - name: Verify generated span outputs
+        working-directory: tracelite
         run: dart run tool/generate.dart --check
 
       - name: Build native runtime and SQLite shim
+        working-directory: tracelite
         run: |
           mkdir -p build
           cc -shared -fPIC -O2 -Inative \
@@ -147,15 +150,25 @@ jobs:
             -o build/test_producer
 
       - name: Analyze
+        working-directory: tracelite
         run: dart analyze
 
       - name: Platform smoke tests
+        working-directory: tracelite
         run: |
           dart test \
             test/runtime_smoke_test.dart \
             test/shim_smoke_test.dart \
             test/native_artifacts_test.dart \
             test/package_boundary_test.dart
+
+      - name: Linux CI benchmark suite
+        working-directory: tracelite
+        run: |
+          dart run bin/tracelite.dart suite \
+            --profile=ci \
+            --interfaces=sqlite3,drift,sqlite_async,resqlite \
+            --out-dir=build/tracelite-linux-ci-suite
 
   windows-core:
     runs-on: windows-2025

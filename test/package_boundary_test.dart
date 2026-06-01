@@ -36,6 +36,7 @@ void main() {
     expect(pubignoreLines, contains('tool/src/'));
     expect(pubignoreLines, contains('tool/tracelite_dev.dart'));
     expect(pubignoreLines, contains('tool/visualizer_check.dart'));
+    expect(pubignoreLines, contains('tool/verify_resqlite_source.dart'));
   });
 
   test('published launcher keeps core commands available', () async {

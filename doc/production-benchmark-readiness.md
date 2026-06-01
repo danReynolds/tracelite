@@ -24,13 +24,14 @@ basic production-gate viability or source reproducibility. The current gap is
 adoption: resqlite needs to finish retiring or preserving old profile-only
 signals under the pinned integration, and Tracelite still needs public
 distribution polish (publishing metadata, signed packaged visualizer builds, and
-Windows native release host validation). Tracelite's own macOS CI pins and
-verifies the trace-enabled resqlite sibling checkout at
+Windows native release host validation). Tracelite's own macOS and Linux CI
+pin and verify the trace-enabled resqlite sibling checkout at
 `a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
 gate cannot accidentally benchmark the pub package. Linux now has a focused
-package:sqlite3 shim smoke lane in CI. Windows now validates the
-platform-independent Dart artifact and core CLI surface in CI, but the full
-production peer suite and native runtime/shim tracing remain macOS-validated.
+package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite in CI. Windows
+now validates the platform-independent Dart artifact and core CLI surface in CI,
+but repeated production-profile history and Windows native runtime/shim tracing
+remain outside the current evidence set.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -63,10 +64,11 @@ The explicit resqlite merge gate is documented in
   one prepared child runner across the selected scenario matrix, and
   `suite-history` forwards the same runner mode into each independent suite
   run.
-- `.github/workflows/ci.yml` now defines the intended macOS CI baseline:
-  generated-span freshness, native runtime/shim build, analysis, tests, and the
-  four-peer `ci` suite. It assumes a sibling resqlite repository checkout and
-  supports `CROSS_REPO_READ_TOKEN` for private installs.
+- `.github/workflows/ci.yml` now defines the intended macOS and Linux CI
+  baseline: generated-span freshness, native runtime/shim build, source-pinned
+  resqlite resolution, analysis/tests, and the four-peer `ci` suite. It assumes
+  a sibling resqlite repository checkout and supports `CROSS_REPO_READ_TOKEN`
+  for private installs.
 - `tracelite calibrate` measures Dart recorder overhead with body-only,
   disabled-recorder, and active-recorder loops.
 - Compare artifacts now include deterministic workload parameters and
@@ -502,14 +504,15 @@ fanout medians.
 
 ### 5. Portability is still macOS-first for the production suite
 
-The production peer suite is still macOS-oriented. The shim path now has a
-platform-aware resolver name and a Linux package:sqlite3 smoke job, which proves
-the basic native-hook loading strategy outside macOS. Windows now has a
+The repeated production peer suite is still macOS-oriented. The shim path now
+has a platform-aware resolver name, a Linux package:sqlite3 smoke job, and a
+Linux four-peer `ci` suite, which proves the native-hook loading strategy and
+source-pinned peer harness outside macOS at CI scale. Windows now has a
 core-artifact CI lane for dependency resolution, generated-output freshness,
 analysis, and platform-independent diff/insight/package-boundary tests. Windows
-native runtime and SQLite substitution, plus full non-macOS production-suite
-evidence, are still required before this can be called production-quality
-across every Dart target.
+native runtime and SQLite substitution, plus full non-macOS production-profile
+history, are still required before this can be called production-quality across
+every Dart target.
 
 ## Recommended next iteration
 
