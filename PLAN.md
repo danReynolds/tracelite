@@ -223,8 +223,8 @@ Run both: `dart test`. Both pass.
   reporting success.
 - `bin/tracelite.dart explain <artifact-or-dir>` reads compare, diff, decision,
   suite, suite-history, and workload-summary artifacts and emits trust,
-  trace-health, noise, peer-spread, and bottleneck findings as Markdown plus
-  optional `tracelite.insights.v1` JSON.
+  trace-health, noise, peer-spread, harness-overhead, and bottleneck findings
+  as Markdown plus optional `tracelite.insights.v1` JSON.
 - `bin/tracelite.dart doctor` checks source layout, generated files, Dart
   dependency resolution, native build artifacts, compiler availability, and the
   visualizer runtime. It prints actionable setup fixes and can write a

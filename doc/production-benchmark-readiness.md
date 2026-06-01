@@ -449,8 +449,11 @@ fake watch wrapper around the current raw `NativeDatabase` path.
 Scenario elapsed time is now measured inside the child process, so startup does
 not pollute the benchmark metric. The runner still pays `dart run` process
 startup per repetition, which makes large experiment suites slower than they
-need to be. A production runner should use a compiled/snapshotted child or a
-long-lived worker once region lifecycle and reset semantics are formalized.
+need to be. `tracelite explain` now flags compare artifacts where child-process
+wall time dwarfs measured workload time, so smoke-sized artifacts are visibly
+classified as harness-dominated rather than quietly treated as production
+evidence. A production runner should still use a compiled/snapshotted child or
+a long-lived worker once region lifecycle and reset semantics are formalized.
 
 ### 4. Resqlite semantic parity depends on adoption
 

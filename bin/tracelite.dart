@@ -18,7 +18,7 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  if (args.isEmpty || args.first == '--help' || args.first == '-h') {
+  if (args.isEmpty || _isTopLevelHelp(args.first)) {
     printTraceliteCoreUsage(exitCode: args.isEmpty ? 64 : 0);
   }
 
@@ -36,6 +36,9 @@ Future<void> main(List<String> args) async {
   stderr.writeln('unknown or source-checkout-only command: $command');
   printTraceliteCoreUsage();
 }
+
+bool _isTopLevelHelp(String arg) =>
+    arg == '--help' || arg == '-h' || arg == 'help';
 
 Future<bool> _canRunDevelopmentCli(String root) async {
   final devCli = File(_join(root, 'tool/tracelite_dev.dart'));

@@ -19,11 +19,14 @@ bool isTraceliteCoreCommand(String command) =>
     traceliteCoreCommands.contains(command);
 
 void runTraceliteCoreCli(List<String> args) {
-  if (args.isEmpty || args.first == '--help' || args.first == '-h') {
+  if (args.isEmpty || _isTopLevelHelp(args.first)) {
     printTraceliteCoreUsage(exitCode: args.isEmpty ? 64 : 0);
   }
 
   final command = args.first;
+  if (_isSubcommandHelp(args.skip(1))) {
+    printTraceliteCoreUsage(exitCode: 0);
+  }
   switch (command) {
     case 'report':
       _report(args.skip(1).toList());
@@ -48,6 +51,12 @@ void runTraceliteCoreCli(List<String> args) {
       printTraceliteCoreUsage();
   }
 }
+
+bool _isTopLevelHelp(String arg) =>
+    arg == '--help' || arg == '-h' || arg == 'help';
+
+bool _isSubcommandHelp(Iterable<String> args) =>
+    args.any((arg) => arg == '--help' || arg == '-h');
 
 void _report(List<String> args) {
   if (args.length != 1) {

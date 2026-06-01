@@ -9,11 +9,14 @@ import 'package:tracelite/tracelite.dart';
 import 'src/peer.dart';
 
 Future<void> main(List<String> args) async {
-  if (args.isEmpty || args.first == '--help' || args.first == '-h') {
+  if (args.isEmpty || _isTopLevelHelp(args.first)) {
     _usage(exitCode: args.isEmpty ? 64 : 0);
   }
 
   final command = args.first;
+  if (_isSubcommandHelp(args.skip(1))) {
+    _usage(exitCode: 0);
+  }
   switch (command) {
     case 'doctor':
       await _doctor(args.skip(1).toList());
@@ -44,6 +47,12 @@ Future<void> main(List<String> args) async {
       _usage();
   }
 }
+
+bool _isTopLevelHelp(String arg) =>
+    arg == '--help' || arg == '-h' || arg == 'help';
+
+bool _isSubcommandHelp(Iterable<String> args) =>
+    args.any((arg) => arg == '--help' || arg == '-h');
 
 Future<void> _doctor(List<String> args) async {
   final options = _parseOptions(args);

@@ -28,7 +28,8 @@ work.
 - Dart-side spans/counters through `TraceRecorder`.
 - Common SQL workloads across validated peers.
 - Calibrated thresholds, CV gates, outlier policy, and decisions.
-- Artifact interpretation through `explain` and visualizer insight panels.
+- Artifact interpretation through `explain` and visualizer insight panels:
+  trace health, noise, bottlenecks, peer spread, and harness overhead.
 - Schema-validated graph data for dashboards and the visualizer.
 
 ## How It Works
@@ -52,6 +53,10 @@ are represented explicitly instead of hidden behind incomparable numbers.
 ## Common Commands
 
 ```bash
+# Complete CLI usage; command-level help works too, for example
+# `dart run bin/tracelite.dart doctor --help`.
+dart run bin/tracelite.dart help
+
 # Published/core command: inspect an existing trace.
 dart run bin/tracelite.dart report build/example.tlt-region
 

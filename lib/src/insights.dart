@@ -10,12 +10,16 @@ final class BenchmarkInsightOptions {
     this.bottleneckSharePercent = 55,
     this.traceCoverageFloorPercent = 25,
     this.peerSpreadPercent = 20,
+    this.harnessOverheadPercent = 300,
+    this.harnessOverheadFloorNs = 50000000,
   });
 
   final double maxCvPercent;
   final double bottleneckSharePercent;
   final double traceCoverageFloorPercent;
   final double peerSpreadPercent;
+  final double harnessOverheadPercent;
+  final int harnessOverheadFloorNs;
 }
 
 final class BenchmarkInsight {
@@ -137,6 +141,28 @@ List<BenchmarkInsight> _compareInsights(
         peerArtifact: peer,
         options: options,
       ));
+      final childMean = _metricMean(peer, 'child_elapsed_ns');
+      if (childMean != null) {
+        final overheadNs = math.max(0, childMean - measured);
+        final overheadPercent = (overheadNs / measured) * 100;
+        if (overheadNs >= options.harnessOverheadFloorNs &&
+            overheadPercent >= options.harnessOverheadPercent) {
+          insights.add(BenchmarkInsight(
+            severity: 'warning',
+            id: 'harness_overhead_dominates',
+            title: '$name run is harness dominated',
+            body:
+                'Child-process wall time is ${formatDurationNs(childMean.round())} while measured workload time is ${formatDurationNs(measured.round())}; use larger workloads or repeated suite profiles before making a production decision from this artifact.',
+            evidence: {
+              'peer': name,
+              'scenario': scenario,
+              'child_elapsed_ns_mean': childMean,
+              'measured_elapsed_ns_mean': measured,
+              'harness_overhead_percent': overheadPercent,
+            },
+          ));
+        }
+      }
     }
   }
 

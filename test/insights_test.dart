@@ -66,6 +66,24 @@ void main() {
     );
   });
 
+  test('compare insights warn when runner overhead dominates tiny workloads',
+      () {
+    final artifact = _compareArtifact(
+      measured: [10000000, 11000000, 9000000],
+      sqliteStepTotal: [5000000, 5100000, 4900000],
+      childElapsed: [250000000, 260000000, 255000000],
+    );
+
+    final insights = benchmarkArtifactInsights(artifact);
+    final ids = insights.map((insight) => insight.id);
+    expect(ids, contains('harness_overhead_dominates'));
+    final overhead = insights.singleWhere(
+      (insight) => insight.id == 'harness_overhead_dominates',
+    );
+    expect(overhead.severity, 'warning');
+    expect(overhead.body, contains('Child-process wall time'));
+  });
+
   test('insight markdown renders an actionable table', () {
     final markdown = benchmarkArtifactInsightsMarkdown(
       _compareArtifact(
@@ -82,8 +100,10 @@ void main() {
 Map<String, Object?> _compareArtifact({
   required List<int> measured,
   required List<int> sqliteStepTotal,
+  List<int>? childElapsed,
   int droppedEvents = 0,
 }) {
+  final childElapsedValues = childElapsed ?? measured;
   return {
     'schema': 'tracelite.compare.v1',
     'scenario': 'point-select',
@@ -98,6 +118,7 @@ Map<String, Object?> _compareArtifact({
         'unsupported_repetitions': 0,
         'summary': {
           'measured_elapsed_ns': _stats(measured),
+          'child_elapsed_ns': _stats(childElapsedValues),
           'elapsed_ns': _stats(measured),
           'sqlite3_step_total_ns': _stats(sqliteStepTotal),
           'sqlite3_step_count': _stats(List.filled(measured.length, 3)),
@@ -112,6 +133,7 @@ Map<String, Object?> _compareArtifact({
               'repetition': i + 1,
               'status': 'ok',
               'measured_elapsed_ns': measured[i],
+              'child_elapsed_ns': childElapsedValues[i],
               'elapsed_ns': measured[i],
               'diagnostics': {
                 'dropped_events': droppedEvents,
