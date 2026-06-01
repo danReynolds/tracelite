@@ -94,7 +94,7 @@ jobs:
             -o build/libtracelite_runtime.so
           cc -shared -fPIC -O2 -Inative \
             native/tracelite_runtime.c native/shim_sqlite3.c \
-            -lsqlite3 \
+            -Wl,--no-as-needed -lsqlite3 \
             -o build/libsqlite_traced.so
           cc -std=c11 -O2 -Inative \
             native/tracelite_runtime.c native/test_producer.c \

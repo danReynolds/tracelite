@@ -759,7 +759,7 @@ cc -dynamiclib -O2 -Inative \
 # Build the libsqlite3 shim (Linux)
 cc -shared -fPIC -O2 -Inative \
   native/tracelite_runtime.c native/shim_sqlite3.c \
-  -lsqlite3 \
+  -Wl,--no-as-needed -lsqlite3 \
   -o build/libsqlite_traced.so
 
 # Run all tests

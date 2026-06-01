@@ -45,7 +45,7 @@ String? sqliteShimBuildCommand({String? operatingSystem}) {
     'macos' => '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
         'native/shim_sqlite3.c -Wl,-reexport-lsqlite3 -o $output',
     'linux' => '  cc -shared -fPIC -O2 -Inative native/tracelite_runtime.c '
-        'native/shim_sqlite3.c -lsqlite3 -o $output',
+        'native/shim_sqlite3.c -Wl,--no-as-needed -lsqlite3 -o $output',
     _ => null,
   };
 }

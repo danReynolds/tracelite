@@ -26,7 +26,7 @@
  *
  * Build (Linux):
  *   gcc -shared -fPIC ... -o libsqlite_traced.so
- *       -Wl,--default-symver -lsqlite3
+ *       -Wl,--no-as-needed -lsqlite3
  *
  * Loading from Dart:
  *   package:sqlite3 native hooks can be configured with

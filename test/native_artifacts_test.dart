@@ -45,6 +45,7 @@ void main() {
       native_artifacts.sqliteShimBuildCommand(operatingSystem: 'linux'),
       allOf(
         contains('-shared -fPIC'),
+        contains('-Wl,--no-as-needed'),
         contains('-lsqlite3'),
         contains('build/libsqlite_traced.so'),
       ),
