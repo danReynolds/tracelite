@@ -10,7 +10,10 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — reduce production workload noise until a ceiling-capped `calibrate-policy --strict=true` passes, wire resqlite's profile workflow to tracelite artifacts, then finish packaging and Linux/Windows shim validation.
+**Next bottleneck:** production benchmark replacement hardening — keep the pinned
+resqlite PR green, decide how aggressively to retire the old resqlite direct
+profile runner, then finish diagnostic-workload noise reduction, packaging, and
+Linux/Windows shim validation.
 
 ---
 
@@ -537,6 +540,10 @@ Work:
     bytes, stream counts, reader busy state.
 - Add side-by-side parity tests between current resqlite profile output and
   tracelite artifacts for a small initial matrix.
+- Done in the resqlite integration PR: benchmark, decision, and profile wrappers
+  pin Tracelite to `resqlite-profiling-gate-2026-06-01`, record both source
+  states, verify the resqlite dependency binding, and preserve `insights.md` /
+  `insights.json` from `tracelite explain`.
 
 Acceptance gates:
 

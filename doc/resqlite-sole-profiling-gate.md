@@ -1,13 +1,13 @@
 # resqlite sole-profiling acceptance gate
 
-Status: primary path credible, sole-framework acceptance still blocked,
-2026-05-31
+Status: primary path credible, source pin integrated, sole-framework acceptance
+still needs adoption sign-off, 2026-06-01
 
 This is the merge blocker for accepting tracelite as resqlite's sole regular
 profiling and benchmarking framework. Tracelite can already replace the old
 profile artifact and dashboard pipeline for covered surfaces, but PR #109
-should stay draft until the release gate below is satisfied with current
-artifacts.
+should stay gated until the release criteria below are satisfied with current
+artifacts and CI.
 
 ## Acceptance criteria
 
@@ -71,6 +71,13 @@ The highest-priority implementation blocker found on 2026-05-31 was release
 scope drift: `suite-history` could calibrate a scenario subset while the nested
 `suite` still ran the whole profile. That has been fixed so `suite` and
 `suite-history` both honor `--scenarios`.
+
+The highest-priority integration blocker found later was source reproducibility.
+That is now closed in PR #109: the resqlite wrappers pin Tracelite to
+`resqlite-profiling-gate-2026-06-01`
+(`1fc321113c5a3a1598fc2908b52ed401eb65737c`), reject dirty or mismatched
+checkouts by default, record both source states in wrapper manifests, and verify
+that Tracelite resolves `resqlite` to the checkout under test.
 
 The resqlite wrapper now separates broad suite coverage from strict policy
 scope. It runs the full ten-scenario production matrix for artifacts and graph
@@ -156,9 +163,14 @@ Evidence:
   `sqlite-diagnostics`.
 - The rejected decision still exported graph data and validation passed.
 
+The 2026-06-01 wrapper update also adds `insights.md` and `insights.json` to
+benchmark, decision, and profile workflows by running `tracelite explain` over
+the produced artifacts. These are review aids; acceptance still comes from the
+machine policy gates above.
+
 Remaining blockers before accepting tracelite as the sole framework:
 
-- Pin the resqlite PR to a stable tracelite source state instead of relying on a
-  dirty local checkout.
-- Preserve or replace any old resqlite profile-only signals that are not yet
-  proven by tracelite workload summaries.
+- Preserve, demote, or intentionally remove any old resqlite profile-only
+  signals that are not needed now that tracelite emits workload summaries,
+  graph data, decisions, and insight artifacts.
+- Keep the pinned PR CI green whenever the Tracelite pin changes.
