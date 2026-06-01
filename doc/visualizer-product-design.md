@@ -16,7 +16,8 @@ span index, span inspector, span aggregation table, peer comparison table,
 graph-data validation rows, and workload tables; and is reachable through
 `dart run bin/tracelite.dart visualize [--release|--profile] <path>`. The
 timeline has explicit zoom controls, scroll/double-click zoom, keyboard
-navigation, enlarged dense-span hit targets, nearest-span picking, and a linked
+navigation, enlarged dense-span hit targets, nearest-span picking, range-aware
+visible-span queries, density rendering for large trace windows, and a linked
 span index so small SQLite calls remain inspectable. The workspace and compare
 screens also use the core insight layer to surface trust, trace-health, noise,
 peer-spread, and bottleneck findings before users drill into raw tables.

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tracelite/tracelite.dart';
 import 'package:tracelite_visualizer/main.dart';
+import 'package:tracelite_visualizer/src/workspace.dart';
 
 void main() {
   testWidgets('renders the visualizer shell', (tester) async {
@@ -108,11 +109,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('sqlite3_step'), findsWidgets);
 
+    await tester.enterText(find.byType(TextField).last, 'target_dense_span');
+    await tester.pumpAndSettle();
+    expect(find.text('1 matches'), findsOneWidget);
+
     await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView).last, const Offset(0, 900));
     await tester.pumpAndSettle();
     expect(find.text('Selected Span'), findsOneWidget);
+    expect(find.text('target_dense_span'), findsWidgets);
+  });
+
+  test('TraceDocument visible range queries find late dense spans', () async {
+    final temp = Directory.systemTemp.createTempSync(
+      'tracelite-viz-dense-query-',
+    );
+    addTearDown(() => temp.deleteSync(recursive: true));
+    await _writeDenseTraceWorkspace(temp, spanCount: 12000);
+
+    final workspace = await VisualizerWorkspace.load(temp.path);
+    final trace = workspace.traces.single;
+    final target = trace.completeSpans.last;
+    final visible = trace.visibleSpansIn(target.startNs, target.startNs + 1);
+
+    expect(trace.trace.spanName(target.spanId), 'target_dense_span');
+    expect(visible, contains(target));
+    expect(
+      trace.visibleSpanCountIn(target.startNs, target.startNs + 1),
+      greaterThanOrEqualTo(1),
+    );
   });
 
   testWidgets('decodes SQLite statement SQL fingerprints in trace views', (
@@ -270,8 +296,15 @@ Future<void> _writeDenseTraceWorkspace(
       category: 'sqlite',
     );
   }
+  recorder.registerSpan(
+    userSpanIdStart + 4,
+    'target_dense_span',
+    category: 'sqlite',
+  );
   for (var i = 0; i < spanCount; i++) {
-    final spanId = userSpanIdStart + (i % 4);
+    final spanId = i == spanCount - 1
+        ? userSpanIdStart + 4
+        : userSpanIdStart + (i % 4);
     recorder.begin(spanId, args: [i]);
     recorder.end(spanId, args: [i % 17]);
   }

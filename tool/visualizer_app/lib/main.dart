@@ -634,10 +634,7 @@ class _TracePageState extends State<TracePage> {
     TraceDocument trace,
     _VisibleRange visibleRange,
   ) {
-    return trace.completeSpans.where((span) {
-      final end = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
-      return span.startNs < visibleRange.endNs && end > visibleRange.startNs;
-    }).toList();
+    return trace.visibleSpansIn(visibleRange.startNs, visibleRange.endNs);
   }
 
   List<SpanGroupStats> _spanGroupsFor(
@@ -884,6 +881,8 @@ const double _timelineBarHeight = 20;
 const double _timelineMinBarWidth = 5;
 const double _timelineHitSlopPixels = 9;
 const double _timelineNearestPickPixels = 16;
+const int _maxDetailedTimelineSpans = 10000;
+const double _minDetailedTimelineSpanPixels = 2.5;
 
 double _timelineLeftGutter(double width) {
   return math.min(190, math.max(118, width * 0.30));
@@ -1321,14 +1320,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
   }
 
   int _visibleSpanCount() {
-    var count = 0;
-    for (final span in widget.trace.completeSpans) {
-      final endNs = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
-      if (span.startNs > _viewEndNs) break;
-      if (endNs < _viewStartNs || span.startNs > _viewEndNs) continue;
-      count++;
-    }
-    return count;
+    return widget.trace.visibleSpanCountIn(_viewStartNs, _viewEndNs);
   }
 
   int _minimumWindowNs(int fullDurationNs) {
@@ -1771,19 +1763,15 @@ class _TimelinePainter extends CustomPainter {
         math.max(0, size.height - _timelineTop),
       ),
     );
-    const maxTimelineSpans = 10000;
-    var rendered = 0;
-    var clippedByCap = false;
-    for (final span in trace.completeSpans) {
-      final lane = trackIndex[span.trackId];
-      if (lane == null) continue;
-      final endNs = span.endNs ?? span.startNs;
-      if (span.startNs > viewEndNs) break;
-      if (endNs < viewStartNs || span.startNs > viewEndNs) continue;
-      if (rendered >= maxTimelineSpans) {
-        clippedByCap = true;
-        continue;
-      }
+
+    final visibleSpanCount = trace.visibleSpanCountIn(viewStartNs, viewEndNs);
+    final densityMode = visibleSpanCount > _maxDetailedTimelineSpans;
+    final detailedSpans = <_TimelineSpanRect>[];
+    final densityRows = <int, _TimelineDensityBuckets>{};
+
+    _TimelineSpanRect? spanRectFor(TraceSpan span, int lane) {
+      final endNs = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+      if (endNs <= viewStartNs || span.startNs >= viewEndNs) return null;
       final x =
           leftGutter +
           ((span.startNs - viewStartNs) / durationNs).clamp(0.0, 1.0) *
@@ -1791,18 +1779,30 @@ class _TimelinePainter extends CustomPainter {
       final right =
           leftGutter +
           ((endNs - viewStartNs) / durationNs).clamp(0.0, 1.0) * timelineWidth;
-      final width = math.max(_timelineMinBarWidth, right - x);
-      final rect = Rect.fromLTWH(
-        x.clamp(leftGutter, timelineRight).toDouble(),
-        _timelineTop + lane * _timelineLaneHeight + _timelineBarTopInset,
-        width,
-        _timelineBarHeight,
+      final projectedWidth = math.max(0.0, right - x);
+      return _TimelineSpanRect(
+        span: span,
+        rect: Rect.fromLTWH(
+          x.clamp(leftGutter, timelineRight).toDouble(),
+          _timelineTop + lane * _timelineLaneHeight + _timelineBarTopInset,
+          math.max(_timelineMinBarWidth, projectedWidth),
+          _timelineBarHeight,
+        ),
+        projectedLeft: (x - leftGutter).clamp(0.0, timelineWidth).toDouble(),
+        projectedRight: (right - leftGutter)
+            .clamp(0.0, timelineWidth)
+            .toDouble(),
+        projectedWidth: projectedWidth,
       );
+    }
+
+    void drawSpanRect(_TimelineSpanRect spanRect) {
+      final span = spanRect.span;
       final isSelected = identical(span, selected);
       final isHovered = identical(span, hovered);
-      final paint = identical(span, selected)
+      final paint = isSelected
           ? selectedPaint
-          : identical(span, hovered)
+          : isHovered
           ? hoveredPaint
           : spanPaints.putIfAbsent(
               trace.trace.spanName(span.spanId),
@@ -1811,16 +1811,84 @@ class _TimelinePainter extends CustomPainter {
                     ..color = _spanColor(trace.trace.spanName(span.spanId)),
             );
       canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+        RRect.fromRectAndRadius(spanRect.rect, const Radius.circular(3)),
         paint,
       );
       if (isSelected || isHovered) {
         canvas.drawRRect(
-          RRect.fromRectAndRadius(rect.inflate(1), const Radius.circular(4)),
+          RRect.fromRectAndRadius(
+            spanRect.rect.inflate(1),
+            const Radius.circular(4),
+          ),
           isSelected ? selectedOutlinePaint : hoveredOutlinePaint,
         );
       }
-      rendered++;
+    }
+
+    trace.forEachVisibleSpan(viewStartNs, viewEndNs, (span) {
+      final lane = trackIndex[span.trackId];
+      if (lane == null) return;
+      final spanRect = spanRectFor(span, lane);
+      if (spanRect == null) return;
+      if (densityMode) {
+        densityRows
+            .putIfAbsent(
+              lane,
+              () => _TimelineDensityBuckets(timelineWidth.ceil()),
+            )
+            .add(spanRect.projectedLeft, spanRect.projectedRight);
+        if (spanRect.projectedWidth < _minDetailedTimelineSpanPixels ||
+            detailedSpans.length >= _maxDetailedTimelineSpans) {
+          return;
+        }
+      }
+      detailedSpans.add(spanRect);
+    });
+
+    if (densityMode) {
+      final densityPaint = Paint();
+      for (final entry in densityRows.entries) {
+        final lane = entry.key;
+        final row = entry.value;
+        final laneTop =
+            _timelineTop + lane * _timelineLaneHeight + _timelineBarTopInset;
+        final maxCount = math.max(1, row.maxCount);
+        final maxLog = math.log(maxCount + 1);
+        for (var bucket = 0; bucket < row.counts.length; bucket++) {
+          final count = row.counts[bucket];
+          if (count == 0) continue;
+          final intensity = math.log(count + 1) / maxLog;
+          final height = math.max(
+            4.0,
+            _timelineBarHeight * (0.35 + intensity * 0.65),
+          );
+          densityPaint.color = colorScheme.primary.withValues(
+            alpha: 0.14 + intensity * 0.50,
+          );
+          canvas.drawRect(
+            Rect.fromLTWH(
+              leftGutter + bucket,
+              laneTop + (_timelineBarHeight - height) / 2,
+              1.25,
+              height,
+            ),
+            densityPaint,
+          );
+        }
+      }
+    }
+
+    for (final spanRect in detailedSpans) {
+      drawSpanRect(spanRect);
+    }
+
+    for (final highlighted in [selected, hovered]) {
+      if (highlighted == null) continue;
+      final lane = trackIndex[highlighted.trackId];
+      if (lane == null) continue;
+      final spanRect = spanRectFor(highlighted, lane);
+      if (spanRect == null) continue;
+      drawSpanRect(spanRect);
     }
     canvas.restore();
 
@@ -1858,13 +1926,14 @@ class _TimelinePainter extends CustomPainter {
       ..layout(maxWidth: size.width - 20);
     textPainter.paint(canvas, const Offset(10, 8));
 
-    if (clippedByCap) {
+    if (densityMode) {
       textPainter
         ..text = TextSpan(
-          text: 'Large trace mode: zoom in to render all visible spans.',
+          text:
+              'Large trace mode: showing density for $visibleSpanCount spans; zoom in for individual spans.',
           style: TextStyle(
-            fontSize: 12,
-            color: colorScheme.error,
+            fontSize: 11,
+            color: colorScheme.primary,
             fontWeight: FontWeight.w700,
           ),
         )
@@ -1880,6 +1949,41 @@ class _TimelinePainter extends CustomPainter {
         oldDelegate.hovered != hovered ||
         oldDelegate.viewStartNs != viewStartNs ||
         oldDelegate.viewEndNs != viewEndNs;
+  }
+}
+
+class _TimelineSpanRect {
+  const _TimelineSpanRect({
+    required this.span,
+    required this.rect,
+    required this.projectedLeft,
+    required this.projectedRight,
+    required this.projectedWidth,
+  });
+
+  final TraceSpan span;
+  final Rect rect;
+  final double projectedLeft;
+  final double projectedRight;
+  final double projectedWidth;
+}
+
+class _TimelineDensityBuckets {
+  _TimelineDensityBuckets(int bucketCount)
+    : counts = List<int>.filled(math.max(1, bucketCount), 0);
+
+  final List<int> counts;
+  int maxCount = 0;
+
+  void add(double left, double right) {
+    final bucketCount = counts.length;
+    final start = left.floor().clamp(0, bucketCount - 1).toInt();
+    final end = math.max(start, right.ceil().clamp(0, bucketCount - 1).toInt());
+    for (var bucket = start; bucket <= end; bucket++) {
+      final count = counts[bucket] + 1;
+      counts[bucket] = count;
+      maxCount = math.max(maxCount, count);
+    }
   }
 }
 

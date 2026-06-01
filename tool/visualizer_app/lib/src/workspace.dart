@@ -77,6 +77,7 @@ final class TraceDocument {
   late final Map<int, List<TraceSpan>> completeSpansByTrack = _spansByTrack(
     completeSpans,
   );
+  late final int maxCompleteSpanDurationNs = _maxSpanDurationNs(completeSpans);
   late final Map<int, SqlTraceLabel> statementSqlByPointer =
       _statementSqlByPointer(trace);
 
@@ -107,6 +108,35 @@ final class TraceDocument {
     final label = trace.strings[span.beginArgs[1]];
     return label == null ? null : SqlTraceLabel.fromTraceString(label);
   }
+
+  List<TraceSpan> visibleSpansIn(int startNs, int endNs) {
+    final result = <TraceSpan>[];
+    forEachVisibleSpan(startNs, endNs, result.add);
+    return result;
+  }
+
+  int visibleSpanCountIn(int startNs, int endNs) {
+    var count = 0;
+    forEachVisibleSpan(startNs, endNs, (_) => count++);
+    return count;
+  }
+
+  void forEachVisibleSpan(
+    int startNs,
+    int endNs,
+    void Function(TraceSpan span) visit,
+  ) {
+    if (completeSpans.isEmpty || endNs <= startNs) return;
+    final earliestPossibleStart = startNs - maxCompleteSpanDurationNs;
+    var index = _lowerBoundSpanStart(completeSpans, earliestPossibleStart);
+    while (index < completeSpans.length) {
+      final span = completeSpans[index];
+      if (span.startNs >= endNs) break;
+      final end = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+      if (end > startNs) visit(span);
+      index++;
+    }
+  }
 }
 
 Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
@@ -118,6 +148,28 @@ Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
     for (final entry in result.entries)
       entry.key: List.unmodifiable(entry.value),
   };
+}
+
+int _maxSpanDurationNs(List<TraceSpan> spans) {
+  var maxDurationNs = 1;
+  for (final span in spans) {
+    maxDurationNs = math.max(maxDurationNs, math.max(1, span.durationNs));
+  }
+  return maxDurationNs;
+}
+
+int _lowerBoundSpanStart(List<TraceSpan> spans, int startNs) {
+  var low = 0;
+  var high = spans.length;
+  while (low < high) {
+    final mid = low + ((high - low) >> 1);
+    if (spans[mid].startNs < startNs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
 }
 
 Map<int, SqlTraceLabel> _statementSqlByPointer(Trace trace) {
