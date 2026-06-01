@@ -225,6 +225,10 @@ Run both: `dart test`. Both pass.
 - `tool/publish_check.dart` validates a clean tracked-file archive with
   `dart pub publish --dry-run`, avoiding false publish warnings from ignored
   local overrides used for sibling-checkout validation.
+- CI writes an explicit `pubspec_overrides.yaml` that points `resqlite` at the
+  checked-out `codex/tracelite-profiling-hooks` sibling and verifies
+  `.dart_tool/package_config.json` before running peer tests, so the macOS gate
+  cannot silently fall back to the pub package and lose trace hooks.
 - `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
   repeatable scenario matrix and writes a manifest plus per-scenario artifacts
   and logs.
@@ -317,7 +321,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux native-hook shim smoke works | △ CI-configured | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` adds an Ubuntu package:sqlite3 shim smoke lane; full production peer suite remains macOS-only until CI evidence lands and broader peers are promoted |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
-| resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario |
+| resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the trace-enabled sibling checkout before peer tests |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
 
 Things validated by build but not runtime:

@@ -20,15 +20,48 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/resqlite
+          ref: codex/tracelite-profiling-hooks
           path: resqlite
           token: ${{ secrets.CROSS_REPO_READ_TOKEN || github.token }}
 
       - name: Set up Dart
         uses: dart-lang/setup-dart@v1
 
+      - name: Pin resqlite sibling dependency
+        working-directory: tracelite
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            resqlite:
+              path: ../resqlite
+          YAML
+
       - name: Install dependencies
         working-directory: tracelite
         run: dart pub get
+
+      - name: Verify resqlite source override
+        working-directory: tracelite
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import sys
+          import urllib.parse
+
+          config = json.loads(pathlib.Path('.dart_tool/package_config.json').read_text())
+          packages = {package['name']: package for package in config['packages']}
+          resqlite = packages.get('resqlite')
+          if resqlite is None:
+              sys.exit('resqlite is missing from package_config.json')
+          root_uri = resqlite['rootUri']
+          parsed = urllib.parse.urlparse(root_uri)
+          actual = pathlib.Path(urllib.parse.unquote(parsed.path)).resolve()
+          expected = pathlib.Path('../resqlite').resolve()
+          if actual != expected:
+              sys.exit(f'resqlite resolved to {actual}, expected {expected}')
+          print(f'resqlite source: {actual}')
+          PY
 
       - name: Verify generated span outputs
         working-directory: tracelite
