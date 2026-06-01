@@ -115,7 +115,7 @@ Still needed in resqlite:
 Current state: fixed in this implementation pass.
 
 The public `tracelite` library now exports only core tracing APIs. The peer
-harness moved under `bin/src/`, and peer library packages are dev dependencies.
+harness moved under `tool/src/`, and peer library packages are dev dependencies.
 This matters because resqlite cannot depend on tracelite if tracelite's public
 library depends back on resqlite.
 

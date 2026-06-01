@@ -118,6 +118,7 @@ void _writeFixtureCheckout(Directory root) {
     'bin',
     'native',
     'tool',
+    'tool/src',
     'tool/visualizer_app',
     'lib/src',
     'doc',
@@ -128,6 +129,8 @@ void _writeFixtureCheckout(Directory root) {
   for (final file in const [
     'pubspec.yaml',
     'bin/tracelite.dart',
+    'tool/tracelite_dev.dart',
+    'tool/src/peer.dart',
     'native/tracelite_runtime.c',
     'native/tracelite_runtime.h',
     'native/shim_sqlite3.c',

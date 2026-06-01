@@ -68,15 +68,15 @@ dart run bin/tracelite.dart visualize build/graph-data
 
 ## Integrations
 
-The core runtime, trace format, recorder, decision logic, graph export, and
-visualizer are standalone. The repository also ships peer adapters so one CLI
-can run comparable workloads against Dart SQLite packages. That is why
-`pubspec.yaml` includes peer libraries, including `resqlite`.
+The published dependency graph is core-only: runtime code depends on `ffi` and
+`yaml`, not on peer SQLite libraries. The repository also ships source-checkout
+peer adapters so one CLI can run comparable workloads against Dart SQLite
+packages during development and resqlite release-gate validation.
 
 The long-term package split is core library plus peer-benchmark CLI. Today the
-public recorder APIs are standalone, while the source checkout keeps the peer
-CLI in-tree so resqlite and other Dart SQLite libraries can run one benchmark
-workflow during the pre-1.0 phase.
+public recorder APIs are standalone, while the source checkout keeps the
+dev-dependency-backed peer CLI in-tree so resqlite and other Dart SQLite
+libraries can run one benchmark workflow during the pre-1.0 phase.
 
 resqlite has the deepest integration today: it can emit semantic spans/counters
 for its reader pool, writer isolate, stream invalidation, diagnostics, and old
@@ -94,8 +94,9 @@ checkout testing do not affect the publish dry-run.
 
 `native/` contains the shared-memory runtime and SQLite shim. `lib/` contains
 the recorder, trace reader, decision logic, graph-data export, and vocabularies.
-`bin/` contains the CLI. `tool/visualizer_app/` contains the Flutter desktop
-visualizer.
+`bin/` contains the source-checkout launcher, `tool/tracelite_dev.dart` contains
+the dev-dependency-backed benchmark CLI, and `tool/visualizer_app/` contains the
+Flutter desktop visualizer.
 
 ## Docs
 
