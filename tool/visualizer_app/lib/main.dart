@@ -456,6 +456,7 @@ class _TracePageState extends State<TracePage> {
               body: 'Open a .tlt-region file or a directory containing traces.',
             )
           : ListView(
+              key: const ValueKey('trace-page-scroll'),
               padding: const EdgeInsets.all(20),
               children: [
                 if (traces.length > 1) ...[
@@ -2419,10 +2420,11 @@ class SpanIndexPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visibleRows = spans.take(300).toList();
-    final omitted = spans.length - visibleRows.length;
     final colors = Theme.of(context).colorScheme;
-    final tableHeight = math.min(420.0, 42.0 + visibleRows.length * 42.0);
+    final tableHeight = math.min(
+      420.0,
+      42.0 + math.max(1, spans.length) * _spanIndexRowHeight,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2455,60 +2457,52 @@ class SpanIndexPanel extends StatelessWidget {
         SizedBox(
           height: tableHeight,
           child: SingleChildScrollView(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                headingRowHeight: 34,
-                dataRowMinHeight: 34,
-                dataRowMaxHeight: 42,
-                columns: const [
-                  DataColumn(label: Text('span')),
-                  DataColumn(label: Text('start'), numeric: true),
-                  DataColumn(label: Text('duration'), numeric: true),
-                  DataColumn(label: Text('track'), numeric: true),
-                  DataColumn(label: Text('correlation'), numeric: true),
-                  DataColumn(label: Text('args')),
-                ],
-                rows: [
-                  for (final (index, span) in visibleRows.indexed)
-                    DataRow(
-                      key: ValueKey('span-row-$index'),
-                      selected: identical(span, selected),
-                      onSelectChanged: (_) => onSelected(span),
-                      cells: [
-                        DataCell(
-                          Text(
-                            trace.trace.spanName(span.spanId),
-                            key: ValueKey('span-row-$index-name'),
-                          ),
-                        ),
-                        DataCell(Text(formatNs(_startOffsetNs(span)))),
-                        DataCell(Text(formatNs(span.durationNs))),
-                        DataCell(Text('${span.trackId}')),
-                        DataCell(Text('${span.begin.correlationId ?? '-'}')),
-                        DataCell(
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 340),
-                            child: Text(
-                              _spanArgsSummary(trace, span),
-                              overflow: TextOverflow.ellipsis,
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: _spanIndexTableWidth,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: colors.outlineVariant),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(
+                  children: [
+                    const _SpanIndexHeaderRow(),
+                    Divider(height: 1, color: colors.outlineVariant),
+                    Expanded(
+                      child: spans.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No matching spans',
+                                style: TextStyle(
+                                  color: colors.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              itemExtent: _spanIndexRowHeight,
+                              itemCount: spans.length,
+                              itemBuilder: (context, index) {
+                                final span = spans[index];
+                                return _SpanIndexRow(
+                                  key: ValueKey('span-row-$index'),
+                                  trace: trace,
+                                  span: span,
+                                  index: index,
+                                  selected: identical(span, selected),
+                                  startOffsetNs: _startOffsetNs(span),
+                                  onSelected: onSelected,
+                                );
+                              },
                             ),
-                          ),
-                        ),
-                      ],
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
-        if (omitted > 0) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Showing the first ${visibleRows.length}; refine the filter to narrow $omitted more spans.',
-            style: TextStyle(color: colors.onSurfaceVariant),
-          ),
-        ],
       ],
     );
   }
@@ -2517,6 +2511,175 @@ class SpanIndexPanel extends StatelessWidget {
     final events = trace.trace.events;
     final start = events.isEmpty ? 0 : events.first.timestampNs;
     return math.max(0, span.startNs - start);
+  }
+}
+
+const double _spanIndexRowHeight = 42;
+const double _spanIndexSpanWidth = 230;
+const double _spanIndexStartWidth = 120;
+const double _spanIndexDurationWidth = 120;
+const double _spanIndexTrackWidth = 76;
+const double _spanIndexCorrelationWidth = 120;
+const double _spanIndexArgsWidth = 420;
+const double _spanIndexTableWidth =
+    _spanIndexSpanWidth +
+    _spanIndexStartWidth +
+    _spanIndexDurationWidth +
+    _spanIndexTrackWidth +
+    _spanIndexCorrelationWidth +
+    _spanIndexArgsWidth;
+
+class _SpanIndexHeaderRow extends StatelessWidget {
+  const _SpanIndexHeaderRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
+      child: DefaultTextStyle(
+        style: TextStyle(
+          color: colors.onSurfaceVariant,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+        child: const Row(
+          children: [
+            _SpanIndexHeaderCell(width: _spanIndexSpanWidth, label: 'span'),
+            _SpanIndexHeaderCell(width: _spanIndexStartWidth, label: 'start'),
+            _SpanIndexHeaderCell(
+              width: _spanIndexDurationWidth,
+              label: 'duration',
+            ),
+            _SpanIndexHeaderCell(width: _spanIndexTrackWidth, label: 'track'),
+            _SpanIndexHeaderCell(
+              width: _spanIndexCorrelationWidth,
+              label: 'correlation',
+            ),
+            _SpanIndexHeaderCell(width: _spanIndexArgsWidth, label: 'args'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SpanIndexHeaderCell extends StatelessWidget {
+  const _SpanIndexHeaderCell({required this.width, required this.label});
+
+  final double width;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: 36,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(label, overflow: TextOverflow.ellipsis),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpanIndexRow extends StatelessWidget {
+  const _SpanIndexRow({
+    super.key,
+    required this.trace,
+    required this.span,
+    required this.index,
+    required this.selected,
+    required this.startOffsetNs,
+    required this.onSelected,
+  });
+
+  final TraceDocument trace;
+  final TraceSpan span;
+  final int index;
+  final bool selected;
+  final int startOffsetNs;
+  final ValueChanged<TraceSpan> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final background = selected
+        ? colors.primaryContainer.withValues(alpha: 0.70)
+        : index.isEven
+        ? colors.surface
+        : colors.surfaceContainerHighest.withValues(alpha: 0.20);
+    final textStyle = TextStyle(
+      color: selected ? colors.onPrimaryContainer : colors.onSurface,
+      fontSize: 12,
+      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+    );
+    return Material(
+      color: background,
+      child: InkWell(
+        onTap: () => onSelected(span),
+        child: DefaultTextStyle(
+          style: textStyle,
+          child: Row(
+            children: [
+              _SpanIndexCell(
+                width: _spanIndexSpanWidth,
+                child: Text(
+                  trace.trace.spanName(span.spanId),
+                  key: ValueKey('span-row-$index-name'),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexStartWidth,
+                child: Text(formatNs(startOffsetNs)),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexDurationWidth,
+                child: Text(formatNs(span.durationNs)),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexTrackWidth,
+                child: Text('${span.trackId}'),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexCorrelationWidth,
+                child: Text('${span.begin.correlationId ?? '-'}'),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexArgsWidth,
+                child: Text(
+                  _spanArgsSummary(trace, span),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpanIndexCell extends StatelessWidget {
+  const _SpanIndexCell({required this.width, required this.child});
+
+  final double width;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: _spanIndexRowHeight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      ),
+    );
   }
 }
 

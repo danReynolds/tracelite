@@ -17,10 +17,11 @@ graph-data validation rows, and workload tables; and is reachable through
 `dart run bin/tracelite.dart visualize [--release|--profile] <path>`. The
 timeline has explicit zoom controls, scroll/double-click zoom, keyboard
 navigation, enlarged dense-span hit targets, nearest-span picking, range-aware
-visible-span queries, density rendering for large trace windows, and a linked
-span index so small SQLite calls remain inspectable. The workspace and compare
-screens also use the core insight layer to surface trust, trace-health, noise,
-peer-spread, and bottleneck findings before users drill into raw tables.
+visible-span queries, density rendering for large trace windows, and a
+virtualized linked span index so small SQLite calls remain inspectable. The
+workspace and compare screens also use the core insight layer to surface trust,
+trace-health, noise, peer-spread, and bottleneck findings before users drill
+into raw tables.
 
 Production readiness checkpoint: the app is suitable for local developer
 dogfooding and release-mode smoke testing. External distribution still requires

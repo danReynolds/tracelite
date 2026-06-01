@@ -91,19 +91,28 @@ void main() {
     expect(find.text('Trace Inspector'), findsOneWidget);
     expect(find.text('12000'), findsWidgets);
 
-    await tester.drag(find.byType(ListView).last, const Offset(0, -900));
+    await tester.drag(
+      find.byKey(const ValueKey('trace-page-scroll')),
+      const Offset(0, -900),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Span Index'), findsOneWidget);
     expect(find.text('12000 matches'), findsOneWidget);
 
-    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.drag(
+      find.byKey(const ValueKey('trace-page-scroll')),
+      const Offset(0, -700),
+    );
     await tester.pumpAndSettle();
     expect(
       find.textContaining('Visible Span Aggregation', skipOffstage: false),
       findsOneWidget,
     );
 
-    await tester.drag(find.byType(ListView).last, const Offset(0, 700));
+    await tester.drag(
+      find.byKey(const ValueKey('trace-page-scroll')),
+      const Offset(0, 700),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
     await tester.pumpAndSettle();
@@ -115,7 +124,10 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).last, const Offset(0, 900));
+    await tester.drag(
+      find.byKey(const ValueKey('trace-page-scroll')),
+      const Offset(0, 900),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Selected Span'), findsOneWidget);
     expect(find.text('target_dense_span'), findsWidgets);
@@ -158,7 +170,10 @@ void main() {
 
     await tester.tap(find.text('Trace'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.drag(
+      find.byKey(const ValueKey('trace-page-scroll')),
+      const Offset(0, -700),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Span Index'), findsOneWidget);
@@ -182,7 +197,10 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).last, const Offset(0, 700));
+    await tester.drag(
+      find.byKey(const ValueKey('trace-page-scroll')),
+      const Offset(0, 700),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Selected Span'), findsOneWidget);
