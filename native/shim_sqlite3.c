@@ -9,9 +9,9 @@
  *   - For each *wrapped* function: define our own symbol; the body
  *     resolves the real implementation via cached dlsym() and times the
  *     call.
- *   - For *unwrapped* functions: rely on the linker re-exporting the
- *     real library so untraced symbols are still resolvable from this
- *     shim's handle.
+ *   - For *unwrapped* functions: rely on the platform link strategy so
+ *     untraced symbols are still resolvable from this shim's handle
+ *     (re-export on macOS, libsqlite3 dependency lookup on Linux).
  *
  * Embedded mode:
  *   - Defining TRACELITE_SQLITE3_EMBEDDED builds the same wrappers into a
@@ -31,7 +31,8 @@
  * Loading from Dart:
  *   package:sqlite3 native hooks can be configured with
  *   `source: system, name: sqlite_traced`, and this repo copies the shim
- *   to libsqlite_traced.dylib before traced peer runs.
+ *   to the platform resolver name (`libsqlite_traced.dylib` on macOS or
+ *   `libsqlite_traced.so` on Linux) before traced peer runs.
  */
 
 #include "tracelite_runtime.h"

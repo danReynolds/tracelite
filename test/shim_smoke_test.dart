@@ -4,18 +4,25 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
+import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 import 'package:tracelite/tracelite.dart';
 
 void main() {
   test('shim intercepts real sqlite3 calls from package:sqlite3', () async {
-    final shim = File('build/libsqlite_traced.dylib');
-    if (!shim.existsSync()) {
-      fail('build/libsqlite_traced.dylib not built; run:\n'
-          '  cc -dynamiclib -Inative native/tracelite_runtime.c '
-          'native/shim_sqlite3.c -Wl,-reexport-lsqlite3 '
-          '-o build/libsqlite_traced.dylib');
+    final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+    if (shimBuildCommand == null) {
+      markTestSkipped(
+        'sqlite shim smoke is not implemented for '
+        '${Platform.operatingSystem}',
+      );
+      return;
     }
-    final resolverShim = File('libsqlite_traced.dylib');
+
+    final shim = File(native_artifacts.sqliteShimLibraryPath());
+    if (!shim.existsSync()) {
+      fail('${shim.path} not built; run:\n$shimBuildCommand');
+    }
+    final resolverShim = File(native_artifacts.sqliteShimLibraryName());
     resolverShim.writeAsBytesSync(shim.readAsBytesSync());
 
     final regionPath =

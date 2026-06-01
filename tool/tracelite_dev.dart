@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:tracelite/src/core_cli.dart';
+import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 import 'package:tracelite/tracelite.dart';
 
 import 'src/peer.dart';
@@ -125,36 +126,41 @@ Future<void> _doctor(List<String> args) async {
           ),
   );
 
-  final runtime = File(_joinPath(root.path, _defaultRuntimeLibraryPath()));
+  final runtime = File(
+    _joinPath(root.path, native_artifacts.defaultRuntimeLibraryPath()),
+  );
   checks.add(
     runtime.existsSync()
         ? _DoctorCheck.ok('native runtime', runtime.path)
         : _DoctorCheck.warn(
             'native runtime',
             'missing ${runtime.path}',
-            action: _runtimeBuildCommand().trim(),
+            action: native_artifacts.runtimeBuildCommand().trim(),
           ),
   );
 
-  final shim = File(_joinPath(root.path, _sqliteShimLibraryPath()));
-  if (Platform.isMacOS) {
+  final shimCommand = native_artifacts.sqliteShimBuildCommand();
+  if (shimCommand != null) {
+    final shim = File(
+      _joinPath(root.path, native_artifacts.sqliteShimLibraryPath()),
+    );
     checks.add(
       shim.existsSync()
           ? _DoctorCheck.ok('sqlite shim', shim.path)
           : _DoctorCheck.warn(
               'sqlite shim',
               'missing ${shim.path}',
-              action: _sqliteShimBuildCommand().trim(),
+              action: shimCommand.trim(),
             ),
     );
   } else {
     checks.add(
       _DoctorCheck.warn(
         'sqlite shim',
-        'macOS shim is the validated path; current platform is '
+        'sqlite shim build is not implemented for '
             '${Platform.operatingSystem}.',
-        action: 'Use macOS for production peer-suite evidence until '
-            'Linux/Windows shim validation lands.',
+        action: 'Use macOS or Linux for native shim evidence until '
+            'Windows shim validation lands.',
       ),
     );
   }
@@ -547,15 +553,26 @@ Future<void> _compare(List<String> args) async {
   final outJson = options['out-json'];
   final ringDataWords = _ringWordsForScenario(scenario, rows);
 
-  final shim = File('build/libsqlite_traced.dylib');
-  if (!shim.existsSync()) {
-    stderr.writeln('missing ${shim.path}; build it with:');
-    stderr.writeln('  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
-        'native/shim_sqlite3.c -Wl,-reexport-lsqlite3 '
-        '-o build/libsqlite_traced.dylib');
+  final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+  if (shimBuildCommand == null) {
+    stderr.writeln(
+      'sqlite shim comparison is not implemented for '
+      '${Platform.operatingSystem}.',
+    );
+    stderr.writeln(
+      'Use macOS or Linux for peer-suite evidence until Windows shim '
+      'validation lands.',
+    );
     exit(66);
   }
-  final resolverShim = File('libsqlite_traced.dylib');
+
+  final shim = File(native_artifacts.sqliteShimLibraryPath());
+  if (!shim.existsSync()) {
+    stderr.writeln('missing ${shim.path}; build it with:');
+    stderr.writeln(shimBuildCommand);
+    exit(66);
+  }
+  final resolverShim = File(native_artifacts.sqliteShimLibraryName());
   resolverShim.writeAsBytesSync(shim.readAsBytesSync());
 
   final tempRoot = Directory.systemTemp.createTempSync('tracelite-compare-');
@@ -717,11 +734,12 @@ Future<void> _calibrate(List<String> args) async {
   final iterations = _positiveIntOption(options, 'iterations', 10000);
   final repetitions = _positiveIntOption(options, 'repetitions', 5);
   final outJson = options['out-json'];
-  final runtimePath = options['runtime'] ?? _defaultRuntimeLibraryPath();
+  final runtimePath =
+      options['runtime'] ?? native_artifacts.defaultRuntimeLibraryPath();
   final runtime = File(runtimePath);
   if (!runtime.existsSync()) {
     stderr.writeln('missing ${runtime.path}; build it with:');
-    stderr.writeln(_runtimeBuildCommand());
+    stderr.writeln(native_artifacts.runtimeBuildCommand());
     exit(66);
   }
 
@@ -1596,35 +1614,6 @@ int _ringWordsForEvents(int events) {
     power <<= 1;
   }
   return power;
-}
-
-String _defaultRuntimeLibraryPath() {
-  final extension = switch (Platform.operatingSystem) {
-    'macos' => 'dylib',
-    'windows' => 'dll',
-    _ => 'so',
-  };
-  return 'build/libtracelite_runtime.$extension';
-}
-
-String _runtimeBuildCommand() {
-  final output = _defaultRuntimeLibraryPath();
-  return switch (Platform.operatingSystem) {
-    'macos' => '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
-        '-o $output',
-    'windows' => '  cc -shared -O2 -Inative native/tracelite_runtime.c '
-        '-o $output',
-    _ => '  cc -shared -fPIC -O2 -Inative native/tracelite_runtime.c '
-        '-o $output',
-  };
-}
-
-String _sqliteShimLibraryPath() => 'build/libsqlite_traced.dylib';
-
-String _sqliteShimBuildCommand() {
-  return '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
-      'native/shim_sqlite3.c -Wl,-reexport-lsqlite3 '
-      '-o ${_sqliteShimLibraryPath()}';
 }
 
 String _joinPath(String first, String second) {

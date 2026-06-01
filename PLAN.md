@@ -45,16 +45,17 @@ package:sqlite3  ←─── native hooks select source: system, name: sqlite_t
   │   resolves DynamicLibrary symbols against...
   │
   ▼
-libsqlite_traced.dylib (the tracelite shim)
+libsqlite_traced.{dylib,so} (the tracelite shim)
   │   ├── wrapped SQLite API subset:
   │   │     open/close, prepare/step/reset/finalize,
   │   │     binds, column reads, counters/errors, exec
   │   │     → emit BEGIN/END events with timing into shared mmap ring
   │   │     → call real libsqlite3 via dlsym(RTLD_NEXT, ...)
-  │   └── unwrapped functions: forwarded transparently via LC_REEXPORT_DYLIB
+  │   └── unwrapped functions: forwarded transparently via the platform link
+  │       strategy (LC_REEXPORT_DYLIB on macOS, libsqlite3 link on Linux)
   │
   ▼
-real libsqlite3.dylib or private sqlite3mc symbols in an embedded build
+real libsqlite3 or private sqlite3mc symbols in an embedded build
 
 
             ┌─── meanwhile, on the Dart side ───┐
@@ -246,7 +247,7 @@ Current validation status:
 
 | Peer | Scenario status | Shim trace status | Notes |
 |---|---|---|---|
-| `sqlite3` | Pass | Pass | Uses sqlite3 native hooks with `source: system`, `name: sqlite_traced`; the harness provides `libsqlite_traced.dylib` in cwd. |
+| `sqlite3` | Pass | Pass | Uses sqlite3 native hooks with `source: system`, `name: sqlite_traced`; the harness provides the platform resolver library (`libsqlite_traced.dylib` on macOS, `libsqlite_traced.so` on Linux) in cwd. |
 | `drift` | Pass | Pass | Uses `NativeDatabase`, which routes through `package:sqlite3`. |
 | `sqlite_async` | Pass | Pass | Uses the documented `singleConnection` wrapper over a traced `package:sqlite3` connection for the narrow common-interface scenario. The default native pool bypasses the shim. |
 | `resqlite` | Pass | Pass | Uses the local `resqlite` checkout's `trace_sqlite` build mode, which compiles sqlite3mc under private symbols and embeds tracelite's SQLite wrappers inside `libresqlite`. |
@@ -314,7 +315,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `flutter test`, `flutter analyze`, and `flutter build macos` pass |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
-| Linux LD_PRELOAD shim works | ✗ designed only | macOS-only validation today |
+| Linux native-hook shim smoke works | △ CI-configured | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` adds an Ubuntu package:sqlite3 shim smoke lane; full production peer suite remains macOS-only until CI evidence lands and broader peers are promoted |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
 | resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
@@ -655,11 +656,11 @@ prototype.
 Work:
 
 - Package the CLI and runtime build outputs cleanly.
-- Validate Linux shim loading (`LD_PRELOAD` or equivalent native-asset path).
+- Validate Linux shim loading through the sqlite3 native-hook resolver path.
 - Validate Windows substitution/loading strategy.
 - Add CI for:
   - generator freshness;
-  - runtime/shim tests;
+  - runtime/shim tests (macOS full suite plus Linux package:sqlite3 shim smoke);
   - benchmark artifact tests;
   - resqlite `trace_sqlite` native-asset smoke;
   - four-peer compare smoke where dependencies are available.
@@ -685,9 +686,9 @@ The non-obvious choices a future maintainer needs to know.
 
 ### 1. Reexport-and-override, not LD_PRELOAD
 
-Initial design assumed LD_PRELOAD-style symbol interposition. The actual implementation uses a different mechanism: build the shim as a libsqlite3-compatible dylib that re-exports the real libsqlite3 plus overrides the traced SQLite API subset. Consumer programs load the shim via sqlite3 native hooks. No global env var manipulation is required for the `package:sqlite3` path.
+Initial design assumed LD_PRELOAD-style symbol interposition. The actual implementation uses a different mechanism: build the shim as a libsqlite3-compatible dynamic library that forwards to the real libsqlite3 plus overrides the traced SQLite API subset. Consumer programs load the shim via sqlite3 native hooks. No global env var manipulation is required for the `package:sqlite3` path.
 
-This is *better* than LD_PRELOAD because it works on macOS without DYLD_INSERT_LIBRARIES restrictions, doesn't rely on global symbol resolution order, and doesn't surprise users who didn't expect their environment to be intercepted.
+This is *better* than LD_PRELOAD because it works on macOS without DYLD_INSERT_LIBRARIES restrictions, can use the same native-hook resolver name on Linux, and doesn't surprise users who didn't expect their environment to be intercepted.
 
 ### 2. BEGIN/END/INSTANT phase schemas, not single-phase args
 
@@ -754,6 +755,12 @@ cc -dynamiclib -O2 -Inative \
   native/tracelite_runtime.c native/shim_sqlite3.c \
   -Wl,-reexport-lsqlite3 \
   -o build/libsqlite_traced.dylib
+
+# Build the libsqlite3 shim (Linux)
+cc -shared -fPIC -O2 -Inative \
+  native/tracelite_runtime.c native/shim_sqlite3.c \
+  -lsqlite3 \
+  -o build/libsqlite_traced.so
 
 # Run all tests
 dart test

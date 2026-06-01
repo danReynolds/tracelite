@@ -21,7 +21,9 @@ basic production-gate viability. The current gap is reproducibility: resqlite
 needs a stable tracelite source pin, and old profile-only signals need explicit
 coverage or replacement in the pinned integration. Public package release still
 also needs distribution polish (publishing metadata, signed packaged visualizer
-builds, and non-macOS release host validation).
+builds, and Windows release host validation). Linux now has a focused
+package:sqlite3 shim smoke lane in CI, but the full production peer suite
+remains macOS-validated.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -462,11 +464,13 @@ The 2026-05-10 parity run added that export path. The existing resqlite
 summaries, RSS deltas, SQLite diagnostics, noop floors, and many-streams
 fanout medians.
 
-### 5. Portability is still macOS-first
+### 5. Portability is still macOS-first for the production suite
 
-The current shim validation is macOS-oriented. Linux `LD_PRELOAD`, Windows
-substitution, and CI coverage for those paths are still required before this can
-be called production-quality across Dart targets.
+The production peer suite is still macOS-oriented. The shim path now has a
+platform-aware resolver name and a Linux package:sqlite3 smoke job, which proves
+the basic native-hook loading strategy outside macOS. Windows substitution and
+full non-macOS production-suite evidence are still required before this can be
+called production-quality across every Dart target.
 
 ## Recommended next iteration
 

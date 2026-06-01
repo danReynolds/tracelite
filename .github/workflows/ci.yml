@@ -45,6 +45,9 @@ jobs:
             native/tracelite_runtime.c native/shim_sqlite3.c \
             -Wl,-reexport-lsqlite3 \
             -o build/libsqlite_traced.dylib
+          cc -std=c11 -O2 -Inative \
+            native/tracelite_runtime.c native/test_producer.c \
+            -o build/test_producer
 
       - name: Analyze
         working-directory: tracelite
@@ -61,3 +64,49 @@ jobs:
             --profile=ci \
             --interfaces=sqlite3,drift,sqlite_async,resqlite \
             --out-dir=build/tracelite-ci-suite
+
+  linux-shim:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out tracelite
+        uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Verify generated span outputs
+        run: dart run tool/generate.dart --check
+
+      - name: Build native runtime and SQLite shim
+        run: |
+          mkdir -p build
+          cc -shared -fPIC -O2 -Inative \
+            native/tracelite_runtime.c \
+            -o build/libtracelite_runtime.so
+          cc -shared -fPIC -O2 -Inative \
+            native/tracelite_runtime.c native/shim_sqlite3.c \
+            -lsqlite3 \
+            -o build/libsqlite_traced.so
+          cc -std=c11 -O2 -Inative \
+            native/tracelite_runtime.c native/test_producer.c \
+            -o build/test_producer
+
+      - name: Analyze
+        run: dart analyze
+
+      - name: Platform smoke tests
+        run: |
+          dart test \
+            test/runtime_smoke_test.dart \
+            test/shim_smoke_test.dart \
+            test/native_artifacts_test.dart \
+            test/package_boundary_test.dart

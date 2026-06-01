@@ -6,10 +6,15 @@ Future<void> main(List<String> args) async {
   final root = await _gitRoot();
   final dirty = await _gitStatus(root);
   if (dirty.isNotEmpty && !allowDirty) {
-    stderr.writeln('Tracked files are dirty; commit or pass --allow-dirty.');
+    stderr.writeln('Working tree is dirty; commit or pass --allow-dirty.');
     stderr.writeln(dirty);
     exitCode = 65;
     return;
+  } else if (dirty.isNotEmpty) {
+    stderr.writeln(
+      'Warning: --allow-dirty builds the archive from git-tracked paths; '
+      'untracked files are omitted unless staged.',
+    );
   }
 
   final temp = await Directory.systemTemp.createTemp('tracelite-publish-');
@@ -53,7 +58,7 @@ Future<String> _gitRoot() async {
 Future<String> _gitStatus(String root) async {
   final result = await Process.run(
     'git',
-    const ['status', '--porcelain', '--untracked-files=no'],
+    const ['status', '--porcelain', '--untracked-files=all'],
     workingDirectory: root,
   );
   if (result.exitCode != 0) {

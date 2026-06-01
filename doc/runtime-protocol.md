@@ -40,7 +40,7 @@ The protocol has to satisfy six properties:
 
 ## 1. Topology
 
-Tracelite uses a **single mmap'd region per trace**, owned by the harness, attached by every producer. Producers are typically all in-process (a Dart program loads the C shim via `LD_PRELOAD`, so the C code and the Dart code share a process), but the protocol works for cross-process drainage as well.
+Tracelite uses a **single mmap'd region per trace**, owned by the harness, attached by every producer. Producers are typically all in-process (a Dart program loads the C shim through the sqlite3 native-hook resolver, so the C code and the Dart code share a process), but the protocol works for cross-process drainage as well.
 
 Each *producer* (one Dart isolate, one C thread, one external process) gets its own private ring buffer within the shared region. This makes appends single-producer/single-consumer (SPSC). The hot path uses no compare-and-swap (CAS) and no inter-producer synchronization — only acquire/release atomics on the ring's `head` and `tail` to communicate with the consumer.
 
