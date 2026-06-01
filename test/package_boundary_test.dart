@@ -26,6 +26,17 @@ void main() {
     );
   });
 
+  test('publish archive excludes source-checkout peer adapters', () {
+    final pubignoreLines = File('.pubignore')
+        .readAsLinesSync()
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty && !line.startsWith('#'))
+        .toSet();
+
+    expect(pubignoreLines, contains('tool/src/'));
+    expect(pubignoreLines, contains('tool/tracelite_dev.dart'));
+  });
+
   test('published launcher keeps core commands available', () async {
     final binSource = File('bin/tracelite.dart').readAsStringSync();
     final coreCliSource = File('lib/src/core_cli.dart').readAsStringSync();

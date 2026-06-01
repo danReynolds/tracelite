@@ -2,4 +2,6 @@ build/
 libsqlite_traced.dylib
 pubspec_overrides.yaml
 tool/visualizer_app/
+tool/src/
+tool/tracelite_dev.dart
 tools/

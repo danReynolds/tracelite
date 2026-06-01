@@ -85,6 +85,11 @@ The published dependency graph is core-only: runtime code depends on `ffi` and
 peer adapters so one CLI can run comparable workloads against Dart SQLite
 packages during development and resqlite release-gate validation.
 
+The pub archive excludes the source-checkout peer runner
+(`tool/tracelite_dev.dart` and `tool/src/`). Published users get the
+recorder/runtime library and artifact CLI; repository checkouts get the peer
+benchmark suite.
+
 The long-term package split is core library plus peer-benchmark CLI. Today the
 public recorder APIs are standalone, while the source checkout keeps the
 dev-dependency-backed peer CLI in-tree so resqlite and other Dart SQLite
@@ -108,8 +113,8 @@ checkout testing do not affect the publish dry-run.
 the recorder, trace reader, decision logic, graph-data export, and vocabularies.
 `bin/` contains the thin published launcher. Core artifact commands live in
 `lib/src/core_cli.dart` so the published executable and source-checkout
-development CLI use the same implementation. `tool/tracelite_dev.dart` contains
-the dev-dependency-backed benchmark implementation, and
+development CLI use the same implementation. In a repository checkout,
+`tool/tracelite_dev.dart` contains the dev-dependency-backed benchmark implementation, and
 `tool/visualizer_app/` contains the Flutter desktop visualizer.
 
 ## Docs

@@ -21,7 +21,18 @@ Future<void> main(List<String> args) async {
       const ['pub', 'publish', '--dry-run'],
       workingDirectory: temp.path,
     );
-    exitCode = result;
+    if (result.exitCode == 0) {
+      final forbidden = _forbiddenArchiveEntries(result.stdout);
+      if (forbidden.isNotEmpty) {
+        stderr.writeln(
+          'Publish archive contains source-checkout-only files: '
+          '${forbidden.join(', ')}',
+        );
+        exitCode = 65;
+        return;
+      }
+    }
+    exitCode = result.exitCode;
   } finally {
     await temp.delete(recursive: true);
   }
@@ -74,7 +85,14 @@ Future<void> _copyTrackedFiles(String root, String targetRoot) async {
   }
 }
 
-Future<int> _runStreaming(
+List<String> _forbiddenArchiveEntries(String stdoutText) {
+  return [
+    if (stdoutText.contains('tracelite_dev.dart')) 'tool/tracelite_dev.dart',
+    if (stdoutText.contains('peer.dart')) 'tool/src/peer.dart',
+  ];
+}
+
+Future<_RunResult> _runStreaming(
   String executable,
   List<String> args, {
   required String workingDirectory,
@@ -84,11 +102,26 @@ Future<int> _runStreaming(
     args,
     workingDirectory: workingDirectory,
   );
+  final stdoutBuffer = StringBuffer();
   await Future.wait([
-    stdout.addStream(process.stdout),
-    stderr.addStream(process.stderr),
+    _tee(process.stdout, stdout, stdoutBuffer),
+    _tee(process.stderr, stderr),
   ]);
-  return process.exitCode;
+  return _RunResult(
+    exitCode: await process.exitCode,
+    stdout: stdoutBuffer.toString(),
+  );
+}
+
+Future<void> _tee(
+  Stream<List<int>> source,
+  IOSink sink, [
+  StringBuffer? buffer,
+]) async {
+  await for (final chunk in source) {
+    sink.add(chunk);
+    buffer?.write(String.fromCharCodes(chunk));
+  }
 }
 
 String _join(String parent, String child) {
@@ -96,4 +129,14 @@ String _join(String parent, String child) {
   return parent.endsWith(Platform.pathSeparator)
       ? '$parent$child'
       : '$parent${Platform.pathSeparator}$child';
+}
+
+final class _RunResult {
+  const _RunResult({
+    required this.exitCode,
+    required this.stdout,
+  });
+
+  final int exitCode;
+  final String stdout;
 }
