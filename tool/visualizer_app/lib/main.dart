@@ -415,6 +415,7 @@ class _TracePageState extends State<TracePage> {
   TraceSpan? _selectedSpan;
   _VisibleRange? _visibleRange;
   String _spanFilter = '';
+  bool _spanIndexVisibleOnly = false;
 
   @override
   void dispose() {
@@ -431,6 +432,7 @@ class _TracePageState extends State<TracePage> {
     if (oldWidget.workspace != widget.workspace) {
       _selectedSpan = null;
       _visibleRange = null;
+      _spanIndexVisibleOnly = false;
     }
   }
 
@@ -438,8 +440,13 @@ class _TracePageState extends State<TracePage> {
   Widget build(BuildContext context) {
     final traces = widget.workspace.traces;
     final trace = traces.isEmpty ? null : traces[_selectedIndex];
-    final matchingSpans = trace == null ? <TraceSpan>[] : _matchingSpans(trace);
     final visibleRange = trace == null ? null : _visibleRangeFor(trace);
+    final allMatchingSpans = trace == null
+        ? <TraceSpan>[]
+        : _matchingSpans(trace);
+    final matchingSpans = trace == null
+        ? <TraceSpan>[]
+        : _spanIndexMatches(allMatchingSpans, visibleRange);
     final visibleSpans = trace == null || visibleRange == null
         ? <TraceSpan>[]
         : _visibleSpans(trace, visibleRange);
@@ -541,6 +548,12 @@ class _TracePageState extends State<TracePage> {
                             'Hover to preview. Click near a tiny bar or a span row to pin it in the inspector.',
                       ),
                       _ToolGuideEntry(
+                        icon: Icons.filter_alt,
+                        title: 'Span Index',
+                        body:
+                            'Search by span, SQL, args, track, or correlation, then limit results to the visible window.',
+                      ),
+                      _ToolGuideEntry(
                         icon: Icons.keyboard,
                         title: 'Keyboard',
                         body:
@@ -570,10 +583,15 @@ class _TracePageState extends State<TracePage> {
                   child: SpanIndexPanel(
                     trace: trace,
                     spans: matchingSpans,
+                    totalMatches: allMatchingSpans.length,
+                    visibleOnly: _spanIndexVisibleOnly,
                     selected: _selectedSpan,
                     filterController: _spanFilterController,
                     onFilterChanged: (value) {
                       setState(() => _spanFilter = value.trim());
+                    },
+                    onVisibleOnlyChanged: (value) {
+                      setState(() => _spanIndexVisibleOnly = value);
                     },
                     onSelected: (span) {
                       setState(() => _selectedSpan = span);
@@ -607,6 +625,24 @@ class _TracePageState extends State<TracePage> {
           return b.durationNs.compareTo(a.durationNs);
         });
     return spans;
+  }
+
+  List<TraceSpan> _spanIndexMatches(
+    List<TraceSpan> allMatches,
+    _VisibleRange? visibleRange,
+  ) {
+    if (!_spanIndexVisibleOnly || visibleRange == null) {
+      return allMatches;
+    }
+    return [
+      for (final span in allMatches)
+        if (_spanOverlapsRange(span, visibleRange)) span,
+    ];
+  }
+
+  bool _spanOverlapsRange(TraceSpan span, _VisibleRange range) {
+    final endNs = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+    return endNs > range.startNs && span.startNs < range.endNs;
   }
 
   _VisibleRange _visibleRangeFor(TraceDocument trace) {
@@ -2405,17 +2441,23 @@ class SpanIndexPanel extends StatelessWidget {
     super.key,
     required this.trace,
     required this.spans,
+    required this.totalMatches,
+    required this.visibleOnly,
     required this.selected,
     required this.filterController,
     required this.onFilterChanged,
+    required this.onVisibleOnlyChanged,
     required this.onSelected,
   });
 
   final TraceDocument trace;
   final List<TraceSpan> spans;
+  final int totalMatches;
+  final bool visibleOnly;
   final TraceSpan? selected;
   final TextEditingController filterController;
   final ValueChanged<String> onFilterChanged;
+  final ValueChanged<bool> onVisibleOnlyChanged;
   final ValueChanged<TraceSpan> onSelected;
 
   @override
@@ -2428,30 +2470,43 @@ class SpanIndexPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: filterController,
-                onChanged: onFilterChanged,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.search),
-                  labelText:
-                      'Filter spans by name, SQL, args, track, or correlation',
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final search = TextField(
+              controller: filterController,
+              onChanged: onFilterChanged,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.search),
+                labelText:
+                    'Filter spans by name, SQL, args, track, or correlation',
               ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              '${spans.length} matches',
-              style: TextStyle(
-                color: colors.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+            );
+            final tools = _SpanIndexScopeTools(
+              visibleOnly: visibleOnly,
+              visibleMatches: spans.length,
+              totalMatches: totalMatches,
+              onVisibleOnlyChanged: onVisibleOnlyChanged,
+            );
+            if (constraints.maxWidth < 780) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  search,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: tools),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: search),
+                const SizedBox(width: 12),
+                tools,
+              ],
+            );
+          },
         ),
         const SizedBox(height: 10),
         SizedBox(
@@ -2511,6 +2566,68 @@ class SpanIndexPanel extends StatelessWidget {
     final events = trace.trace.events;
     final start = events.isEmpty ? 0 : events.first.timestampNs;
     return math.max(0, span.startNs - start);
+  }
+}
+
+class _SpanIndexScopeTools extends StatelessWidget {
+  const _SpanIndexScopeTools({
+    required this.visibleOnly,
+    required this.visibleMatches,
+    required this.totalMatches,
+    required this.onVisibleOnlyChanged,
+  });
+
+  final bool visibleOnly;
+  final int visibleMatches;
+  final int totalMatches;
+  final ValueChanged<bool> onVisibleOnlyChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final countLabel = visibleOnly
+        ? '$visibleMatches/$totalMatches matches'
+        : '$visibleMatches matches';
+    return Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Tooltip(
+          message:
+              'Limit the span index to rows overlapping the current timeline window',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () => onVisibleOnlyChanged(!visibleOnly),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    key: const ValueKey('span-index-visible-toggle'),
+                    value: visibleOnly,
+                    onChanged: onVisibleOnlyChanged,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Visible window only',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Text(
+          countLabel,
+          style: TextStyle(
+            color: colors.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
   }
 }
 

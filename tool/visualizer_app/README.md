@@ -33,9 +33,11 @@ flutter run -d macos -a ../../build/visualizer-demo
   the run, the zoom slider or `+`/`-` to resize the visible window, double-click
   or scroll over the timeline to zoom at the cursor, drag horizontally to pan,
   hover to preview, and click near a tiny bar or span-index row to pin details.
-  `F` focuses the active span and `Home` fits the full trace. The timeline uses
-  enlarged bars, wider hit targets, and nearest-span picking so dense traces do
-  not require perfect clicks.
+  The span index can stay global or switch to visible-window mode so search
+  results follow the current zoomed timeline window. `F` focuses the active span
+  and `Home` fits the full trace. The timeline uses enlarged bars, wider hit
+  targets, and nearest-span picking so dense traces do not require perfect
+  clicks.
 - Compare ranks peers by measured elapsed time, scenario elapsed time, SQLite
   call volume, and trace health.
 - Artifacts lists the raw trace, suite, decision, workload, and graph-data
