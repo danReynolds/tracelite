@@ -156,3 +156,33 @@ jobs:
             test/shim_smoke_test.dart \
             test/native_artifacts_test.dart \
             test/package_boundary_test.dart
+
+  windows-core:
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out tracelite
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Verify generated span outputs
+        run: dart --packages=.dart_tool/package_config.json tool/generate.dart --check
+
+      - name: Analyze Dart artifact surface
+        run: >-
+          dart analyze
+          lib
+          bin
+          tool/platform_core_smoke.dart
+          test/native_artifacts_test.dart
+          test/package_boundary_test.dart
+          test/insights_test.dart
+          test/diff_statistics_test.dart
+
+      - name: Core artifact smoke
+        run: dart --packages=.dart_tool/package_config.json tool/platform_core_smoke.dart

@@ -24,12 +24,13 @@ basic production-gate viability or source reproducibility. The current gap is
 adoption: resqlite needs to finish retiring or preserving old profile-only
 signals under the pinned integration, and Tracelite still needs public
 distribution polish (publishing metadata, signed packaged visualizer builds, and
-Windows release host validation). Tracelite's own macOS CI pins and verifies the
-trace-enabled resqlite sibling checkout at
+Windows native release host validation). Tracelite's own macOS CI pins and
+verifies the trace-enabled resqlite sibling checkout at
 `a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
 gate cannot accidentally benchmark the pub package. Linux now has a focused
-package:sqlite3 shim smoke lane in CI, but the full production peer suite
-remains macOS-validated.
+package:sqlite3 shim smoke lane in CI. Windows now validates the
+platform-independent Dart artifact and core CLI surface in CI, but the full
+production peer suite and native runtime/shim tracing remain macOS-validated.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -501,9 +502,12 @@ fanout medians.
 
 The production peer suite is still macOS-oriented. The shim path now has a
 platform-aware resolver name and a Linux package:sqlite3 smoke job, which proves
-the basic native-hook loading strategy outside macOS. Windows substitution and
-full non-macOS production-suite evidence are still required before this can be
-called production-quality across every Dart target.
+the basic native-hook loading strategy outside macOS. Windows now has a
+core-artifact CI lane for dependency resolution, generated-output freshness,
+analysis, and platform-independent diff/insight/package-boundary tests. Windows
+native runtime and SQLite substitution, plus full non-macOS production-suite
+evidence, are still required before this can be called production-quality
+across every Dart target.
 
 ## Recommended next iteration
 

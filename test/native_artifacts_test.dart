@@ -17,6 +17,29 @@ void main() {
     );
   });
 
+  test('runtime build commands are explicit about supported platforms', () {
+    expect(
+      native_artifacts.runtimeBuildCommand(operatingSystem: 'macos'),
+      allOf(
+        contains('-dynamiclib'),
+        contains('native/tracelite_runtime.c'),
+        contains('build/libtracelite_runtime.dylib'),
+      ),
+    );
+    expect(
+      native_artifacts.runtimeBuildCommand(operatingSystem: 'linux'),
+      allOf(
+        contains('-shared -fPIC'),
+        contains('native/tracelite_runtime.c'),
+        contains('build/libtracelite_runtime.so'),
+      ),
+    );
+    expect(
+      native_artifacts.runtimeBuildCommand(operatingSystem: 'windows'),
+      isNull,
+    );
+  });
+
   test('sqlite shim resolver names match native-hook lookup conventions', () {
     expect(
       native_artifacts.sqliteShimLibraryPath(operatingSystem: 'macos'),

@@ -12,8 +12,9 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Next bottleneck:** production benchmark replacement hardening — keep the pinned
 resqlite PR green, decide how aggressively to retire the old resqlite direct
-profile runner, then finish diagnostic-workload noise reduction, packaging, and
-Linux/Windows shim validation.
+profile runner, then finish diagnostic-workload noise reduction, packaging,
+Windows native runtime/shim validation, and full non-macOS production-suite
+evidence.
 
 ---
 
@@ -332,7 +333,8 @@ A clear-eyed accounting. Designed ≠ proven.
 | Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `flutter test`, `flutter analyze`, and `flutter build macos` pass |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
-| Linux native-hook shim smoke works | △ CI-configured | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` adds an Ubuntu package:sqlite3 shim smoke lane; full production peer suite remains macOS-only until CI evidence lands and broader peers are promoted |
+| Linux native-hook shim smoke works | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane; full production peer suite remains macOS-only until broader peers are promoted |
+| Windows core artifact surface works | △ CI-configured | `.github/workflows/ci.yml` runs generated-output, analysis, and platform-independent core artifact tests on Windows; native runtime/shim tracing remains unsupported until the runtime is ported off POSIX-only mmap/open/clock APIs |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
 | resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the pinned trace-enabled sibling checkout before peer tests |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
@@ -689,6 +691,9 @@ Work:
 
 - Package the CLI and runtime build outputs cleanly.
 - Validate Linux shim loading through the sqlite3 native-hook resolver path.
+- Validate Windows core artifact commands in CI while keeping native tracing
+  explicitly unsupported until the runtime and SQLite shim have real Windows
+  implementations.
 - Validate Windows substitution/loading strategy.
 - Add CI for:
   - generator freshness;

@@ -136,18 +136,31 @@ Future<void> _doctor(List<String> args) async {
           ),
   );
 
-  final runtime = File(
-    _joinPath(root.path, native_artifacts.defaultRuntimeLibraryPath()),
-  );
-  checks.add(
-    runtime.existsSync()
-        ? _DoctorCheck.ok('native runtime', runtime.path)
-        : _DoctorCheck.warn(
-            'native runtime',
-            'missing ${runtime.path}',
-            action: native_artifacts.runtimeBuildCommand().trim(),
-          ),
-  );
+  final runtimeCommand = native_artifacts.runtimeBuildCommand();
+  if (runtimeCommand != null) {
+    final runtime = File(
+      _joinPath(root.path, native_artifacts.defaultRuntimeLibraryPath()),
+    );
+    checks.add(
+      runtime.existsSync()
+          ? _DoctorCheck.ok('native runtime', runtime.path)
+          : _DoctorCheck.warn(
+              'native runtime',
+              'missing ${runtime.path}',
+              action: runtimeCommand.trim(),
+            ),
+    );
+  } else {
+    checks.add(
+      _DoctorCheck.warn(
+        'native runtime',
+        'native runtime build is not implemented for '
+            '${Platform.operatingSystem}.',
+        action: 'Use macOS or Linux for native tracing evidence until '
+            'Windows runtime validation lands.',
+      ),
+    );
+  }
 
   final shimCommand = native_artifacts.sqliteShimBuildCommand();
   if (shimCommand != null) {
@@ -930,8 +943,21 @@ Future<void> _calibrate(List<String> args) async {
       options['runtime'] ?? native_artifacts.defaultRuntimeLibraryPath();
   final runtime = File(runtimePath);
   if (!runtime.existsSync()) {
-    stderr.writeln('missing ${runtime.path}; build it with:');
-    stderr.writeln(native_artifacts.runtimeBuildCommand());
+    final buildCommand = native_artifacts.runtimeBuildCommand();
+    if (buildCommand == null) {
+      stderr.writeln('missing ${runtime.path}.');
+      stderr.writeln(
+        'native runtime calibration is not implemented for '
+        '${Platform.operatingSystem}.',
+      );
+      stderr.writeln(
+        'Use macOS or Linux for native tracing evidence until Windows runtime '
+        'validation lands.',
+      );
+    } else {
+      stderr.writeln('missing ${runtime.path}; build it with:');
+      stderr.writeln(buildCommand);
+    }
     exit(66);
   }
 

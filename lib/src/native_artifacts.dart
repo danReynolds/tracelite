@@ -13,14 +13,13 @@ String defaultRuntimeLibraryPath({String? operatingSystem}) {
       '${dynamicLibraryExtension(operatingSystem: operatingSystem)}';
 }
 
-String runtimeBuildCommand({String? operatingSystem}) {
+String? runtimeBuildCommand({String? operatingSystem}) {
   final os = operatingSystem ?? Platform.operatingSystem;
   final output = defaultRuntimeLibraryPath(operatingSystem: os);
   return switch (os) {
     'macos' => '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
         '-o $output',
-    'windows' => '  cc -shared -O2 -Inative native/tracelite_runtime.c '
-        '-o $output',
+    'windows' => null,
     _ => '  cc -shared -fPIC -O2 -Inative native/tracelite_runtime.c '
         '-o $output',
   };
