@@ -243,7 +243,7 @@ Run both: `dart test`. Both pass.
   artifacts and logs. `ci` is the small PR smoke, `experiment` is the medium
   repeated baseline/candidate workflow, and `production` is the release-gate
   matrix.
-- `bin/tracelite.dart suite-history --profile=experiment|production --runs=5 --out-dir=...`
+- `bin/tracelite.dart suite-history --profile=ci|experiment|production --runs=5 --out-dir=...`
   runs independent suites into timestamped run directories, writes a
   `tracelite.suite_history.v1` manifest, and emits policy-calibration JSON and
   markdown sidecars.

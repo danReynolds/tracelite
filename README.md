@@ -111,10 +111,11 @@ libraries can run one benchmark workflow during the pre-1.0 phase.
 resqlite has the deepest integration today: it can emit semantic spans/counters
 for its reader pool, writer isolate, stream invalidation, diagnostics, and old
 profile-parity metrics. Its current gate is pinned to
-`bcb3f3f419a09aa682948595fdb8ab002af637dc`
-(`resqlite-profiling-gate-2026-05-31`) and has validated repeated production
+`1fc321113c5a3a1598fc2908b52ed401eb65737c`
+(`resqlite-profiling-gate-2026-06-01`) and has validated repeated production
 runs, policy calibration, no-regression acceptance, injected-regression
-rejection, graph-data export, and clean-clone publish dry-run behavior.
+rejection, graph-data export, insight artifacts, and clean-clone publish dry-run
+behavior.
 
 For release hygiene, run `dart run tool/publish_check.dart` from a clean commit.
 It validates a clean git archive, so ignored local overrides used for sibling

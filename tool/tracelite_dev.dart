@@ -2178,7 +2178,7 @@ Never _usage({int exitCode = 64}) {
       '[--scenarios=narrow-batch-insert,...] '
       '[--out-dir=build/tracelite-suite]');
   stderr.writeln('  dart run bin/tracelite.dart suite-history '
-      '[--profile=experiment|production] [--runs=5] '
+      '[--profile=ci|experiment|production] [--runs=5] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
       '[--metrics=elapsed_ns,...] [--target-rse-percent=2.5] '
