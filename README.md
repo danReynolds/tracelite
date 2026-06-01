@@ -84,6 +84,12 @@ dart run bin/tracelite.dart suite \
   --profile=experiment \
   --interfaces=sqlite3,drift,sqlite_async
 
+# Source-checkout compare; repeated runs default to an app-JIT child runner.
+dart run bin/tracelite.dart compare \
+  --scenario=narrow-batch-insert \
+  --interfaces=sqlite3,resqlite \
+  --repetitions=5
+
 # Source-checkout desktop visualizer launcher.
 dart run bin/tracelite.dart visualize build/graph-data
 ```
@@ -94,7 +100,9 @@ Use `ci` for routine pull-request smoke checks, `experiment` for a new
 performance idea's baseline/candidate run, and `production` for release-gate
 calibration. All profiles write the same manifest and compare artifacts, so a
 run can move from quick signal to audited decision without changing artifact
-shape.
+shape. Repeated source-checkout compares default to an app-JIT child runner so
+the artifact still has isolated repetitions without paying `dart run` startup
+for every sample.
 
 ## Integrations
 

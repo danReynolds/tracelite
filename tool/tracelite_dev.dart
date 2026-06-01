@@ -279,8 +279,7 @@ Future<void> _suite(List<String> args) async {
     final result = await Process.run(
       Platform.resolvedExecutable,
       [
-        'run',
-        'bin/tracelite.dart',
+        'tool/tracelite_dev.dart',
         'compare',
         '--scenario=${scenario.name}',
         '--interfaces=$interfaces',
@@ -452,8 +451,7 @@ Future<void> _suiteHistory(List<String> args) async {
     final result = await Process.run(
       Platform.resolvedExecutable,
       [
-        'run',
-        'bin/tracelite.dart',
+        'tool/tracelite_dev.dart',
         'suite',
         '--profile=$profileName',
         '--interfaces=$interfaces',
@@ -561,6 +559,11 @@ Future<void> _compare(List<String> args) async {
   final rows = _positiveIntOption(options, 'rows', 100);
   final repetitions = _positiveIntOption(options, 'repetitions', 1);
   final outJson = options['out-json'];
+  final runnerMode = options['runner'] ?? 'auto';
+  if (!const {'auto', 'script', 'app-jit'}.contains(runnerMode)) {
+    stderr.writeln('--runner must be auto, script, or app-jit');
+    exit(64);
+  }
   final ringDataWords = _ringWordsForScenario(scenario, rows);
 
   final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
@@ -587,6 +590,11 @@ Future<void> _compare(List<String> args) async {
 
   final tempRoot = Directory.systemTemp.createTempSync('tracelite-compare-');
   try {
+    final runner = await _preparePeerChildRunner(
+      requestedMode: runnerMode,
+      tempRoot: tempRoot,
+      useAppJitByDefault: interfaces.length * repetitions > 1,
+    );
     final results = <_PeerTraceResult>[];
     for (final peer in interfaces) {
       for (var repetition = 1; repetition <= repetitions; repetition++) {
@@ -601,21 +609,14 @@ Future<void> _compare(List<String> args) async {
         final stopwatch = Stopwatch()..start();
         final child = await Process.run(
           Platform.resolvedExecutable,
-          [
-            'run',
-            'bin/tracelite.dart',
-            '_run-peer',
-            '--peer=$peer',
-            '--scenario=$scenario',
-            '--database=$databasePath',
-            '--rows=$rows',
-            '--metrics=$metricsPath',
-          ],
-          environment: {
-            'TRACELITE_REGION': regionPath,
-            'DYLD_LIBRARY_PATH': Directory.current.absolute.path,
-            'LD_LIBRARY_PATH': Directory.current.absolute.path,
-          },
+          runner.arguments(_runPeerArgs(
+            peer: peer,
+            scenario: scenario,
+            databasePath: databasePath,
+            rows: rows,
+            metricsPath: metricsPath,
+          )),
+          environment: _peerChildEnvironment(regionPath),
         );
         stopwatch.stop();
         final metrics = _readPeerMetrics(metricsPath);
@@ -663,6 +664,7 @@ Future<void> _compare(List<String> args) async {
       rows: rows,
       repetitions: repetitions,
       ringDataWords: ringDataWords,
+      runner: runner.toJson(),
       results: results,
     );
     if (outJson != null && outJson.isNotEmpty) {
@@ -680,6 +682,91 @@ Future<void> _compare(List<String> args) async {
       tempRoot.deleteSync(recursive: true);
     } catch (_) {}
   }
+}
+
+Future<_PeerChildRunner> _preparePeerChildRunner({
+  required String requestedMode,
+  required Directory tempRoot,
+  required bool useAppJitByDefault,
+}) async {
+  final shouldUseAppJit = requestedMode == 'app-jit' ||
+      requestedMode == 'auto' && useAppJitByDefault;
+  if (!shouldUseAppJit) {
+    return _PeerChildRunner.script(requestedMode: requestedMode);
+  }
+
+  final snapshotPath = '${tempRoot.path}/tracelite-peer-runner.jit';
+  final regionPath = '${tempRoot.path}/runner-warmup.tlt-region';
+  final metricsPath = '${tempRoot.path}/runner-warmup.metrics.json';
+  final databasePath = '${tempRoot.path}/runner-warmup.db';
+  TraceRegion.createFile(
+    regionPath,
+    ringDataWords: _ringWordsForScenario(narrowBatchInsertScenario, 1),
+  );
+
+  final stopwatch = Stopwatch()..start();
+  final result = await Process.run(
+    Platform.resolvedExecutable,
+    [
+      '--snapshot-kind=app-jit',
+      '--snapshot=$snapshotPath',
+      'tool/tracelite_dev.dart',
+      ..._runPeerArgs(
+        peer: 'sqlite3',
+        scenario: narrowBatchInsertScenario,
+        databasePath: databasePath,
+        rows: 1,
+        metricsPath: metricsPath,
+      ),
+    ],
+    environment: _peerChildEnvironment(regionPath),
+  );
+  stopwatch.stop();
+
+  if (result.exitCode == 0 && File(snapshotPath).existsSync()) {
+    return _PeerChildRunner.appJit(
+      requestedMode: requestedMode,
+      snapshotPath: snapshotPath,
+      buildElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+    );
+  }
+
+  final detail = 'app-jit runner preparation failed with exit '
+      '${result.exitCode}; stdout: ${result.stdout}; stderr: ${result.stderr}';
+  if (requestedMode == 'app-jit') {
+    stderr.writeln(detail);
+    exit(66);
+  }
+  stderr.writeln('$detail; falling back to direct script runner.');
+  return _PeerChildRunner.script(
+    requestedMode: requestedMode,
+    fallbackReason: detail,
+  );
+}
+
+List<String> _runPeerArgs({
+  required String peer,
+  required String scenario,
+  required String databasePath,
+  required int rows,
+  required String metricsPath,
+}) {
+  return [
+    '_run-peer',
+    '--peer=$peer',
+    '--scenario=$scenario',
+    '--database=$databasePath',
+    '--rows=$rows',
+    '--metrics=$metricsPath',
+  ];
+}
+
+Map<String, String> _peerChildEnvironment(String regionPath) {
+  return {
+    'TRACELITE_REGION': regionPath,
+    'DYLD_LIBRARY_PATH': Directory.current.absolute.path,
+    'LD_LIBRARY_PATH': Directory.current.absolute.path,
+  };
 }
 
 Future<void> _visualize(List<String> args) async {
@@ -921,6 +1008,7 @@ Map<String, Object?> _compareArtifact({
   required int rows,
   required int repetitions,
   required int ringDataWords,
+  required Map<String, Object?> runner,
   required List<_PeerTraceResult> results,
 }) {
   final peers = <String, List<_PeerTraceResult>>{};
@@ -935,6 +1023,7 @@ Map<String, Object?> _compareArtifact({
     'rows': rows,
     'workload': peerScenarioParameters(scenario, rows: rows),
     'environment': _environmentArtifact(),
+    'runner': runner,
     'repetitions': repetitions,
     'ring_data_words': ringDataWords,
     'peers': [
@@ -1103,6 +1192,9 @@ void _printCompareReport(Map<String, Object?> artifact) {
   final rows = artifact['rows'] as int;
   final repetitions = artifact['repetitions'] as int;
   final peers = artifact['peers'] as List<Object?>;
+  final runner = artifact['runner'] is Map
+      ? Map<String, Object?>.from(artifact['runner']! as Map)
+      : const <String, Object?>{};
 
   stdout
     ..writeln('# tracelite compare')
@@ -1110,6 +1202,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
     ..writeln('Scenario: `$scenario`')
     ..writeln('Rows: $rows')
     ..writeln('Repetitions: $repetitions')
+    ..writeln('Runner: `${runner['mode'] ?? 'unknown'}`')
     ..writeln()
     ..writeln(
       '> tracelite compares shared SQL execution paths, not overall '
@@ -1839,6 +1932,61 @@ class _PeerTraceResult {
   Map<String, Object?> get measurements => metrics.measurements;
 }
 
+class _PeerChildRunner {
+  _PeerChildRunner._({
+    required this.mode,
+    required this.requestedMode,
+    this.snapshotPath,
+    this.buildElapsedNs,
+    this.fallbackReason,
+  });
+
+  factory _PeerChildRunner.script({
+    required String requestedMode,
+    String? fallbackReason,
+  }) {
+    return _PeerChildRunner._(
+      mode: 'script',
+      requestedMode: requestedMode,
+      fallbackReason: fallbackReason,
+    );
+  }
+
+  factory _PeerChildRunner.appJit({
+    required String requestedMode,
+    required String snapshotPath,
+    required int buildElapsedNs,
+  }) {
+    return _PeerChildRunner._(
+      mode: 'app_jit',
+      requestedMode: requestedMode,
+      snapshotPath: snapshotPath,
+      buildElapsedNs: buildElapsedNs,
+    );
+  }
+
+  final String mode;
+  final String requestedMode;
+  final String? snapshotPath;
+  final int? buildElapsedNs;
+  final String? fallbackReason;
+
+  List<String> arguments(List<String> peerArgs) {
+    final snapshot = snapshotPath;
+    if (mode == 'app_jit' && snapshot != null) {
+      return [snapshot, ...peerArgs];
+    }
+    return ['tool/tracelite_dev.dart', ...peerArgs];
+  }
+
+  Map<String, Object?> toJson() => {
+        'mode': mode,
+        'requested_mode': requestedMode,
+        if (buildElapsedNs != null) 'build_elapsed_ns': buildElapsedNs,
+        if (fallbackReason != null) 'fallback_reason': fallbackReason,
+      };
+}
+
 class _SuiteProfile {
   const _SuiteProfile({
     required this.description,
@@ -2180,7 +2328,8 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('  dart run bin/tracelite.dart compare '
       '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
-      '[--repetitions=5] [--out-json=compare.json]');
+      '[--repetitions=5] [--runner=auto|script|app-jit] '
+      '[--out-json=compare.json]');
   stderr.writeln('  dart run bin/tracelite.dart suite '
       '[--profile=ci|experiment|production] '
       '[--interfaces=sqlite3,drift,...] '

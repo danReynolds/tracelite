@@ -200,7 +200,8 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart compare --repetitions=N --out-json=compare.json` runs
   repeated peer scenarios and writes benchmark artifacts with per-repetition
   scenario elapsed time, child process time, trace diagnostics, span groups, and
-  counter groups.
+  counter groups. Multi-repetition or multi-peer compares default to an app-JIT
+  child runner so each repetition does not pay `dart run` startup.
 - `bin/tracelite.dart diff --baseline=base.json --candidate=change.json`
   compares compare artifacts by summary metric with CV gates, a 95% mean-delta
   confidence interval, Mann-Whitney U repetition evidence, and outlier counts.
@@ -493,6 +494,9 @@ Delivered:
   elapsed time, trace diagnostics, span groups, and counter groups.
 - Scenario elapsed time is measured inside the child process, so benchmark
   timings exclude `dart run` startup and native-asset build-hook overhead.
+- Multi-repetition or multi-peer compares default to an app-JIT child runner,
+  and source-checkout suites invoke the dev CLI directly, reducing repeated
+  `dart run` startup without changing the per-repetition artifact shape.
 - `tracelite diff --baseline=base.json --candidate=change.json` compares
   artifacts by summary metric with a percent threshold and coefficient-of-
   variation noise gate.
@@ -603,8 +607,10 @@ Work:
   invalidation semantics.
 - Scale ring sizing from expected event volume and fail loudly if any producer
   drops events.
-- Consider a compiled/snapshotted child or long-lived worker to reduce suite
-  wall time once region reset semantics are formalized.
+- Done first slice: source-checkout compare uses direct script launches for
+  single-shot runs and app-JIT child launches for repeated or multi-peer runs.
+  A long-lived worker can reduce suite wall time further once region reset
+  semantics are formalized.
 
 Acceptance gates:
 

@@ -43,6 +43,10 @@ void main() {
     expect(artifact['schema'], 'tracelite.compare.v1');
     expect(artifact['workload'], isA<Map<String, Object?>>());
     expect(artifact['environment'], isA<Map<String, Object?>>());
+    final runner = artifact['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'app_jit');
+    expect(runner['requested_mode'], 'auto');
+    expect(runner['build_elapsed_ns'] as int, greaterThan(0));
     expect(artifact['repetitions'], 2);
     expect(artifact['ring_data_words'] as int, greaterThan(0));
     final peers = artifact['peers'] as List<Object?>;

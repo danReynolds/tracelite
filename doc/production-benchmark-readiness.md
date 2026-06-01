@@ -57,6 +57,9 @@ The explicit resqlite merge gate is documented in
   benchmark matrix and writes a suite manifest plus per-scenario compare
   artifacts and logs. `experiment` is the medium repeated preset for
   baseline/candidate work that should not pay the full release-gate cost yet.
+- Source-checkout `compare` now records its child runner mode and defaults to
+  an app-JIT child runner for repeated or multi-peer runs, while `suite` and
+  `suite-history` avoid nested `dart run` launches.
 - `.github/workflows/ci.yml` now defines the intended macOS CI baseline:
   generated-span freshness, native runtime/shim build, analysis, tests, and the
   four-peer `ci` suite. It assumes a sibling resqlite repository checkout and
@@ -447,13 +450,15 @@ fake watch wrapper around the current raw `NativeDatabase` path.
 ### 3. Runner startup is separated, not eliminated
 
 Scenario elapsed time is now measured inside the child process, so startup does
-not pollute the benchmark metric. The runner still pays `dart run` process
-startup per repetition, which makes large experiment suites slower than they
-need to be. `tracelite explain` now flags compare artifacts where child-process
-wall time dwarfs measured workload time, so smoke-sized artifacts are visibly
-classified as harness-dominated rather than quietly treated as production
-evidence. A production runner should still use a compiled/snapshotted child or
-a long-lived worker once region lifecycle and reset semantics are formalized.
+not pollute the benchmark metric. The runner no longer pays `dart run` process
+startup for every peer repetition: source-checkout `compare` launches direct
+scripts for single-shot runs and prepares an app-JIT child runner for repeated
+or multi-peer runs by default. `tracelite explain` flags compare artifacts where
+child-process wall time still dwarfs measured workload time, so smoke-sized
+artifacts are visibly classified as harness-dominated rather than quietly
+treated as production evidence. A future production runner can still go further
+with a long-lived worker once region lifecycle and reset semantics are
+formalized.
 
 ### 4. Resqlite semantic parity depends on adoption
 
