@@ -768,6 +768,12 @@ class _ComparePageState extends State<ComparePage> {
                         body:
                             'Dropped, unmatched-begin, and unmatched-end event counts. Non-zero means inspect before trusting timings.',
                       ),
+                      _ToolGuideEntry(
+                        icon: Icons.fingerprint,
+                        title: 'SQL Fingerprints',
+                        body:
+                            'Normalized prepare groups show query-shape cost without exposing literal values.',
+                      ),
                     ],
                   ),
                 ),
@@ -775,6 +781,11 @@ class _ComparePageState extends State<ComparePage> {
                 _Section(
                   title: 'Peer Metrics',
                   child: PeerComparisonTable(compare: compare),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'SQL Query Shapes',
+                  child: PeerSqlFingerprintBreakdown(compare: compare),
                 ),
                 const SizedBox(height: 16),
                 _Section(
@@ -2017,6 +2028,51 @@ class PeerSpanBreakdown extends StatelessWidget {
       rows: rows,
     );
   }
+}
+
+class PeerSqlFingerprintBreakdown extends StatelessWidget {
+  const PeerSqlFingerprintBreakdown({super.key, required this.compare});
+
+  final CompareDocument compare;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <List<String>>[];
+    for (final peer in compare.peers) {
+      final sample = peer.samples
+          .where((sample) => sample.status == 'ok')
+          .firstOrNull;
+      if (sample == null) {
+        rows.add([peer.name, peer.status, '-', '-', '-', '-']);
+        continue;
+      }
+      if (sample.sqlFingerprintGroups.isEmpty) {
+        rows.add([peer.name, 'no SQL fingerprints', '-', '-', '-', '-']);
+        continue;
+      }
+      for (final group in sample.sqlFingerprintGroups.take(8)) {
+        rows.add([
+          peer.name,
+          _shortFingerprint(group.fingerprint),
+          '${group.prepareCount}',
+          formatNs(group.prepareTotalNs),
+          formatNs(group.prepareP90Ns),
+          group.normalizedSql,
+        ]);
+      }
+    }
+    return _SimpleArtifactTable(
+      headers: const ['peer', 'fingerprint', 'prepares', 'total', 'p90', 'sql'],
+      rows: rows,
+    );
+  }
+}
+
+String _shortFingerprint(String fingerprint) {
+  const prefix = 'sqlfp:v1:';
+  if (!fingerprint.startsWith(prefix)) return fingerprint;
+  final hash = fingerprint.substring(prefix.length);
+  return hash.length <= 8 ? fingerprint : '$prefix${hash.substring(0, 8)}';
 }
 
 class SpanIndexPanel extends StatelessWidget {

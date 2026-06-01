@@ -244,6 +244,7 @@ final class PeerSample {
     required this.spans,
     required this.diagnostics,
     required this.spanGroups,
+    required this.sqlFingerprintGroups,
   });
 
   final int repetition;
@@ -254,6 +255,7 @@ final class PeerSample {
   final int spans;
   final TraceHealth diagnostics;
   final List<SampleSpanGroup> spanGroups;
+  final List<SampleSqlFingerprintGroup> sqlFingerprintGroups;
 
   factory PeerSample.fromJson(Map<String, Object?> json) {
     return PeerSample(
@@ -272,6 +274,15 @@ final class PeerSample {
             final byTotal = b.totalNs.compareTo(a.totalNs);
             if (byTotal != 0) return byTotal;
             return a.name.compareTo(b.name);
+          }),
+      sqlFingerprintGroups:
+          [
+            for (final group in _listOfMaps(json['sql_fingerprint_groups']))
+              SampleSqlFingerprintGroup.fromJson(group),
+          ]..sort((a, b) {
+            final byTotal = b.prepareTotalNs.compareTo(a.prepareTotalNs);
+            if (byTotal != 0) return byTotal;
+            return a.fingerprint.compareTo(b.fingerprint);
           }),
     );
   }
@@ -327,6 +338,38 @@ final class SampleSpanGroup {
       p50Ns: _int(json['p50_ns']) ?? 0,
       p90Ns: _int(json['p90_ns']) ?? 0,
       p99Ns: _int(json['p99_ns']) ?? 0,
+    );
+  }
+}
+
+final class SampleSqlFingerprintGroup {
+  const SampleSqlFingerprintGroup({
+    required this.fingerprint,
+    required this.normalizedSql,
+    required this.prepareCount,
+    required this.prepareTotalNs,
+    required this.prepareP50Ns,
+    required this.prepareP90Ns,
+    required this.prepareP99Ns,
+  });
+
+  final String fingerprint;
+  final String normalizedSql;
+  final int prepareCount;
+  final int prepareTotalNs;
+  final int prepareP50Ns;
+  final int prepareP90Ns;
+  final int prepareP99Ns;
+
+  factory SampleSqlFingerprintGroup.fromJson(Map<String, Object?> json) {
+    return SampleSqlFingerprintGroup(
+      fingerprint: _string(json['fingerprint']) ?? 'unknown',
+      normalizedSql: _string(json['normalized_sql']) ?? '',
+      prepareCount: _int(json['prepare_count']) ?? 0,
+      prepareTotalNs: _int(json['prepare_total_ns']) ?? 0,
+      prepareP50Ns: _int(json['prepare_p50_ns']) ?? 0,
+      prepareP90Ns: _int(json['prepare_p90_ns']) ?? 0,
+      prepareP99Ns: _int(json['prepare_p99_ns']) ?? 0,
     );
   }
 }

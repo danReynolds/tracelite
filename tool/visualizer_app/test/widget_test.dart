@@ -64,6 +64,9 @@ void main() {
     expect(find.text('Compare Tools'), findsOneWidget);
     expect(find.text('Measured Mean'), findsOneWidget);
     expect(find.text('Peer Metrics'), findsOneWidget);
+    expect(find.text('SQL Query Shapes'), findsOneWidget);
+    expect(find.text('SQL Fingerprints'), findsOneWidget);
+    expect(find.textContaining('INSERT INTO TRACELITE_ITEMS'), findsOneWidget);
     expect(find.text('sqlite3'), findsWidgets);
   });
 
@@ -160,6 +163,18 @@ void _writeDemoWorkspace(Directory dir) {
                   'p50_ns': 1000,
                   'p90_ns': 2000,
                   'p99_ns': 3000,
+                },
+              ],
+              'sql_fingerprint_groups': [
+                {
+                  'fingerprint': 'sqlfp:v1:2a1aa0dda20c1116',
+                  'normalized_sql':
+                      'INSERT INTO TRACELITE_ITEMS(ID, NAME) VALUES (?, ?)',
+                  'prepare_count': 10,
+                  'prepare_total_ns': 700000,
+                  'prepare_p50_ns': 40000,
+                  'prepare_p90_ns': 80000,
+                  'prepare_p99_ns': 90000,
                 },
               ],
             },

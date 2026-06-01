@@ -58,6 +58,18 @@ void main() {
                       'p99_ns': 3000,
                     },
                   ],
+                  'sql_fingerprint_groups': [
+                    {
+                      'fingerprint': 'sqlfp:v1:2a1aa0dda20c1116',
+                      'normalized_sql':
+                          'INSERT INTO TRACELITE_ITEMS(ID, NAME) VALUES (?, ?)',
+                      'prepare_count': 10,
+                      'prepare_total_ns': 700000,
+                      'prepare_p50_ns': 40000,
+                      'prepare_p90_ns': 80000,
+                      'prepare_p99_ns': 90000,
+                    },
+                  ],
                 },
               ],
               'capabilities': ['sql'],
@@ -72,6 +84,12 @@ void main() {
       expect(workspace.traces, hasLength(1));
       expect(workspace.compares, hasLength(1));
       expect(workspace.compares.single.peers.single.name, 'sqlite3');
+      final sample = workspace.compares.single.peers.single.samples.single;
+      expect(sample.sqlFingerprintGroups, hasLength(1));
+      expect(
+        sample.sqlFingerprintGroups.single.normalizedSql,
+        contains('INSERT INTO TRACELITE_ITEMS'),
+      );
     } finally {
       temp.deleteSync(recursive: true);
     }
