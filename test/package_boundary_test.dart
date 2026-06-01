@@ -26,10 +26,19 @@ void main() {
 
   test('published launcher keeps core commands available', () async {
     final binSource = File('bin/tracelite.dart').readAsStringSync();
-    expect(binSource, isNot(contains("package:drift/")));
-    expect(binSource, isNot(contains("package:sqlite3/")));
-    expect(binSource, isNot(contains("package:sqlite_async/")));
-    expect(binSource, isNot(contains("package:resqlite/")));
+    final coreCliSource = File('lib/src/core_cli.dart').readAsStringSync();
+    for (final source in [binSource, coreCliSource]) {
+      expect(source, isNot(contains("package:drift/")));
+      expect(source, isNot(contains("package:sqlite3/")));
+      expect(source, isNot(contains("package:sqlite_async/")));
+      expect(source, isNot(contains("package:resqlite/")));
+    }
+    expect(
+      binSource.split('\n').length,
+      lessThan(150),
+      reason: 'The published launcher should stay a thin boundary wrapper. '
+          'Core artifact commands live in lib/src/core_cli.dart.',
+    );
 
     final tempDir = await Directory.systemTemp.createTemp(
       'tracelite-core-cli-boundary-test-',

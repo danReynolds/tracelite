@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:tracelite/src/core_cli.dart';
 import 'package:tracelite/tracelite.dart';
 
 import 'src/peer.dart';
@@ -16,21 +17,17 @@ Future<void> main(List<String> args) async {
     case 'doctor':
       await _doctor(args.skip(1).toList());
     case 'report':
-      _report(args.skip(1).toList());
     case 'workload-summary':
-      _workloadSummary(args.skip(1).toList());
+    case 'create-region':
+    case 'decision':
+    case 'calibrate-policy':
+    case 'export-graph-data':
+    case 'validate-graph-data':
+      runTraceliteCoreCli(args);
     case 'compare':
       await _compare(args.skip(1).toList());
     case 'diff':
       _diff(args.skip(1).toList());
-    case 'decision':
-      _decision(args.skip(1).toList());
-    case 'calibrate-policy':
-      _calibratePolicy(args.skip(1).toList());
-    case 'export-graph-data':
-      _exportGraphData(args.skip(1).toList());
-    case 'validate-graph-data':
-      _validateGraphData(args.skip(1).toList());
     case 'visualize':
       await _visualize(args.skip(1).toList());
     case 'suite':
@@ -39,8 +36,6 @@ Future<void> main(List<String> args) async {
       await _suiteHistory(args.skip(1).toList());
     case 'calibrate':
       await _calibrate(args.skip(1).toList());
-    case 'create-region':
-      _createRegion(args.skip(1).toList());
     case '_run-peer':
       await _runPeer(args.skip(1).toList());
     default:
@@ -229,56 +224,6 @@ Future<void> _doctor(List<String> args) async {
     }
     exit(65);
   }
-}
-
-void _createRegion(List<String> args) {
-  final options = _parseOptions(args);
-  final out = options['out'];
-  if (out == null || out.isEmpty) {
-    stderr.writeln('create-region requires --out=path');
-    _usage();
-  }
-  final maxProducers = _positiveIntOption(options, 'max-producers', 8);
-  final stringPoolBytes = _positiveIntOption(
-    options,
-    'string-pool-bytes',
-    kDefaultStringPoolSize,
-  );
-  final ringDataWords = _positivePowerOfTwoOption(
-    options,
-    'ring-data-words',
-    kDefaultRingDataWords,
-  );
-  File(out).parent.createSync(recursive: true);
-  TraceRegion.createFile(
-    out,
-    maxProducers: maxProducers,
-    stringPoolSize: stringPoolBytes,
-    ringDataWords: ringDataWords,
-  );
-  stdout.writeln('Created tracelite region: $out');
-  stdout.writeln('  max_producers: $maxProducers');
-  stdout.writeln('  string_pool_bytes: $stringPoolBytes');
-  stdout.writeln('  ring_data_words: $ringDataWords');
-}
-
-void _workloadSummary(List<String> args) {
-  if (args.isEmpty || args.first.startsWith('--')) {
-    stderr.writeln('workload-summary expects a region or trace path');
-    _usage();
-  }
-  final path = args.first;
-  final options = _parseOptions(args.skip(1).toList());
-  final trace = Trace.loadRegion(path);
-  final artifact = traceWorkloadSummaryArtifact(trace);
-  final outJson = options['out-json'];
-  if (outJson != null && outJson.isNotEmpty) {
-    const encoder = JsonEncoder.withIndent('  ');
-    File(outJson)
-      ..parent.createSync(recursive: true)
-      ..writeAsStringSync('${encoder.convert(artifact)}\n');
-  }
-  stdout.write(traceWorkloadSummaryMarkdown(artifact));
 }
 
 Future<void> _suite(List<String> args) async {
@@ -590,16 +535,6 @@ Future<void> _suiteHistory(List<String> args) async {
   }
 }
 
-void _report(List<String> args) {
-  if (args.length != 1) {
-    stderr.writeln('report expects exactly one region or trace path');
-    _usage();
-  }
-  final path = args.single;
-  final trace = Trace.loadRegion(path);
-  stdout.write(trace.toMarkdownReport());
-}
-
 Future<void> _compare(List<String> args) async {
   final options = _parseOptions(args);
   final scenario = options['scenario'] ?? narrowBatchInsertScenario;
@@ -753,260 +688,6 @@ void _diff(List<String> args) {
     maxCvPercent: maxCvPercent,
     alpha: alpha,
   );
-}
-
-void _decision(List<String> args) {
-  final options = _parseOptions(args);
-  final baselinePath = options['baseline'];
-  final candidatePath = options['candidate'];
-  if (baselinePath == null || candidatePath == null) {
-    stderr.writeln('decision requires --baseline and --candidate');
-    _usage();
-  }
-
-  final calibrationPolicy = _readPolicyOption(options);
-  final expectation = options['expect'] ?? 'improvement';
-  if (expectation != 'improvement' && expectation != 'no_regression') {
-    stderr.writeln('--expect must be improvement or no_regression');
-    exit(64);
-  }
-
-  final decision = benchmarkDecisionArtifact(
-    baselineArtifacts: _readComparableArtifacts(baselinePath),
-    candidateArtifacts: _readComparableArtifacts(candidatePath),
-    baselinePath: baselinePath,
-    candidatePath: candidatePath,
-    options: BenchmarkDecisionOptions(
-      expectation: expectation,
-      primaryPeer: options['primary-peer'] ?? 'resqlite',
-      primaryScenarios: _csvOption(options['primary-scenarios']),
-      primaryMetric: options['primary-metric'] ?? 'elapsed_ns',
-      guardrailPeers: _csvOption(options['guardrail-peers']),
-      guardrailScenarios: _csvOption(options['guardrail-scenarios']),
-      guardrailMetrics: _csvOption(
-        options['guardrail-metrics'],
-        defaultValue: defaultGuardrailMetrics,
-      ),
-      primaryThresholdPercent: _doubleOption(
-        options,
-        'primary-threshold-percent',
-        _policyDouble(calibrationPolicy, 'primary_threshold_percent', 5),
-      ),
-      maxRegressionPercent: _doubleOption(
-        options,
-        'max-regression-percent',
-        _policyDouble(calibrationPolicy, 'max_regression_percent', 3),
-      ),
-      maxCvPercent: _doubleOption(
-        options,
-        'max-cv-percent',
-        _policyDouble(calibrationPolicy, 'max_cv_percent', 15),
-      ),
-      alpha: double.tryParse(options['alpha'] ?? '0.05') ?? 0.05,
-    ),
-  );
-
-  final outJson = options['out-json'];
-  if (outJson != null && outJson.isNotEmpty) {
-    const encoder = JsonEncoder.withIndent('  ');
-    File(outJson)
-      ..parent.createSync(recursive: true)
-      ..writeAsStringSync('${encoder.convert(decision)}\n');
-  }
-  stdout.write(benchmarkDecisionMarkdown(decision));
-  if (!benchmarkDecisionPassed(decision)) {
-    exitCode = 65;
-  }
-}
-
-void _calibratePolicy(List<String> args) {
-  final options = _parseOptions(
-    args,
-    multiValueKeys: const {'history'},
-  );
-  final historyPaths = _csvOption(options['history']);
-  if (historyPaths.isEmpty) {
-    stderr.writeln('calibrate-policy requires --history=path');
-    _usage();
-  }
-
-  final seen = <String>{};
-  final inputs = <BenchmarkPolicyCalibrationInput>[];
-  try {
-    for (final historyPath in historyPaths) {
-      inputs.addAll(_policyHistoryInputs(historyPath, seen));
-    }
-  } on FileSystemException catch (error) {
-    stderr.writeln('${error.message}: ${error.path}');
-    exit(66);
-  } on FormatException catch (error) {
-    stderr.writeln(error.message);
-    exit(65);
-  }
-  if (inputs.isEmpty) {
-    stderr.writeln('calibrate-policy found no compare artifacts');
-    exit(65);
-  }
-
-  final artifact = benchmarkPolicyCalibrationArtifact(
-    compareArtifacts: inputs,
-    options: BenchmarkPolicyCalibrationOptions(
-      metrics: _csvOption(
-        options['metrics'],
-        defaultValue: defaultPolicyCalibrationMetrics,
-      ),
-      scenarios: _csvOption(options['scenarios']),
-      peers: _csvOption(options['peers']),
-      minHistoryRuns: _positiveIntOption(options, 'min-history-runs', 2),
-      minRepetitions: _positiveIntOption(options, 'min-repetitions', 5),
-      maxRepetitions: _positiveIntOption(options, 'max-repetitions', 30),
-      targetRelativeStandardErrorPercent: _positiveDoubleOption(
-        options,
-        'target-rse-percent',
-        2.5,
-      ),
-      withinRunNoisePercentile: _positiveDoubleOption(
-        options,
-        'within-run-noise-percentile',
-        0.75,
-      ),
-      thresholdFloorPercent: _positiveDoubleOption(
-        options,
-        'threshold-floor-percent',
-        5,
-      ),
-      guardrailFloorPercent: _positiveDoubleOption(
-        options,
-        'guardrail-floor-percent',
-        3,
-      ),
-      noiseGateFloorPercent: _positiveDoubleOption(
-        options,
-        'noise-gate-floor-percent',
-        5,
-      ),
-      noiseGateMultiplier: _positiveDoubleOption(
-        options,
-        'noise-gate-multiplier',
-        1.5,
-      ),
-      maxOutlierPercent: _positiveDoubleOption(
-        options,
-        'max-outlier-percent',
-        10,
-      ),
-      maxRunOutlierPercent: _positiveDoubleOption(
-        options,
-        'max-run-outlier-percent',
-        20,
-      ),
-      thresholdCeilingPercent: _positiveDoubleOptionOrNull(
-        options,
-        'threshold-ceiling-percent',
-      ),
-      guardrailCeilingPercent: _positiveDoubleOptionOrNull(
-        options,
-        'guardrail-ceiling-percent',
-      ),
-      noiseGateCeilingPercent: _positiveDoubleOptionOrNull(
-        options,
-        'noise-gate-ceiling-percent',
-      ),
-    ),
-  );
-
-  final outJson = options['out-json'];
-  if (outJson != null && outJson.isNotEmpty) {
-    const encoder = JsonEncoder.withIndent('  ');
-    File(outJson)
-      ..parent.createSync(recursive: true)
-      ..writeAsStringSync('${encoder.convert(artifact)}\n');
-  }
-  stdout.write(benchmarkPolicyCalibrationMarkdown(artifact));
-  if (_boolOption(options, 'strict', false) &&
-      !benchmarkPolicyCalibrationPassed(artifact)) {
-    exitCode = 65;
-  }
-}
-
-void _exportGraphData(List<String> args) {
-  final options = _parseOptions(
-    args,
-    multiValueKeys: const {
-      'compare',
-      'suite',
-      'suite-history',
-      'decision',
-      'workload-summary',
-    },
-  );
-  final out = options['out'];
-  if (out == null || out.isEmpty) {
-    stderr.writeln('export-graph-data requires --out=directory');
-    _usage();
-  }
-
-  final compareInputs = <GraphDataInput>[
-    for (final path in _csvOption(options['compare'])) _graphInput(path),
-    for (final path in _csvOption(options['suite'])) ..._suiteGraphInputs(path),
-    for (final path in _csvOption(options['suite-history']))
-      ..._suiteHistoryGraphInputs(path),
-  ];
-  final decisionInputs = [
-    for (final path in _csvOption(options['decision'])) _graphInput(path),
-  ];
-  final workloadInputs = [
-    for (final path in _csvOption(options['workload-summary']))
-      _graphInput(path),
-  ];
-  if (compareInputs.isEmpty &&
-      decisionInputs.isEmpty &&
-      workloadInputs.isEmpty) {
-    stderr.writeln(
-      'export-graph-data requires at least one of '
-      '--compare, --suite, --suite-history, --decision, or '
-      '--workload-summary',
-    );
-    _usage();
-  }
-
-  final bundle = traceliteGraphDataBundle(
-    runId: options['run-id'],
-    compareArtifacts: compareInputs,
-    decisionArtifacts: decisionInputs,
-    workloadSummaries: workloadInputs,
-  );
-  final files = _writeGraphDataBundle(Directory(out), bundle);
-  final validationErrors = validateGraphDataDirectory(out);
-  if (validationErrors.isNotEmpty) {
-    stderr.writeln('exported graph data failed validation:');
-    for (final error in validationErrors) {
-      stderr.writeln('- $error');
-    }
-    exit(65);
-  }
-  _printGraphDataReport(
-    outDir: out,
-    bundle: bundle,
-    files: files,
-  );
-}
-
-void _validateGraphData(List<String> args) {
-  if (args.length != 1) {
-    stderr.writeln('validate-graph-data expects a graph-data directory');
-    _usage();
-  }
-  final errors = validateGraphDataDirectory(args.single);
-  if (errors.isEmpty) {
-    stdout.writeln('graph data valid: ${args.single}');
-    return;
-  }
-  stderr.writeln('graph data invalid: ${args.single}');
-  for (final error in errors) {
-    stderr.writeln('- $error');
-  }
-  exit(65);
 }
 
 Future<void> _visualize(List<String> args) async {
@@ -1714,34 +1395,6 @@ Map<String, Object?> _readJsonMap(String path) {
   return decoded;
 }
 
-List<Map<String, Object?>> _readComparableArtifacts(String path) {
-  final root = _readJsonMap(path);
-  return switch (root['schema']) {
-    'tracelite.compare.v1' => [root],
-    'tracelite.suite.v1' => _readSuiteCompareArtifacts(path, root),
-    _ => throw FormatException(
-        '$path is not a tracelite compare artifact or suite manifest',
-      ),
-  };
-}
-
-List<Map<String, Object?>> _readSuiteCompareArtifacts(
-  String manifestPath,
-  Map<String, Object?> manifest,
-) {
-  final runs = manifest['runs'];
-  if (runs is! List<Object?>) {
-    throw FormatException('$manifestPath has no runs list');
-  }
-  return [
-    for (final run in runs.cast<Map<String, Object?>>())
-      _readJsonMap(_resolveManifestArtifactPath(
-        manifestPath,
-        run['artifact']! as String,
-      )),
-  ];
-}
-
 List<BenchmarkPolicyCalibrationInput> _policyHistoryInputs(
   String path,
   Set<String> seen,
@@ -1902,131 +1555,6 @@ double _policyDouble(
   if (value is num) return value.toDouble();
   stderr.writeln('policy value `$name` must be numeric');
   exit(65);
-}
-
-GraphDataInput _graphInput(String path, {String? parentPath}) {
-  return GraphDataInput(
-    path: path,
-    parentPath: parentPath,
-    artifact: _readJsonMap(path),
-  );
-}
-
-List<GraphDataInput> _suiteGraphInputs(String manifestPath) {
-  final manifest = _readJsonMap(manifestPath);
-  if (manifest['schema'] != 'tracelite.suite.v1') {
-    throw FormatException('$manifestPath is not a tracelite suite manifest');
-  }
-  final runs = manifest['runs'];
-  if (runs is! List<Object?>) {
-    throw FormatException('$manifestPath has no runs list');
-  }
-  return [
-    for (final run in runs.cast<Map<String, Object?>>())
-      _graphInput(
-        _resolveManifestArtifactPath(manifestPath, run['artifact']! as String),
-        parentPath: manifestPath,
-      ),
-  ];
-}
-
-List<GraphDataInput> _suiteHistoryGraphInputs(String historyPath) {
-  final history = _readJsonMap(historyPath);
-  if (history['schema'] != 'tracelite.suite_history.v1') {
-    throw FormatException('$historyPath is not a tracelite suite history');
-  }
-  final runs = history['runs'];
-  if (runs is! List<Object?>) {
-    throw FormatException('$historyPath has no runs list');
-  }
-
-  final inputs = <GraphDataInput>[];
-  for (final run in runs.cast<Map<String, Object?>>()) {
-    if (run['status'] != 'ok') continue;
-    final manifest = run['manifest'];
-    if (manifest is! String || manifest.isEmpty) continue;
-    final manifestPath = _resolveManifestArtifactPath(historyPath, manifest);
-    inputs.addAll(_suiteGraphInputs(manifestPath));
-  }
-  return inputs;
-}
-
-String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
-  final artifact = File(artifactPath);
-  if (artifact.isAbsolute || artifact.existsSync()) return artifact.path;
-  return File(manifestPath).parent.uri.resolve(artifactPath).toFilePath();
-}
-
-List<String> _csvOption(String? value, {List<String> defaultValue = const []}) {
-  if (value == null || value.trim().isEmpty) return defaultValue;
-  return value
-      .split(',')
-      .map((part) => part.trim())
-      .where((part) => part.isNotEmpty)
-      .toList();
-}
-
-Map<String, String> _writeGraphDataBundle(
-  Directory outDir,
-  Map<String, Object?> bundle,
-) {
-  outDir.createSync(recursive: true);
-  final datasets = bundle['datasets'];
-  if (datasets is! Map<String, Object?>) {
-    throw const FormatException('graph data bundle has no datasets map');
-  }
-  const encoder = JsonEncoder.withIndent('  ');
-  final files = <String, String>{};
-  final counts = <String, int>{};
-  for (final entry in datasets.entries) {
-    final rows = entry.value;
-    if (rows is! List<Object?>) continue;
-    final filename = '${entry.key.replaceAll('_', '-')}.json';
-    files[entry.key] = filename;
-    counts[entry.key] = rows.length;
-    File('${outDir.path}/$filename').writeAsStringSync(
-      '${encoder.convert({
-            'schema': graphDatasetSchema,
-            'generated_at': bundle['generated_at'],
-            if (bundle['run_id'] != null) 'run_id': bundle['run_id'],
-            'dataset': entry.key,
-            'rows': rows,
-          })}\n',
-    );
-  }
-  final index = <String, Object?>{
-    'schema': bundle['schema'],
-    'generated_at': bundle['generated_at'],
-    if (bundle['run_id'] != null) 'run_id': bundle['run_id'],
-    'sources': bundle['sources'],
-    'files': files,
-    'counts': counts,
-  };
-  File('${outDir.path}/index.json')
-      .writeAsStringSync('${encoder.convert(index)}\n');
-  return files;
-}
-
-void _printGraphDataReport({
-  required String outDir,
-  required Map<String, Object?> bundle,
-  required Map<String, String> files,
-}) {
-  final datasets = bundle['datasets'] as Map<String, Object?>;
-  stdout
-    ..writeln('# tracelite graph data')
-    ..writeln()
-    ..writeln('Out dir: `$outDir`')
-    ..writeln()
-    ..writeln('| dataset | rows | file |')
-    ..writeln('|---|---:|---|');
-  for (final entry in files.entries) {
-    final rows = datasets[entry.key] as List<Object?>? ?? const [];
-    stdout.writeln('| `${entry.key}` | ${rows.length} | `${entry.value}` |');
-  }
-  stdout
-    ..writeln()
-    ..writeln('Index: `$outDir/index.json`');
 }
 
 _PeerRunMetrics _readPeerMetrics(String path) {
@@ -2358,6 +1886,21 @@ bool _hasTraceDiagnostics(Trace trace) {
 int _traceDurationNs(_PeerTraceResult result) =>
     result.trace!.duration.inMicroseconds * 1000;
 
+String _resolveManifestArtifactPath(String manifestPath, String artifactPath) {
+  final artifact = File(artifactPath);
+  if (artifact.isAbsolute || artifact.existsSync()) return artifact.path;
+  return File(manifestPath).parent.uri.resolve(artifactPath).toFilePath();
+}
+
+List<String> _csvOption(String? value, {List<String> defaultValue = const []}) {
+  if (value == null || value.trim().isEmpty) return defaultValue;
+  return value
+      .split(',')
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+}
+
 int _positiveIntOption(
   Map<String, String> options,
   String name,
@@ -2438,19 +1981,6 @@ bool _boolOption(
   }
   stderr.writeln('--$name must be true or false');
   exit(64);
-}
-
-int _positivePowerOfTwoOption(
-  Map<String, String> options,
-  String name,
-  int defaultValue,
-) {
-  final value = _positiveIntOption(options, name, defaultValue);
-  if (value & (value - 1) != 0) {
-    stderr.writeln('--$name must be a power of two');
-    exit(64);
-  }
-  return value;
 }
 
 int _ringWordsForScenario(String scenario, int rows) {

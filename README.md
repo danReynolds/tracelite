@@ -101,10 +101,11 @@ checkout testing do not affect the publish dry-run.
 
 `native/` contains the shared-memory runtime and SQLite shim. `lib/` contains
 the recorder, trace reader, decision logic, graph-data export, and vocabularies.
-`bin/` contains the published core CLI plus a source-checkout handoff for peer
-benchmark commands. `tool/tracelite_dev.dart` contains the dev-dependency-backed
-benchmark implementation, and `tool/visualizer_app/` contains the Flutter
-desktop visualizer.
+`bin/` contains the thin published launcher. Core artifact commands live in
+`lib/src/core_cli.dart` so the published executable and source-checkout
+development CLI use the same implementation. `tool/tracelite_dev.dart` contains
+the dev-dependency-backed benchmark implementation, and
+`tool/visualizer_app/` contains the Flutter desktop visualizer.
 
 ## Docs
 
