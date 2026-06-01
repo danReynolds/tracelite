@@ -644,7 +644,10 @@ Work:
   opens raw `.tlt-region` traces, compare artifacts, suite manifests, decision
   artifacts, workload summaries, and graph-data directories. It renders a
   workspace browser, trace timeline, span aggregation table, peer-comparison
-  table, graph-data validation rows, and workload tables.
+  table, graph-data validation rows, and workload tables. The timeline now has
+  explicit zoom controls, scroll/double-click zoom, keyboard navigation, larger
+  dense-span bars, wider hit targets, nearest-span picking, selected-span
+  outlines, and a linked span index.
 - Add true visible-range query reaggregation after the initial custom timeline
   and table views have settled.
 - Consider stack sampling for CPU attribution only after wall/span attribution

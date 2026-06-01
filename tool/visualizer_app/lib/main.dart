@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:tracelite/tracelite.dart';
 
 import 'src/workspace.dart';
@@ -498,7 +499,7 @@ class _TracePageState extends State<TracePage> {
                         icon: Icons.zoom_in,
                         title: 'Zoom',
                         body:
-                            'Use the +/- buttons or scroll over the timeline to inspect dense spans.',
+                            'Use the slider, +/- buttons, double-click, or scroll over the timeline to inspect dense spans.',
                       ),
                       _ToolGuideEntry(
                         icon: Icons.pan_tool_alt,
@@ -510,7 +511,13 @@ class _TracePageState extends State<TracePage> {
                         icon: Icons.touch_app,
                         title: 'Preview',
                         body:
-                            'Hover to preview. Click a bar or span row to pin it in the inspector.',
+                            'Hover to preview. Click near a tiny bar or a span row to pin it in the inspector.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.keyboard,
+                        title: 'Keyboard',
+                        body:
+                            '+/- zoom, left/right pan, F focuses the active span, Home fits the trace.',
                       ),
                     ],
                   ),
@@ -823,8 +830,13 @@ class ArtifactsPage extends StatelessWidget {
 }
 
 const double _timelineTop = 34;
-const double _timelineLaneHeight = 30;
+const double _timelineLaneHeight = 34;
 const double _timelineRightPadding = 18;
+const double _timelineBarTopInset = 7;
+const double _timelineBarHeight = 20;
+const double _timelineMinBarWidth = 5;
+const double _timelineHitSlopPixels = 9;
+const double _timelineNearestPickPixels = 16;
 
 double _timelineLeftGutter(double width) {
   return math.min(190, math.max(118, width * 0.30));
@@ -866,7 +878,7 @@ class TraceTimeline extends StatefulWidget {
 }
 
 class _TraceTimelineState extends State<TraceTimeline> {
-  static const double _minimumFocusedSpanPixels = 18;
+  static const double _minimumFocusedSpanPixels = 28;
 
   TraceSpan? _hoveredSpan;
   late int _viewStartNs;
@@ -900,9 +912,12 @@ class _TraceTimelineState extends State<TraceTimeline> {
       children: [
         _TimelineToolbar(
           visibleLabel: _visibleWindowLabel,
+          densityLabel: '${_visibleSpanCount()} visible spans',
           selectedLabel: activeSpan == null
               ? '${trace.spans.length} spans'
               : trace.spanName(activeSpan.spanId),
+          zoomLevel: _zoomLevel,
+          onZoomLevelChanged: _setZoomLevel,
           onFit: () => _fitToTrace(),
           canFocusSelection: activeSpan != null,
           onFocusSelection: _focusActiveSpan,
@@ -922,6 +937,8 @@ class _TraceTimelineState extends State<TraceTimeline> {
           ),
         ),
         const SizedBox(height: 8),
+        const _TimelineGestureLegend(),
+        const SizedBox(height: 8),
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -935,40 +952,46 @@ class _TraceTimelineState extends State<TraceTimeline> {
                   ),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Listener(
-                  onPointerSignal: (event) => _handlePointerSignal(event, size),
-                  child: MouseRegion(
-                    onHover: (event) {
-                      final span = _spanAt(event.localPosition, size);
-                      if (!identical(span, _hoveredSpan)) {
-                        setState(() => _hoveredSpan = span);
-                      }
-                    },
-                    onExit: (_) {
-                      if (_hoveredSpan != null) {
-                        setState(() => _hoveredSpan = null);
-                      }
-                    },
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragUpdate: (details) {
-                        _panByPixels(details.delta.dx, size.width);
+                child: Focus(
+                  autofocus: true,
+                  onKeyEvent: _handleKeyEvent,
+                  child: Listener(
+                    onPointerSignal: (event) =>
+                        _handlePointerSignal(event, size),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.precise,
+                      onHover: (event) {
+                        final span = _spanAt(event.localPosition, size);
+                        if (!identical(span, _hoveredSpan)) {
+                          setState(() => _hoveredSpan = span);
+                        }
                       },
-                      onDoubleTapDown: (details) {
-                        _zoomAt(details.localPosition, size.width, 0.45);
+                      onExit: (_) {
+                        if (_hoveredSpan != null) {
+                          setState(() => _hoveredSpan = null);
+                        }
                       },
-                      onTapUp: (details) {
-                        final span = _spanAt(details.localPosition, size);
-                        widget.onSelected(span);
-                      },
-                      child: CustomPaint(
-                        painter: _TimelinePainter(
-                          trace: widget.trace,
-                          selected: widget.selected,
-                          hovered: _hoveredSpan,
-                          colorScheme: Theme.of(context).colorScheme,
-                          viewStartNs: _viewStartNs,
-                          viewEndNs: _viewEndNs,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragUpdate: (details) {
+                          _panByPixels(details.delta.dx, size.width);
+                        },
+                        onDoubleTapDown: (details) {
+                          _zoomAt(details.localPosition, size.width, 0.45);
+                        },
+                        onTapUp: (details) {
+                          final span = _spanAt(details.localPosition, size);
+                          widget.onSelected(span);
+                        },
+                        child: CustomPaint(
+                          painter: _TimelinePainter(
+                            trace: widget.trace,
+                            selected: widget.selected,
+                            hovered: _hoveredSpan,
+                            colorScheme: Theme.of(context).colorScheme,
+                            viewStartNs: _viewStartNs,
+                            viewEndNs: _viewEndNs,
+                          ),
                         ),
                       ),
                     ),
@@ -993,6 +1016,17 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final visibleDuration = math.max(1, _viewEndNs - _viewStartNs);
     final percent = (visibleDuration / fullDuration) * 100;
     return '${formatNs(visibleDuration)} visible (${_formatPercent(percent)}%)';
+  }
+
+  double get _zoomLevel {
+    final fullDuration = math.max(1, _traceEndNs - _traceStartNs);
+    final visibleDuration = math.max(1, _viewEndNs - _viewStartNs);
+    final minWindow = _minimumWindowNs(fullDuration);
+    if (fullDuration <= minWindow) return 1;
+    final fullLog = math.log(fullDuration);
+    final minLog = math.log(minWindow);
+    final visibleLog = math.log(visibleDuration.clamp(minWindow, fullDuration));
+    return ((fullLog - visibleLog) / (fullLog - minLog)).clamp(0.0, 1.0);
   }
 
   int get _traceStartNs {
@@ -1026,6 +1060,60 @@ class _TraceTimelineState extends State<TraceTimeline> {
     _zoomAt(event.localPosition, size.width, factor);
   }
 
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _panByPixels(80, _lastTimelineWidth);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _panByPixels(-80, _lastTimelineWidth);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd) {
+      _zoomAtFraction(0.5, 0.82);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      _zoomAtFraction(0.5, 1.20);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyF) {
+      _focusActiveSpan();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.home) {
+      _fitToTrace();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _setZoomLevel(double value) {
+    final fullStart = _traceStartNs;
+    final fullEnd = _traceEndNs;
+    final fullDuration = math.max(1, fullEnd - fullStart);
+    final minWindow = _minimumWindowNs(fullDuration);
+    if (fullDuration <= minWindow) return;
+    final fullLog = math.log(fullDuration);
+    final minLog = math.log(minWindow);
+    final targetLog = fullLog - (fullLog - minLog) * value.clamp(0.0, 1.0);
+    final targetDuration = math
+        .exp(targetLog)
+        .round()
+        .clamp(minWindow, fullDuration)
+        .toInt();
+    final center = _viewStartNs + ((_viewEndNs - _viewStartNs) / 2).round();
+    _setViewport(
+      center - (targetDuration / 2).round(),
+      center + (targetDuration / 2).round(),
+    );
+  }
+
   void _zoomAtFraction(double fraction, double factor) {
     final width = _lastTimelineWidth;
     final leftGutter = _timelineLeftGutter(width);
@@ -1042,7 +1130,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final fullEnd = _traceEndNs;
     final fullDuration = math.max(1, fullEnd - fullStart);
     final currentDuration = math.max(1, _viewEndNs - _viewStartNs);
-    final minWindow = math.max(1000, (fullDuration / 100000).round());
+    final minWindow = _minimumWindowNs(fullDuration);
     final requested = (currentDuration * factor).round();
     final newDuration = requested.clamp(minWindow, fullDuration).toInt();
     final leftGutter = _timelineLeftGutter(width);
@@ -1133,10 +1221,13 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final tappedNs =
         _viewStartNs +
         (((position.dx - leftGutter) / timelineWidth) * duration).round();
-    final laneTop = _timelineTop + laneIndex * _timelineLaneHeight + 7;
-    final laneBottom = laneTop + 15;
+    final laneTop =
+        _timelineTop + laneIndex * _timelineLaneHeight + _timelineBarTopInset;
+    final laneBottom = laneTop + _timelineBarHeight;
     final visibleRight = leftGutter + timelineWidth;
     final candidates = <TraceSpan>[];
+    TraceSpan? nearest;
+    var nearestDistance = double.infinity;
     for (final span
         in widget.trace.completeSpansByTrack[trackId] ?? const <TraceSpan>[]) {
       final end = span.endNs ?? span.startNs;
@@ -1149,27 +1240,58 @@ class _TraceTimelineState extends State<TraceTimeline> {
       final right =
           leftGutter +
           ((end - _viewStartNs) / duration).clamp(0.0, 1.0) * timelineWidth;
-      final visualWidth = math.max(3.0, right - x);
+      final visualWidth = math.max(_timelineMinBarWidth, right - x);
+      final visualLeft = x.clamp(leftGutter, visibleRight).toDouble();
       final visualRect = Rect.fromLTWH(
-        x.clamp(leftGutter, visibleRight).toDouble(),
+        visualLeft,
         laneTop,
         visualWidth,
         laneBottom - laneTop,
-      ).inflate(5);
+      ).inflate(_timelineHitSlopPixels);
       if (visualRect.contains(position) ||
           (tappedNs >= span.startNs && tappedNs <= end)) {
         candidates.add(span);
+        continue;
+      }
+      final spanCenterX = visualLeft + visualWidth / 2;
+      final spanCenterY = laneTop + (laneBottom - laneTop) / 2;
+      final distance = math.sqrt(
+        math.pow(position.dx - spanCenterX, 2) +
+            math.pow(position.dy - spanCenterY, 2),
+      );
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = span;
       }
     }
     candidates.sort((a, b) => a.durationNs.compareTo(b.durationNs));
-    return candidates.isEmpty ? null : candidates.first;
+    if (candidates.isNotEmpty) return candidates.first;
+    return nearestDistance <= _timelineNearestPickPixels ? nearest : null;
+  }
+
+  int _visibleSpanCount() {
+    var count = 0;
+    for (final span in widget.trace.completeSpans) {
+      final endNs = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+      if (span.startNs > _viewEndNs) break;
+      if (endNs < _viewStartNs || span.startNs > _viewEndNs) continue;
+      count++;
+    }
+    return count;
+  }
+
+  int _minimumWindowNs(int fullDurationNs) {
+    return math.min(fullDurationNs, math.max(1000, fullDurationNs ~/ 100000));
   }
 }
 
 class _TimelineToolbar extends StatelessWidget {
   const _TimelineToolbar({
     required this.visibleLabel,
+    required this.densityLabel,
     required this.selectedLabel,
+    required this.zoomLevel,
+    required this.onZoomLevelChanged,
     required this.onFit,
     required this.canFocusSelection,
     required this.onFocusSelection,
@@ -1178,7 +1300,10 @@ class _TimelineToolbar extends StatelessWidget {
   });
 
   final String visibleLabel;
+  final String densityLabel;
   final String selectedLabel;
+  final double zoomLevel;
+  final ValueChanged<double> onZoomLevelChanged;
   final VoidCallback onFit;
   final bool canFocusSelection;
   final VoidCallback onFocusSelection;
@@ -1188,13 +1313,64 @@ class _TimelineToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Row(
+    final controls = [
+      Tooltip(
+        message: 'Drag to change the visible time window',
+        child: SizedBox(
+          width: 210,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.zoom_in_map, color: colors.primary, size: 18),
+              const SizedBox(width: 6),
+              const Text(
+                'Zoom',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+              Expanded(
+                child: Slider(value: zoomLevel, onChanged: onZoomLevelChanged),
+              ),
+            ],
+          ),
+        ),
+      ),
+      Tooltip(
+        message: 'Focus selected span',
+        child: IconButton.filledTonal(
+          onPressed: canFocusSelection ? onFocusSelection : null,
+          icon: const Icon(Icons.center_focus_strong),
+        ),
+      ),
+      Tooltip(
+        message: 'Zoom out',
+        child: IconButton.filledTonal(
+          onPressed: onZoomOut,
+          icon: const Icon(Icons.remove),
+        ),
+      ),
+      Tooltip(
+        message: 'Zoom in',
+        child: IconButton.filledTonal(
+          onPressed: onZoomIn,
+          icon: const Icon(Icons.add),
+        ),
+      ),
+      Tooltip(
+        message: 'Fit full trace',
+        child: IconButton.filledTonal(
+          onPressed: onFit,
+          icon: const Icon(Icons.fit_screen),
+        ),
+      ),
+    ];
+
+    final label = Row(
       children: [
         Icon(Icons.travel_explore, color: colors.primary, size: 20),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '$visibleLabel - $selectedLabel',
+            '$visibleLabel - $densityLabel - $selectedLabel',
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: colors.onSurfaceVariant,
@@ -1202,38 +1378,94 @@ class _TimelineToolbar extends StatelessWidget {
             ),
           ),
         ),
-        Tooltip(
-          message: 'Focus selected span',
-          child: IconButton.filledTonal(
-            onPressed: canFocusSelection ? onFocusSelection : null,
-            icon: const Icon(Icons.center_focus_strong),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Tooltip(
-          message: 'Zoom out',
-          child: IconButton.filledTonal(
-            onPressed: onZoomOut,
-            icon: const Icon(Icons.remove),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Tooltip(
-          message: 'Zoom in',
-          child: IconButton.filledTonal(
-            onPressed: onZoomIn,
-            icon: const Icon(Icons.add),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Tooltip(
-          message: 'Fit full trace',
-          child: IconButton.filledTonal(
-            onPressed: onFit,
-            icon: const Icon(Icons.fit_screen),
-          ),
-        ),
       ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 760) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              label,
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: controls,
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: label),
+            const SizedBox(width: 8),
+            Wrap(
+              spacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: controls,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _TimelineGestureLegend extends StatelessWidget {
+  const _TimelineGestureLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: const [
+        _GestureChip(icon: Icons.mouse, label: 'scroll zoom'),
+        _GestureChip(icon: Icons.open_with, label: 'drag pan'),
+        _GestureChip(icon: Icons.touch_app, label: 'click select'),
+        _GestureChip(icon: Icons.keyboard, label: '+/- arrows F Home'),
+      ],
+    );
+  }
+}
+
+class _GestureChip extends StatelessWidget {
+  const _GestureChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: colors.primary, size: 14),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1437,6 +1669,14 @@ class _TimelinePainter extends CustomPainter {
       ..color = colorScheme.error.withValues(alpha: 0.90);
     final hoveredPaint = Paint()
       ..color = colorScheme.tertiary.withValues(alpha: 0.92);
+    final selectedOutlinePaint = Paint()
+      ..color = colorScheme.error
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    final hoveredOutlinePaint = Paint()
+      ..color = colorScheme.tertiary
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
 
     canvas.drawRect(
       Rect.fromLTWH(leftGutter, 0, timelineWidth, size.height),
@@ -1500,13 +1740,15 @@ class _TimelinePainter extends CustomPainter {
       final right =
           leftGutter +
           ((endNs - viewStartNs) / durationNs).clamp(0.0, 1.0) * timelineWidth;
-      final width = math.max(3.0, right - x);
+      final width = math.max(_timelineMinBarWidth, right - x);
       final rect = Rect.fromLTWH(
         x.clamp(leftGutter, timelineRight).toDouble(),
-        _timelineTop + lane * _timelineLaneHeight + 7,
+        _timelineTop + lane * _timelineLaneHeight + _timelineBarTopInset,
         width,
-        15,
+        _timelineBarHeight,
       );
+      final isSelected = identical(span, selected);
+      final isHovered = identical(span, hovered);
       final paint = identical(span, selected)
           ? selectedPaint
           : identical(span, hovered)
@@ -1521,9 +1763,36 @@ class _TimelinePainter extends CustomPainter {
         RRect.fromRectAndRadius(rect, const Radius.circular(3)),
         paint,
       );
+      if (isSelected || isHovered) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect.inflate(1), const Radius.circular(4)),
+          isSelected ? selectedOutlinePaint : hoveredOutlinePaint,
+        );
+      }
       rendered++;
     }
     canvas.restore();
+
+    final markerSpan = selected ?? hovered;
+    if (markerSpan != null) {
+      final markerX =
+          leftGutter +
+          ((markerSpan.startNs - viewStartNs) / durationNs).clamp(0.0, 1.0) *
+              timelineWidth;
+      if (markerSpan.startNs >= viewStartNs &&
+          markerSpan.startNs <= viewEndNs) {
+        final markerPaint = Paint()
+          ..color =
+              (selected == null ? colorScheme.tertiary : colorScheme.error)
+                  .withValues(alpha: 0.60)
+          ..strokeWidth = 1;
+        canvas.drawLine(
+          Offset(markerX, _timelineTop),
+          Offset(markerX, size.height),
+          markerPaint,
+        );
+      }
+    }
 
     textPainter
       ..text = TextSpan(

@@ -14,7 +14,10 @@ decision artifacts, workload summaries, and graph-data directories; renders a
 workspace browser, trace timeline, minimap viewport brush, searchable linked
 span index, span inspector, span aggregation table, peer comparison table,
 graph-data validation rows, and workload tables; and is reachable through
-`dart run bin/tracelite.dart visualize [--release|--profile] <path>`.
+`dart run bin/tracelite.dart visualize [--release|--profile] <path>`. The
+timeline has explicit zoom controls, scroll/double-click zoom, keyboard
+navigation, enlarged dense-span hit targets, nearest-span picking, and a linked
+span index so small SQLite calls remain inspectable.
 
 Production readiness checkpoint: the app is suitable for local developer
 dogfooding and release-mode smoke testing. External distribution still requires

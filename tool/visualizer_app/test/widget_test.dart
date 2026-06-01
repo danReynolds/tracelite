@@ -46,10 +46,13 @@ void main() {
     expect(find.text('Trace Inspector'), findsOneWidget);
     expect(find.text('Trace Tools'), findsOneWidget);
     expect(find.text('Minimap'), findsOneWidget);
-    expect(find.text('Zoom'), findsOneWidget);
+    expect(find.text('Zoom'), findsWidgets);
     expect(find.text('Pan'), findsOneWidget);
     expect(find.text('Preview'), findsOneWidget);
+    expect(find.text('Keyboard'), findsOneWidget);
     expect(find.text('Timeline'), findsOneWidget);
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.text('click select'), findsOneWidget);
     expect(find.byIcon(Icons.center_focus_strong), findsOneWidget);
     expect(find.text('No span selected'), findsOneWidget);
 
