@@ -212,6 +212,10 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart validate-graph-data <dir>` checks index/dataset schemas,
   counts, files, and row shapes; `export-graph-data` runs this validation before
   reporting success.
+- `bin/tracelite.dart doctor` checks source layout, generated files, Dart
+  dependency resolution, native build artifacts, compiler availability, and the
+  visualizer runtime. It prints actionable setup fixes and can write a
+  `tracelite.doctor.v1` JSON artifact for CI diagnostics.
 - `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
   repeatable scenario matrix and writes a manifest plus per-scenario artifacts
   and logs.

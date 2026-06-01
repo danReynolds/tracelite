@@ -13,6 +13,8 @@ Future<void> main(List<String> args) async {
 
   final command = args.first;
   switch (command) {
+    case 'doctor':
+      await _doctor(args.skip(1).toList());
     case 'report':
       _report(args.skip(1).toList());
     case 'workload-summary':
@@ -44,6 +46,186 @@ Future<void> main(List<String> args) async {
     default:
       stderr.writeln('unknown command: $command');
       _usage();
+  }
+}
+
+Future<void> _doctor(List<String> args) async {
+  final options = _parseOptions(args);
+  final root = Directory(_canonicalDirectoryPath(options['root'] ?? '.'));
+  final strict = _boolOption(options, 'strict', false);
+  final jsonOut = options['json'];
+  final checks = <_DoctorCheck>[];
+
+  void requiredFile(String relativePath) {
+    final file = File(_joinPath(root.path, relativePath));
+    checks.add(
+      file.existsSync()
+          ? _DoctorCheck.ok(
+              'source file',
+              relativePath,
+            )
+          : _DoctorCheck.fail(
+              'source file',
+              'missing $relativePath',
+              action: 'Run doctor from a tracelite checkout or pass '
+                  '--root=/path/to/tracelite.',
+            ),
+    );
+  }
+
+  void requiredDirectory(String relativePath) {
+    final directory = Directory(_joinPath(root.path, relativePath));
+    checks.add(
+      directory.existsSync()
+          ? _DoctorCheck.ok(
+              'source directory',
+              relativePath,
+            )
+          : _DoctorCheck.fail(
+              'source directory',
+              'missing $relativePath',
+              action: 'Run doctor from a tracelite checkout or pass '
+                  '--root=/path/to/tracelite.',
+            ),
+    );
+  }
+
+  requiredFile('pubspec.yaml');
+  requiredFile('bin/tracelite.dart');
+  requiredFile('native/tracelite_runtime.c');
+  requiredFile('native/tracelite_runtime.h');
+  requiredFile('native/shim_sqlite3.c');
+  requiredFile('tool/spans.yaml');
+  requiredDirectory('tool/visualizer_app');
+
+  for (final generated in const [
+    'lib/src/builtin_spans.g.dart',
+    'native/builtin_spans.g.h',
+    'doc/format-spec.appendix.md',
+    'doc/span-registry.generated.md',
+  ]) {
+    final file = File(_joinPath(root.path, generated));
+    checks.add(
+      file.existsSync()
+          ? _DoctorCheck.ok('generated file', generated)
+          : _DoctorCheck.fail(
+              'generated file',
+              'missing $generated',
+              action: 'Run `dart run tool/generate.dart`.',
+            ),
+    );
+  }
+
+  final packageConfig = File(
+    _joinPath(root.path, _joinPath('.dart_tool', 'package_config.json')),
+  );
+  checks.add(
+    packageConfig.existsSync()
+        ? _DoctorCheck.ok('dart dependencies', packageConfig.path)
+        : _DoctorCheck.warn(
+            'dart dependencies',
+            'missing ${packageConfig.path}',
+            action: 'Run `dart pub get` before suites or visualizer work.',
+          ),
+  );
+
+  final runtime = File(_joinPath(root.path, _defaultRuntimeLibraryPath()));
+  checks.add(
+    runtime.existsSync()
+        ? _DoctorCheck.ok('native runtime', runtime.path)
+        : _DoctorCheck.warn(
+            'native runtime',
+            'missing ${runtime.path}',
+            action: _runtimeBuildCommand().trim(),
+          ),
+  );
+
+  final shim = File(_joinPath(root.path, _sqliteShimLibraryPath()));
+  if (Platform.isMacOS) {
+    checks.add(
+      shim.existsSync()
+          ? _DoctorCheck.ok('sqlite shim', shim.path)
+          : _DoctorCheck.warn(
+              'sqlite shim',
+              'missing ${shim.path}',
+              action: _sqliteShimBuildCommand().trim(),
+            ),
+    );
+  } else {
+    checks.add(
+      _DoctorCheck.warn(
+        'sqlite shim',
+        'macOS shim is the validated path; current platform is '
+            '${Platform.operatingSystem}.',
+        action: 'Use macOS for production peer-suite evidence until '
+            'Linux/Windows shim validation lands.',
+      ),
+    );
+  }
+
+  final cc = await _commandVersion('cc', const ['--version']);
+  checks.add(
+    cc == null
+        ? _DoctorCheck.warn(
+            'c compiler',
+            'cc was not found',
+            action: 'Install a C compiler before building native artifacts.',
+          )
+        : _DoctorCheck.ok('c compiler', _firstLine(cc)),
+  );
+
+  checks
+      .add(_DoctorCheck.ok('dart runtime', Platform.version.split('\n').first));
+
+  final flutter = await _commandVersion('flutter', const ['--version']);
+  checks.add(
+    flutter == null
+        ? _DoctorCheck.warn(
+            'visualizer runtime',
+            'flutter was not found',
+            action: 'Install Flutter before using `tracelite visualize`.',
+          )
+        : _DoctorCheck.ok('visualizer runtime', _firstLine(flutter)),
+  );
+
+  final failures = checks.where((check) => check.status == 'fail').toList();
+  final warnings = checks.where((check) => check.status == 'warn').toList();
+  final status = failures.isNotEmpty
+      ? 'failed'
+      : strict && warnings.isNotEmpty
+          ? 'failed'
+          : warnings.isNotEmpty
+              ? 'warning'
+              : 'ready';
+
+  final artifact = <String, Object?>{
+    'schema': 'tracelite.doctor.v1',
+    'generated_at': DateTime.now().toUtc().toIso8601String(),
+    'status': status,
+    'strict': strict,
+    'root': root.path,
+    'platform': {
+      'operating_system': Platform.operatingSystem,
+      'version': Platform.operatingSystemVersion,
+    },
+    'checks': [for (final check in checks) check.toJson()],
+  };
+
+  if (jsonOut != null && jsonOut.isNotEmpty) {
+    final file = File(jsonOut);
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(artifact)}\n',
+    );
+  }
+
+  _printDoctorReport(artifact, checks);
+
+  if (status == 'failed') {
+    if (strict && failures.isEmpty) {
+      stderr.writeln('strict mode treats doctor warnings as failures.');
+    }
+    exit(65);
   }
 }
 
@@ -2337,6 +2519,134 @@ String _runtimeBuildCommand() {
   };
 }
 
+String _sqliteShimLibraryPath() => 'build/libsqlite_traced.dylib';
+
+String _sqliteShimBuildCommand() {
+  return '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
+      'native/shim_sqlite3.c -Wl,-reexport-lsqlite3 '
+      '-o ${_sqliteShimLibraryPath()}';
+}
+
+String _joinPath(String first, String second) {
+  if (first.isEmpty || first == '.') return second;
+  if (second.isEmpty) return first;
+  final separator = Platform.pathSeparator;
+  if (first.endsWith(separator)) return '$first$second';
+  return '$first$separator$second';
+}
+
+String _canonicalDirectoryPath(String path) {
+  final directory = Directory(path).absolute;
+  try {
+    return directory.resolveSymbolicLinksSync();
+  } on FileSystemException {
+    return directory.path;
+  }
+}
+
+Future<String?> _commandVersion(String executable, List<String> args) async {
+  try {
+    final result = await Process.run(executable, args);
+    if (result.exitCode != 0) return null;
+    final output = '${result.stdout}${result.stderr}'.trim();
+    return output.isEmpty ? executable : output;
+  } on ProcessException {
+    return null;
+  }
+}
+
+String _firstLine(String value) {
+  return value.split(RegExp(r'\r?\n')).first.trim();
+}
+
+void _printDoctorReport(
+  Map<String, Object?> artifact,
+  List<_DoctorCheck> checks,
+) {
+  stdout
+    ..writeln('# tracelite doctor')
+    ..writeln()
+    ..writeln('Status: `${artifact['status']}`')
+    ..writeln('Root: `${artifact['root']}`')
+    ..writeln('Platform: `${Platform.operatingSystem}`')
+    ..writeln()
+    ..writeln('| check | status | detail |')
+    ..writeln('|---|---|---|');
+  for (final check in checks) {
+    stdout.writeln(
+      '| ${check.name} | `${check.status}` | ${_markdownCell(check.detail)} |',
+    );
+  }
+
+  final actions = [
+    for (final check in checks)
+      if (check.status != 'ok' && check.action != null) check.action!,
+  ];
+  if (actions.isNotEmpty) {
+    stdout
+      ..writeln()
+      ..writeln('Next steps:');
+    for (final action in actions.toSet()) {
+      stdout.writeln('- $action');
+    }
+  }
+}
+
+String _markdownCell(String value) {
+  return value.replaceAll('|', r'\|').replaceAll('\n', '<br>');
+}
+
+final class _DoctorCheck {
+  const _DoctorCheck._({
+    required this.name,
+    required this.status,
+    required this.detail,
+    this.action,
+  });
+
+  factory _DoctorCheck.ok(String name, String detail) {
+    return _DoctorCheck._(name: name, status: 'ok', detail: detail);
+  }
+
+  factory _DoctorCheck.warn(
+    String name,
+    String detail, {
+    required String action,
+  }) {
+    return _DoctorCheck._(
+      name: name,
+      status: 'warn',
+      detail: detail,
+      action: action,
+    );
+  }
+
+  factory _DoctorCheck.fail(
+    String name,
+    String detail, {
+    required String action,
+  }) {
+    return _DoctorCheck._(
+      name: name,
+      status: 'fail',
+      detail: detail,
+      action: action,
+    );
+  }
+
+  final String name;
+  final String status;
+  final String detail;
+  final String? action;
+
+  Map<String, Object?> toJson() => {
+        'name': name,
+        'status': status,
+        'detail': detail,
+        if (action != null) 'action': action,
+      };
+}
+
 String _historyRunName(int runIndex, DateTime timestamp) {
   final compact = timestamp
       .toIso8601String()
@@ -2827,6 +3137,8 @@ class _IntStats {
 
 Never _usage({int exitCode = 64}) {
   stderr.writeln('usage:');
+  stderr.writeln('  dart run bin/tracelite.dart doctor '
+      '[--root=/path/to/tracelite] [--strict=true] [--json=doctor.json]');
   stderr.writeln('  dart run bin/tracelite.dart report <region-path>');
   stderr.writeln('  dart run bin/tracelite.dart workload-summary <region-path> '
       '[--out-json=summary.json]');
