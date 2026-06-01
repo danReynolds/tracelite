@@ -102,9 +102,8 @@ dart run bin/tracelite.dart compare \
 # Source-checkout desktop visualizer launcher.
 dart run bin/tracelite.dart visualize build/graph-data
 
-# Source-checkout visualizer readiness check; add --build=host for local
-# release-bundle evidence on the current desktop platform.
-dart run bin/tracelite.dart visualizer-check --build=host
+# Source-checkout visualizer readiness and packaged host release evidence.
+dart run bin/tracelite.dart visualizer-check --package=host
 ```
 
 ## Benchmark Profiles
@@ -154,11 +153,16 @@ It validates a clean git archive, so ignored local overrides used for sibling
 checkout testing do not affect the publish dry-run.
 
 For visualizer release hygiene, run
-`dart run bin/tracelite.dart visualizer-check --build=host`. It resolves the
+`dart run bin/tracelite.dart visualizer-check --package=host`. It resolves the
 Flutter app dependencies, runs `flutter analyze`, runs `flutter test`, builds
-the host release bundle, and verifies that the expected desktop artifact exists.
-This proves local app health; signed/notarized distribution is still a separate
-release-packaging step.
+the host release bundle, creates a platform archive under
+`build/visualizer-release/`, and writes a manifest with source state, archive
+size, SHA-256 checksum, and signing/notarization status. Add
+`--require-clean-source=true` for attachable release evidence. On macOS, pass
+`--macos-sign-identity` and `--macos-notary-profile` to run the credentialed
+Developer ID signing, notarytool submission, stapling, and final archive path.
+Linux and Windows signing remain release-system responsibilities and are
+recorded as external in the manifest.
 
 ## Architecture
 

@@ -34,4 +34,18 @@ void main() {
       contains('[--profile=ci|experiment|production] [--runs=5]'),
     );
   });
+
+  test('visualizer release docs include package and source gate options', () {
+    final readme = File('README.md').readAsStringSync();
+    final visualizerReadme =
+        File('tool/visualizer_app/README.md').readAsStringSync();
+    final devCli = File('tool/tracelite_dev.dart').readAsStringSync();
+
+    for (final text in [readme, visualizerReadme]) {
+      expect(text, contains('--package=host'));
+      expect(text, contains('--require-clean-source=true'));
+    }
+    expect(devCli, contains('--package=none|host'));
+    expect(devCli, contains('--require-clean-source=true'));
+  });
 }

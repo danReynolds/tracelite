@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 
 Future<void> main(List<String> args) async {
   final options = _parseOptions(args);
@@ -22,7 +26,9 @@ Future<void> main(List<String> args) async {
     exit(66);
   }
 
-  final buildMode = options.buildMode;
+  final buildMode = options.packageMode == 'host' && options.buildMode == 'none'
+      ? 'host'
+      : options.buildMode;
   final device = _hostFlutterDevice();
   if (buildMode == 'host' && device == null) {
     stderr.writeln(
@@ -30,13 +36,29 @@ Future<void> main(List<String> args) async {
     );
     exit(66);
   }
+  if (device != null &&
+      device != 'macos' &&
+      (options.macosSignIdentity != null ||
+          options.macosNotaryProfile != null)) {
+    stderr.writeln(
+      'macOS signing/notarization options are only valid on a macOS host.',
+    );
+    exit(64);
+  }
 
   stdout
     ..writeln('# tracelite visualizer check')
     ..writeln('Root: ${root.path}')
     ..writeln('Flutter: $flutter')
     ..writeln('Build: $buildMode')
+    ..writeln('Package: ${options.packageMode}')
     ..writeln();
+
+  Map<String, Object?>? sourceOverride;
+  if (options.requireCleanSource) {
+    sourceOverride = await _sourceState(root.path);
+    _requireCleanSource(sourceOverride);
+  }
 
   await _runStep(
     label: 'Flutter version',
@@ -76,6 +98,24 @@ Future<void> main(List<String> args) async {
       exit(66);
     }
     stdout.writeln('Release bundle: ${bundle.path}');
+
+    if (options.packageMode == 'host') {
+      final packaged = await _packageHostRelease(
+        root: root,
+        appDir: appDir,
+        device: device,
+        bundle: bundle,
+        outDir: Directory(
+          options.outDir ?? _joinPath(root.path, 'build/visualizer-release'),
+        ),
+        sourceOverride: sourceOverride,
+        macosSignIdentity: options.macosSignIdentity,
+        macosNotaryProfile: options.macosNotaryProfile,
+      );
+      stdout
+        ..writeln('Release archive: ${packaged.archive.path}')
+        ..writeln('Release manifest: ${packaged.manifest.path}');
+    }
   }
 
   stdout.writeln('Visualizer check passed.');
@@ -83,7 +123,12 @@ Future<void> main(List<String> args) async {
 
 _Options _parseOptions(List<String> args) {
   var buildMode = 'none';
+  var packageMode = 'none';
   String? flutterExecutable;
+  String? outDir;
+  String? macosSignIdentity;
+  String? macosNotaryProfile;
+  var requireCleanSource = false;
   var help = false;
 
   for (final arg in args) {
@@ -101,15 +146,68 @@ _Options _parseOptions(List<String> args) {
         stderr.writeln('--build must be `none` or `host`');
         _usage();
       }
+    } else if (arg.startsWith('--package=')) {
+      packageMode = arg.substring('--package='.length);
+      if (packageMode != 'none' && packageMode != 'host') {
+        stderr.writeln('--package must be `none` or `host`');
+        _usage();
+      }
+    } else if (arg.startsWith('--out-dir=')) {
+      outDir = arg.substring('--out-dir='.length);
+      if (outDir.isEmpty) {
+        stderr.writeln('missing value for --out-dir');
+        _usage();
+      }
+    } else if (arg.startsWith('--macos-sign-identity=')) {
+      macosSignIdentity = arg.substring('--macos-sign-identity='.length);
+      if (macosSignIdentity.isEmpty) {
+        stderr.writeln('missing value for --macos-sign-identity');
+        _usage();
+      }
+    } else if (arg.startsWith('--macos-notary-profile=')) {
+      macosNotaryProfile = arg.substring('--macos-notary-profile='.length);
+      if (macosNotaryProfile.isEmpty) {
+        stderr.writeln('missing value for --macos-notary-profile');
+        _usage();
+      }
+    } else if (arg == '--require-clean-source') {
+      requireCleanSource = true;
+    } else if (arg.startsWith('--require-clean-source=')) {
+      final value = arg.substring('--require-clean-source='.length);
+      if (value == 'true') {
+        requireCleanSource = true;
+      } else if (value == 'false') {
+        requireCleanSource = false;
+      } else {
+        stderr.writeln('--require-clean-source must be true or false');
+        _usage();
+      }
     } else {
       stderr.writeln('unknown visualizer-check option: $arg');
       _usage();
     }
   }
 
+  if (macosNotaryProfile != null && macosSignIdentity == null) {
+    stderr.writeln('--macos-notary-profile requires --macos-sign-identity');
+    _usage();
+  }
+  if ((macosSignIdentity != null || macosNotaryProfile != null) &&
+      packageMode != 'host') {
+    stderr.writeln(
+      'macOS signing/notarization options require --package=host',
+    );
+    _usage();
+  }
+
   return _Options(
     buildMode: buildMode,
+    packageMode: packageMode,
     flutterExecutable: flutterExecutable,
+    outDir: outDir,
+    macosSignIdentity: macosSignIdentity,
+    macosNotaryProfile: macosNotaryProfile,
+    requireCleanSource: requireCleanSource,
     help: help,
   );
 }
@@ -137,13 +235,22 @@ Future<void> _runStep({
     }
   } on ProcessException catch (error) {
     stderr.writeln('could not run `$executable`: ${error.message}');
-    stderr.writeln(
-      'Install Flutter or pass --flutter=/path/to/flutter. '
-      'TRACELITE_FLUTTER is also honored.',
-    );
+    if (_isFlutterExecutable(executable)) {
+      stderr.writeln(
+        'Install Flutter or pass --flutter=/path/to/flutter. '
+        'TRACELITE_FLUTTER is also honored.',
+      );
+    } else {
+      stderr.writeln('Install `$executable` and retry this release step.');
+    }
     exit(66);
   }
   stdout.writeln();
+}
+
+bool _isFlutterExecutable(String executable) {
+  final normalized = executable.replaceAll('\\', '/');
+  return normalized == 'flutter' || normalized.endsWith('/flutter');
 }
 
 Directory _checkoutRoot() {
@@ -184,6 +291,305 @@ FileSystemEntity _hostReleaseBundle(String appDir, String device) {
   }
 }
 
+Directory _hostReleaseRoot(String appDir, String device) {
+  switch (device) {
+    case 'macos':
+      return Directory(
+        _joinPath(
+          appDir,
+          'build/macos/Build/Products/Release',
+        ),
+      );
+    case 'linux':
+      return Directory(
+        _joinPath(
+          appDir,
+          'build/linux/x64/release/bundle',
+        ),
+      );
+    case 'windows':
+      return Directory(
+        _joinPath(
+          appDir,
+          'build/windows/x64/runner/Release',
+        ),
+      );
+    default:
+      throw StateError('unsupported visualizer device: $device');
+  }
+}
+
+Future<_PackagedRelease> _packageHostRelease({
+  required Directory root,
+  required Directory appDir,
+  required String device,
+  required FileSystemEntity bundle,
+  required Directory outDir,
+  required Map<String, Object?>? sourceOverride,
+  required String? macosSignIdentity,
+  required String? macosNotaryProfile,
+}) async {
+  await outDir.create(recursive: true);
+  final abi = _targetAbi();
+  final source = sourceOverride ?? await _sourceState(root.path);
+
+  var signingStatus = 'unsigned';
+  var notarizationStatus = 'not_requested';
+  var bundleForArchive = bundle;
+  if (device == 'macos' && macosSignIdentity != null) {
+    await _runStep(
+      label: 'Sign macOS visualizer app',
+      executable: 'codesign',
+      arguments: [
+        '--deep',
+        '--force',
+        '--options',
+        'runtime',
+        '--timestamp',
+        '--sign',
+        macosSignIdentity,
+        bundle.path,
+      ],
+      workingDirectory: root.path,
+    );
+    await _runStep(
+      label: 'Verify macOS signature',
+      executable: 'codesign',
+      arguments: [
+        '--verify',
+        '--deep',
+        '--strict',
+        '--verbose=2',
+        bundle.path,
+      ],
+      workingDirectory: root.path,
+    );
+    signingStatus = 'signed';
+
+    if (macosNotaryProfile != null) {
+      final notarizationArchive = File(
+        _joinPath(outDir.path, 'tracelite_visualizer-$abi-notary.zip'),
+      );
+      if (notarizationArchive.existsSync()) {
+        await notarizationArchive.delete();
+      }
+      await _archiveHostRelease(
+        device: device,
+        appDir: appDir,
+        archive: notarizationArchive,
+      );
+      await _runStep(
+        label: 'Submit macOS visualizer app for notarization',
+        executable: 'xcrun',
+        arguments: [
+          'notarytool',
+          'submit',
+          notarizationArchive.path,
+          '--keychain-profile',
+          macosNotaryProfile,
+          '--wait',
+        ],
+        workingDirectory: root.path,
+      );
+      await _runStep(
+        label: 'Staple macOS notarization ticket',
+        executable: 'xcrun',
+        arguments: ['stapler', 'staple', bundle.path],
+        workingDirectory: root.path,
+      );
+      notarizationStatus = 'stapled';
+      bundleForArchive = bundle;
+    }
+  }
+
+  final archive = File(
+    _joinPath(outDir.path, 'tracelite_visualizer-$abi.${_archiveExtension()}'),
+  );
+  if (archive.existsSync()) {
+    await archive.delete();
+  }
+  await _archiveHostRelease(
+    device: device,
+    appDir: appDir,
+    archive: archive,
+  );
+  if (!archive.existsSync()) {
+    stderr.writeln('expected release archive was not created: ${archive.path}');
+    exit(66);
+  }
+
+  final digest = await sha256.bind(archive.openRead()).first;
+  final manifest = File(
+    _joinPath(outDir.path, 'tracelite_visualizer-$abi.manifest.json'),
+  );
+  final packageRoot = _hostReleaseRoot(appDir.path, device);
+  final manifestJson = <String, Object?>{
+    'schema': 'tracelite.visualizer_release.v1',
+    'generated_at': DateTime.now().toUtc().toIso8601String(),
+    'platform': device,
+    'abi': abi,
+    'source': source,
+    'bundle_path': bundleForArchive.absolute.path,
+    'package_root': packageRoot.absolute.path,
+    'archive_path': archive.absolute.path,
+    'archive_bytes': await archive.length(),
+    'archive_sha256': digest.toString(),
+    'signing': {
+      'status': signingStatus,
+      if (device != 'macos')
+        'note': 'host signing is managed outside tracelite on this platform',
+      if (device == 'macos' && macosSignIdentity == null)
+        'note': 'pass --macos-sign-identity to produce a signed macOS archive',
+    },
+    'notarization': {
+      'status': notarizationStatus,
+      if (device == 'macos' && macosNotaryProfile == null)
+        'note':
+            'pass --macos-notary-profile with --macos-sign-identity to staple a notarized app',
+    },
+  };
+  await manifest.writeAsString(
+    '${const JsonEncoder.withIndent('  ').convert(manifestJson)}\n',
+  );
+  return _PackagedRelease(archive: archive, manifest: manifest);
+}
+
+Future<void> _archiveHostRelease({
+  required String device,
+  required Directory appDir,
+  required File archive,
+}) async {
+  final releaseRoot = _hostReleaseRoot(appDir.path, device);
+  switch (device) {
+    case 'macos':
+      final app = _hostReleaseBundle(appDir.path, device);
+      await _runStep(
+        label: 'Package macOS visualizer archive',
+        executable: 'ditto',
+        arguments: [
+          '-c',
+          '-k',
+          '--sequesterRsrc',
+          '--keepParent',
+          app.path,
+          archive.path,
+        ],
+        workingDirectory: appDir.path,
+      );
+    case 'linux':
+      await _runStep(
+        label: 'Package Linux visualizer archive',
+        executable: 'tar',
+        arguments: ['-czf', archive.path, '-C', releaseRoot.path, '.'],
+        workingDirectory: appDir.path,
+      );
+    case 'windows':
+      await _runStep(
+        label: 'Package Windows visualizer archive',
+        executable: 'powershell',
+        arguments: [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          'Compress-Archive -Path "${releaseRoot.path}\\*" '
+              '-DestinationPath "${archive.path}" -Force',
+        ],
+        workingDirectory: appDir.path,
+      );
+    default:
+      throw StateError('unsupported visualizer device: $device');
+  }
+}
+
+String _archiveExtension() => Platform.isLinux ? 'tar.gz' : 'zip';
+
+String _targetAbi() {
+  final raw = Abi.current().toString().split('.').last;
+  return raw.replaceAllMapped(RegExp(r'([a-z0-9])([A-Z])'), (match) {
+    return '${match.group(1)}-${match.group(2)}';
+  }).toLowerCase();
+}
+
+Future<Map<String, Object?>> _sourceState(String root) async {
+  final revision = await _runCapture(
+    'git',
+    const ['rev-parse', 'HEAD'],
+    workingDirectory: root,
+  );
+  final branch = await _runCapture(
+    'git',
+    const ['branch', '--show-current'],
+    workingDirectory: root,
+  );
+  final status = await _runCapture(
+    'git',
+    const ['status', '--porcelain', '--untracked-files=all'],
+    workingDirectory: root,
+    trimOutput: false,
+  );
+  if (revision == null) {
+    return {'kind': 'unknown'};
+  }
+  final dirtyFiles = status == null || status.isEmpty
+      ? const <String>[]
+      : status.split('\n').where((line) => line.trim().isNotEmpty).toList();
+  return {
+    'kind': 'git',
+    'revision': revision,
+    if (branch != null && branch.isNotEmpty) 'branch': branch,
+    'dirty': dirtyFiles.isNotEmpty,
+    'dirty_count': dirtyFiles.length,
+    if (dirtyFiles.isNotEmpty) 'dirty_files': dirtyFiles.take(20).toList(),
+    if (dirtyFiles.length > 20) 'dirty_files_truncated': true,
+  };
+}
+
+Future<String?> _runCapture(
+  String executable,
+  List<String> arguments, {
+  required String workingDirectory,
+  bool trimOutput = true,
+}) async {
+  try {
+    final result = await Process.run(
+      executable,
+      arguments,
+      workingDirectory: workingDirectory,
+    );
+    if (result.exitCode != 0) return null;
+    final output = result.stdout.toString();
+    return trimOutput ? output.trim() : output.trimRight();
+  } on ProcessException {
+    return null;
+  }
+}
+
+void _requireCleanSource(Map<String, Object?> source) {
+  if (source['kind'] != 'git') {
+    stderr.writeln('cannot verify clean visualizer source state');
+    exit(65);
+  }
+  if (source['dirty'] != true) return;
+  stderr
+    ..writeln('tracelite source has uncommitted changes')
+    ..writeln('revision: ${source['revision']}')
+    ..writeln('dirty files: ${source['dirty_count']}');
+  final dirtyFiles = source['dirty_files'];
+  if (dirtyFiles is List<Object?>) {
+    for (final file in dirtyFiles.take(20)) {
+      stderr.writeln('- $file');
+    }
+    if (source['dirty_files_truncated'] == true) {
+      stderr.writeln('- ...');
+    }
+  }
+  stderr.writeln(
+    'Commit or stash changes, or omit --require-clean-source for local '
+    'visualizer package checks.',
+  );
+  exit(65);
+}
+
 String _joinPath(String first, String second) {
   if (first.isEmpty || first == '.') return second;
   if (second.isEmpty) return first;
@@ -196,22 +602,51 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('usage:');
   stderr.writeln(
     '  dart run bin/tracelite.dart visualizer-check '
-    '[--flutter=/path/to/flutter] [--build=none|host]',
+    '[--flutter=/path/to/flutter] [--build=none|host] '
+    '[--package=none|host] [--out-dir=build/visualizer-release] '
+    '[--require-clean-source=true] '
+    '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
   );
   stderr.writeln();
   stderr.writeln('Runs Flutter pub get, analyze, and test for the desktop');
   stderr.writeln('visualizer. Use --build=host for release-bundle evidence.');
+  stderr.writeln(
+    'Use --package=host to create an audited host release archive and manifest.',
+  );
+  stderr.writeln(
+    'On macOS, signing and notarization are optional credential-backed steps.',
+  );
   exit(exitCode);
 }
 
 final class _Options {
   const _Options({
     required this.buildMode,
+    required this.packageMode,
     required this.flutterExecutable,
+    required this.outDir,
+    required this.macosSignIdentity,
+    required this.macosNotaryProfile,
+    required this.requireCleanSource,
     required this.help,
   });
 
   final String buildMode;
+  final String packageMode;
   final String? flutterExecutable;
+  final String? outDir;
+  final String? macosSignIdentity;
+  final String? macosNotaryProfile;
+  final bool requireCleanSource;
   final bool help;
+}
+
+final class _PackagedRelease {
+  const _PackagedRelease({
+    required this.archive,
+    required this.manifest,
+  });
+
+  final File archive;
+  final File manifest;
 }

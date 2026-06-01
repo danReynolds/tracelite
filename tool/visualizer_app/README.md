@@ -48,11 +48,13 @@ From the repository root:
 ```bash
 dart run bin/tracelite.dart visualizer-check
 dart run bin/tracelite.dart visualizer-check --build=host
+dart run bin/tracelite.dart visualizer-check --package=host
 ```
 
 The first command resolves app dependencies, analyzes, and runs the widget/unit
 tests. The second command also builds the release bundle for the current desktop
-host and verifies that the expected artifact exists.
+host and verifies that the expected artifact exists. The third command also
+creates a release archive and manifest under `build/visualizer-release/`.
 
 During app development:
 
@@ -64,7 +66,25 @@ flutter build macos
 
 ## Release Boundary
 
-`flutter build macos` produces the local release app under
-`build/macos/Build/Products/Release/tracelite_visualizer.app`. Distribution
-outside local developer machines still needs a project signing identity,
-notarization decision, and release artifact packaging.
+`dart run bin/tracelite.dart visualizer-check --package=host` is the release
+artifact command. It runs the same health checks, builds the host release app,
+packages the platform bundle, and writes
+`tracelite_visualizer-<abi>.manifest.json` with the source revision, dirty
+state, archive byte size, SHA-256 checksum, and signing/notarization status.
+Add `--require-clean-source=true` when producing attachable release evidence.
+
+Default archives are unsigned local developer artifacts. For a credentialed
+macOS release, add:
+
+```bash
+dart run bin/tracelite.dart visualizer-check \
+  --package=host \
+  --require-clean-source=true \
+  --macos-sign-identity="Developer ID Application: Example" \
+  --macos-notary-profile=tracelite-notary
+```
+
+That path signs the app, verifies the signature, submits the archive to Apple
+notarytool, staples the ticket, then creates the final distributable archive.
+Linux and Windows signing remain release-system responsibilities and are
+recorded as external in the manifest.

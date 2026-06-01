@@ -13,6 +13,10 @@ void main() {
     expect(result.exitCode, 0);
     expect(result.stderr.toString(), contains('visualizer-check'));
     expect(result.stderr.toString(), contains('--build=none|host'));
+    expect(result.stderr.toString(), contains('--package=none|host'));
+    expect(result.stderr.toString(),
+        contains('--out-dir=build/visualizer-release'));
+    expect(result.stderr.toString(), contains('--require-clean-source=true'));
   });
 
   test('visualizer check reports missing Flutter with an action', () async {
@@ -28,5 +32,52 @@ void main() {
     expect(result.exitCode, 66);
     expect(result.stderr.toString(), contains('Install Flutter'));
     expect(result.stderr.toString(), contains('--flutter=/path/to/flutter'));
+  });
+
+  test('visualizer check rejects invalid package mode before Flutter',
+      () async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      ['tool/visualizer_check.dart', '--package=zip'],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 64);
+    expect(result.stderr.toString(), contains('--package must be'));
+  });
+
+  test('visualizer check requires signing before notarization', () async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--package=host',
+        '--macos-notary-profile=tracelite-notary',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr.toString(),
+      contains('--macos-notary-profile requires --macos-sign-identity'),
+    );
+  });
+
+  test('visualizer check rejects invalid clean-source value', () async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--require-clean-source=maybe',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr.toString(),
+      contains('--require-clean-source must be true or false'),
+    );
   });
 }
