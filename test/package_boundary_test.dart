@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:test/test.dart';
 import 'package:yaml/yaml.dart';
@@ -27,7 +29,8 @@ void main() {
   test('published launcher keeps core commands available', () async {
     final binSource = File('bin/tracelite.dart').readAsStringSync();
     final coreCliSource = File('lib/src/core_cli.dart').readAsStringSync();
-    for (final source in [binSource, coreCliSource]) {
+    final diffSource = File('lib/src/diff.dart').readAsStringSync();
+    for (final source in [binSource, coreCliSource, diffSource]) {
       expect(source, isNot(contains("package:drift/")));
       expect(source, isNot(contains("package:sqlite3/")));
       expect(source, isNot(contains("package:sqlite_async/")));
@@ -71,6 +74,30 @@ void main() {
           'stderr:\n${report.stderr}',
     );
     expect(report.stdout.toString(), contains('# tracelite report'));
+
+    final baselinePath = '${tempDir.path}/baseline.json';
+    final candidatePath = '${tempDir.path}/candidate.json';
+    File(baselinePath).writeAsStringSync(
+      jsonEncode(_compareArtifact([1000000, 1010000, 1020000])),
+    );
+    File(candidatePath).writeAsStringSync(
+      jsonEncode(_compareArtifact([900000, 910000, 920000])),
+    );
+
+    final diff = await _runCoreCli([
+      'diff',
+      '--baseline=$baselinePath',
+      '--candidate=$candidatePath',
+      '--max-cv-percent=1000',
+    ]);
+    expect(
+      diff.exitCode,
+      0,
+      reason: 'diff failed.\nstdout:\n${diff.stdout}\n'
+          'stderr:\n${diff.stderr}',
+    );
+    expect(diff.stdout.toString(), contains('# tracelite diff'));
+    expect(diff.stdout.toString(), contains('| `sqlite3` |'));
   });
 
   test('peer commands stay out of the published core launcher', () async {
@@ -86,6 +113,50 @@ void main() {
       contains('requires a tracelite source checkout'),
     );
   });
+}
+
+Map<String, Object?> _compareArtifact(List<int> elapsedNs) {
+  return {
+    'schema': 'tracelite.compare.v1',
+    'peers': [
+      {
+        'peer': 'sqlite3',
+        'summary': {
+          'elapsed_ns': _stats(elapsedNs),
+        },
+        'samples': [
+          for (var index = 0; index < elapsedNs.length; index++)
+            {
+              'repetition': index + 1,
+              'status': 'ok',
+              'elapsed_ns': elapsedNs[index],
+            },
+        ],
+      },
+    ],
+  };
+}
+
+Map<String, Object?> _stats(List<int> values) {
+  final sorted = values.toList()..sort();
+  final total = sorted.fold<int>(0, (sum, value) => sum + value);
+  final mean = total / sorted.length;
+  final variance = sorted.fold<double>(
+        0,
+        (sum, value) => sum + (value - mean) * (value - mean),
+      ) /
+      sorted.length;
+  return {
+    'count': sorted.length,
+    'total': total,
+    'min': sorted.first,
+    'max': sorted.last,
+    'mean': mean,
+    'median': sorted[sorted.length ~/ 2],
+    'p90': sorted.last,
+    'p99': sorted.last,
+    'stddev': math.sqrt(variance),
+  };
 }
 
 Future<ProcessResult> _runCoreCli(List<String> args) {

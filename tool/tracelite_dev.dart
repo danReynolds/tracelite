@@ -19,6 +19,7 @@ Future<void> main(List<String> args) async {
     case 'report':
     case 'workload-summary':
     case 'create-region':
+    case 'diff':
     case 'decision':
     case 'calibrate-policy':
     case 'export-graph-data':
@@ -26,8 +27,6 @@ Future<void> main(List<String> args) async {
       runTraceliteCoreCli(args);
     case 'compare':
       await _compare(args.skip(1).toList());
-    case 'diff':
-      _diff(args.skip(1).toList());
     case 'visualize':
       await _visualize(args.skip(1).toList());
     case 'suite':
@@ -656,40 +655,6 @@ Future<void> _compare(List<String> args) async {
   }
 }
 
-void _diff(List<String> args) {
-  final options = _parseOptions(args);
-  final baselinePath = options['baseline'];
-  final candidatePath = options['candidate'];
-  if (baselinePath == null || candidatePath == null) {
-    stderr.writeln('diff requires --baseline and --candidate');
-    _usage();
-  }
-  final metric = options['metric'] ?? 'elapsed_ns';
-  final calibrationPolicy = _readPolicyOption(options);
-  final thresholdPercent = _doubleOption(
-    options,
-    'threshold-percent',
-    _policyDouble(calibrationPolicy, 'primary_threshold_percent', 5),
-  );
-  final maxCvPercent = _doubleOption(
-    options,
-    'max-cv-percent',
-    _policyDouble(calibrationPolicy, 'max_cv_percent', 15),
-  );
-  final alpha = double.tryParse(options['alpha'] ?? '0.05') ?? 0.05;
-
-  final baseline = _readJsonMap(baselinePath);
-  final candidate = _readJsonMap(candidatePath);
-  _printDiffReport(
-    baseline: baseline,
-    candidate: candidate,
-    metric: metric,
-    thresholdPercent: thresholdPercent,
-    maxCvPercent: maxCvPercent,
-    alpha: alpha,
-  );
-}
-
 Future<void> _visualize(List<String> args) async {
   var release = false;
   var profile = false;
@@ -1203,89 +1168,6 @@ void _printCompareReport(Map<String, Object?> artifact) {
   }
 }
 
-void _printDiffReport({
-  required Map<String, Object?> baseline,
-  required Map<String, Object?> candidate,
-  required String metric,
-  required double thresholdPercent,
-  required double maxCvPercent,
-  required double alpha,
-}) {
-  final baselinePeers = _peersByName(baseline);
-  final candidatePeers = _peersByName(candidate);
-  final names = baselinePeers.keys.where(candidatePeers.containsKey).toList()
-    ..sort();
-
-  stdout
-    ..writeln('# tracelite diff')
-    ..writeln()
-    ..writeln('Metric: `$metric`')
-    ..writeln('Threshold: ${_trimDouble(thresholdPercent)}%')
-    ..writeln('Max CV: ${_trimDouble(maxCvPercent)}%')
-    ..writeln('Alpha: ${_trimDouble(alpha)}')
-    ..writeln()
-    ..writeln(
-      '| peer | samples | baseline mean | candidate mean | delta | '
-      'delta 95% CI | nonparam p | outliers | change | max cv | verdict |',
-    )
-    ..writeln('|---|---:|---:|---:|---:|---:|---:|---:|---:|---|');
-
-  for (final name in names) {
-    final baselinePeer = baselinePeers[name]!;
-    final candidatePeer = candidatePeers[name]!;
-    final baselineMetric =
-        _metric(baselinePeer['summary']! as Map<String, Object?>, metric);
-    final candidateMetric =
-        _metric(candidatePeer['summary']! as Map<String, Object?>, metric);
-    final baselineSamples = _sampleMetricValues(baselinePeer, metric);
-    final candidateSamples = _sampleMetricValues(candidatePeer, metric);
-    final delta = candidateMetric.mean - baselineMetric.mean;
-    final change =
-        baselineMetric.mean == 0 ? 0.0 : delta / baselineMetric.mean * 100.0;
-    final baselineCv = _cvPercent(baselineMetric);
-    final candidateCv = _cvPercent(candidateMetric);
-    final maxCv = math.max(baselineCv, candidateCv);
-    final ci = _meanDeltaConfidenceInterval(
-      baselineSamples: baselineSamples,
-      candidateSamples: candidateSamples,
-    );
-    final nonParametric = _mannWhitneyTwoSided(
-      baselineSamples: baselineSamples,
-      candidateSamples: candidateSamples,
-    );
-    final outliers = _outlierSummary(
-      baselineSamples: baselineSamples,
-      candidateSamples: candidateSamples,
-    );
-    final hasSamples =
-        baselineSamples.length >= 2 && candidateSamples.length >= 2;
-    final statisticallyClear = ci.excludesZero;
-    final nonParametricClear = nonParametric.available &&
-        nonParametric.pValue <= alpha &&
-        nonParametric.directionMatches(change);
-    final verdict = !hasSamples
-        ? 'insufficient_samples'
-        : maxCv > maxCvPercent
-            ? 'too_noisy'
-            : change.abs() < thresholdPercent
-                ? 'neutral'
-                : !statisticallyClear || !nonParametricClear
-                    ? 'too_noisy'
-                    : change < 0
-                        ? 'improved'
-                        : 'regressed';
-    stdout.writeln(
-      '| `$name` | ${baselineSamples.length}/${candidateSamples.length} | '
-      '${_formatMetricValue(metric, baselineMetric.mean)} | '
-      '${_formatMetricValue(metric, candidateMetric.mean)} | '
-      '${_formatMetricValue(metric, delta)} | '
-      '${_formatConfidenceInterval(metric, ci)} | '
-      '${_formatPValue(nonParametric)} | ${outliers.toReportCell()} | '
-      '${_trimDouble(change)}% | ${_trimDouble(maxCv)}% | $verdict |',
-    );
-  }
-}
-
 Map<String, Object?> _calibrationArtifact({
   required int iterations,
   required int repetitions,
@@ -1520,43 +1402,6 @@ List<BenchmarkPolicyCalibrationInput> _dedupPolicyInput(
   ];
 }
 
-Map<String, Object?>? _readPolicyOption(Map<String, String> options) {
-  final path = options['policy'];
-  if (path == null || path.isEmpty) return null;
-  final artifact = _readJsonMap(path);
-  if (artifact['schema'] != benchmarkPolicyCalibrationSchema) {
-    stderr.writeln('$path is not a tracelite policy calibration artifact');
-    exit(65);
-  }
-  final status = artifact['status'];
-  final allowUnready = _boolOption(options, 'allow-unready-policy', false);
-  if (!allowUnready && status != 'ready') {
-    stderr.writeln(
-      '$path has policy calibration status `$status`; collect more history '
-      'or pass --allow-unready-policy=true for exploratory use',
-    );
-    exit(65);
-  }
-  final policy = artifact['policy'];
-  if (policy is! Map<String, Object?>) {
-    stderr.writeln('$path has no policy object');
-    exit(65);
-  }
-  return policy;
-}
-
-double _policyDouble(
-  Map<String, Object?>? policy,
-  String name,
-  double defaultValue,
-) {
-  if (policy == null) return defaultValue;
-  final value = policy[name];
-  if (value is num) return value.toDouble();
-  stderr.writeln('policy value `$name` must be numeric');
-  exit(65);
-}
-
 _PeerRunMetrics _readPeerMetrics(String path) {
   final file = File(path);
   if (!file.existsSync()) return const _PeerRunMetrics();
@@ -1565,289 +1410,12 @@ _PeerRunMetrics _readPeerMetrics(String path) {
   return _PeerRunMetrics.fromJson(decoded);
 }
 
-Map<String, Map<String, Object?>> _peersByName(Map<String, Object?> artifact) {
-  final peers = artifact['peers'];
-  if (peers is! List<Object?>) {
-    throw const FormatException('artifact has no peers list');
-  }
-  return {
-    for (final peer in peers.cast<Map<String, Object?>>())
-      peer['peer']! as String: peer,
-  };
-}
-
 _IntStats _metric(Map<String, Object?> summary, String metric) {
   final value = summary[metric];
   if (value is! Map<String, Object?>) {
     throw ArgumentError.value(metric, 'metric', 'not present in summary');
   }
   return _IntStats.fromJson(value);
-}
-
-List<int> _sampleMetricValues(Map<String, Object?> peer, String metric) {
-  final samples = peer['samples'];
-  if (samples is! List<Object?>) return const [];
-  return [
-    for (final sampleObj in samples)
-      if (sampleObj is Map<String, Object?> && sampleObj['status'] == 'ok')
-        if (_sampleMetricValue(sampleObj, metric) case final value?) value,
-  ];
-}
-
-int? _sampleMetricValue(Map<String, Object?> sample, String metric) {
-  final direct = sample[metric];
-  if (direct is int) return direct;
-
-  final diagnostics = sample['diagnostics'];
-  if (diagnostics is Map<String, Object?>) {
-    final diagnostic = diagnostics[metric];
-    if (diagnostic is int) return diagnostic;
-  }
-
-  final spanGroups = sample['span_groups'];
-  if (spanGroups is List<Object?>) {
-    if (metric == 'trace_span_total_ns') {
-      var total = 0;
-      for (final group in spanGroups) {
-        if (group is Map<String, Object?> && group['total_ns'] is int) {
-          total += group['total_ns']! as int;
-        }
-      }
-      return total;
-    }
-
-    for (final group in spanGroups) {
-      if (group is! Map<String, Object?>) continue;
-      if (group['span_name'] != 'sqlite3_step') continue;
-      return switch (metric) {
-        'sqlite3_step_count' => group['count'] as int?,
-        'sqlite3_step_total_ns' => group['total_ns'] as int?,
-        _ => null,
-      };
-    }
-  }
-
-  return null;
-}
-
-_ConfidenceInterval _meanDeltaConfidenceInterval({
-  required List<int> baselineSamples,
-  required List<int> candidateSamples,
-}) {
-  if (baselineSamples.length < 2 || candidateSamples.length < 2) {
-    return const _ConfidenceInterval.unavailable();
-  }
-
-  final baseline = _DoubleSample.fromInts(baselineSamples);
-  final candidate = _DoubleSample.fromInts(candidateSamples);
-  final delta = candidate.mean - baseline.mean;
-  final baselineTerm = baseline.variance / baseline.count;
-  final candidateTerm = candidate.variance / candidate.count;
-  final standardError = math.sqrt(baselineTerm + candidateTerm);
-  if (standardError == 0) {
-    return _ConfidenceInterval(lower: delta, upper: delta);
-  }
-
-  final numerator = math.pow(baselineTerm + candidateTerm, 2).toDouble();
-  final denominator = math.pow(baselineTerm, 2) / (baseline.count - 1) +
-      math.pow(candidateTerm, 2) / (candidate.count - 1);
-  final degreesOfFreedom = denominator == 0 ? 1.0 : numerator / denominator;
-  final margin = _tCritical95(degreesOfFreedom) * standardError;
-  return _ConfidenceInterval(lower: delta - margin, upper: delta + margin);
-}
-
-_MannWhitneyResult _mannWhitneyTwoSided({
-  required List<int> baselineSamples,
-  required List<int> candidateSamples,
-}) {
-  if (baselineSamples.length < 3 || candidateSamples.length < 3) {
-    return const _MannWhitneyResult.unavailable();
-  }
-
-  final combined = <_RankedValue>[
-    for (final value in baselineSamples) _RankedValue(value, true),
-    for (final value in candidateSamples) _RankedValue(value, false),
-  ]..sort((a, b) => a.value.compareTo(b.value));
-
-  final hasTies = _assignAverageRanks(combined);
-  final baselineCount = baselineSamples.length;
-  final candidateCount = candidateSamples.length;
-  final baselineRankSum = combined
-      .where((value) => value.isBaseline)
-      .fold<double>(0, (sum, value) => sum + value.rank);
-  final baselineU = baselineRankSum - baselineCount * (baselineCount + 1) / 2.0;
-  final maxU = baselineCount * candidateCount.toDouble();
-  final observedMinU = math.min(baselineU, maxU - baselineU);
-
-  final exactPValue = hasTies
-      ? null
-      : _exactMannWhitneyTwoSidedPValue(
-          totalCount: combined.length,
-          baselineCount: baselineCount,
-          observedMinU: observedMinU,
-        );
-  final pValue = exactPValue ??
-      _approximateMannWhitneyTwoSidedPValue(
-        u: baselineU,
-        baselineCount: baselineCount,
-        candidateCount: candidateCount,
-      );
-  final direction = candidateSamples.average - baselineSamples.average;
-  return _MannWhitneyResult(
-    pValue: pValue.clamp(0.0, 1.0).toDouble(),
-    direction: direction,
-    exact: exactPValue != null,
-  );
-}
-
-bool _assignAverageRanks(List<_RankedValue> values) {
-  var hasTies = false;
-  var index = 0;
-  while (index < values.length) {
-    var end = index + 1;
-    while (end < values.length && values[end].value == values[index].value) {
-      end++;
-    }
-    if (end - index > 1) {
-      hasTies = true;
-    }
-    final rank = (index + 1 + end) / 2.0;
-    for (var i = index; i < end; i++) {
-      values[i].rank = rank;
-    }
-    index = end;
-  }
-  return hasTies;
-}
-
-double? _exactMannWhitneyTwoSidedPValue({
-  required int totalCount,
-  required int baselineCount,
-  required double observedMinU,
-}) {
-  final candidateCount = totalCount - baselineCount;
-  final totalCombinations = _combinationCount(totalCount, baselineCount);
-  if (totalCombinations > 1000000) return null;
-
-  var extreme = 0;
-  var combinations = 0;
-
-  void visit(int nextRank, int chosen, int rankSum) {
-    if (chosen == baselineCount) {
-      combinations++;
-      final u = rankSum - baselineCount * (baselineCount + 1) / 2.0;
-      final minU = math.min(u, baselineCount * candidateCount - u);
-      if (minU <= observedMinU + 1e-9) {
-        extreme++;
-      }
-      return;
-    }
-    final remainingNeeded = baselineCount - chosen;
-    for (var rank = nextRank;
-        rank <= totalCount - remainingNeeded + 1;
-        rank++) {
-      visit(rank + 1, chosen + 1, rankSum + rank);
-    }
-  }
-
-  visit(1, 0, 0);
-  return combinations == 0 ? null : extreme / combinations;
-}
-
-int _combinationCount(int n, int k) {
-  final r = math.min(k, n - k);
-  var result = 1;
-  for (var i = 1; i <= r; i++) {
-    result = result * (n - r + i) ~/ i;
-  }
-  return result;
-}
-
-double _approximateMannWhitneyTwoSidedPValue({
-  required double u,
-  required int baselineCount,
-  required int candidateCount,
-}) {
-  final mean = baselineCount * candidateCount / 2.0;
-  final variance = baselineCount *
-      candidateCount *
-      (baselineCount + candidateCount + 1) /
-      12.0;
-  if (variance <= 0) return 1;
-  final continuity = u > mean
-      ? -0.5
-      : u < mean
-          ? 0.5
-          : 0.0;
-  final z = (u - mean + continuity) / math.sqrt(variance);
-  final oneTail = math.min(_normalCdf(z), 1.0 - _normalCdf(z));
-  return math.min(1.0, oneTail * 2.0);
-}
-
-double _normalCdf(double z) {
-  final sign = z < 0 ? -1.0 : 1.0;
-  final x = z.abs();
-  final t = 1.0 / (1.0 + 0.2316419 * x);
-  final y = 1.0 -
-      0.3989422804014327 *
-          math.exp(-x * x / 2.0) *
-          t *
-          (0.319381530 +
-              t *
-                  (-0.356563782 +
-                      t *
-                          (1.781477937 +
-                              t * (-1.821255978 + 1.330274429 * t))));
-  return sign == 1.0 ? y : 1.0 - y;
-}
-
-_OutlierSummary _outlierSummary({
-  required List<int> baselineSamples,
-  required List<int> candidateSamples,
-}) {
-  return _OutlierSummary(
-    baseline: _tukeyOutlierCount(baselineSamples),
-    candidate: _tukeyOutlierCount(candidateSamples),
-  );
-}
-
-int _tukeyOutlierCount(List<int> samples) {
-  if (samples.length < 4) return 0;
-  final sorted = samples.toList()..sort();
-  final q1 = _percentileInterpolated(sorted, 0.25);
-  final q3 = _percentileInterpolated(sorted, 0.75);
-  final iqr = q3 - q1;
-  if (iqr == 0) return 0;
-  final low = q1 - 1.5 * iqr;
-  final high = q3 + 1.5 * iqr;
-  return sorted.where((value) => value < low || value > high).length;
-}
-
-double _percentileInterpolated(List<int> values, double percentile) {
-  if (values.isEmpty) return 0;
-  final position = (values.length - 1) * percentile;
-  final lower = position.floor();
-  final upper = position.ceil();
-  if (lower == upper) return values[lower].toDouble();
-  final weight = position - lower;
-  return values[lower] * (1 - weight) + values[upper] * weight;
-}
-
-double _tCritical95(double degreesOfFreedom) {
-  if (degreesOfFreedom >= 120) return 1.98;
-  if (degreesOfFreedom >= 60) return 2.00;
-  if (degreesOfFreedom >= 40) return 2.02;
-  if (degreesOfFreedom >= 30) return 2.04;
-  if (degreesOfFreedom >= 20) return 2.09;
-  if (degreesOfFreedom >= 15) return 2.13;
-  if (degreesOfFreedom >= 10) return 2.23;
-  if (degreesOfFreedom >= 8) return 2.31;
-  if (degreesOfFreedom >= 6) return 2.45;
-  if (degreesOfFreedom >= 5) return 2.57;
-  if (degreesOfFreedom >= 4) return 2.78;
-  if (degreesOfFreedom >= 3) return 3.18;
-  if (degreesOfFreedom >= 2) return 4.30;
-  return 12.71;
 }
 
 String _peerStatus(List<_PeerTraceResult> results) {
@@ -2214,28 +1782,6 @@ double _cvPercent(_IntStats stats) {
   return stats.stddev / stats.mean * 100;
 }
 
-String _formatMetricValue(String metric, double value) {
-  if (metric.endsWith('_ns')) {
-    final rounded = value.round();
-    if (rounded < 0) return '-${formatDurationNs(-rounded)}';
-    return formatDurationNs(rounded);
-  }
-  return _trimDouble(value);
-}
-
-String _formatConfidenceInterval(String metric, _ConfidenceInterval interval) {
-  if (!interval.available) return '-';
-  return '[${_formatMetricValue(metric, interval.lower)}, '
-      '${_formatMetricValue(metric, interval.upper)}]';
-}
-
-String _formatPValue(_MannWhitneyResult result) {
-  if (!result.available) return '-';
-  final prefix = result.exact ? '' : '~';
-  if (result.pValue < 0.001) return '${prefix}<0.001';
-  return '$prefix${_trimDouble(result.pValue)}';
-}
-
 String _formatNs(double ns) => formatDurationNs(ns.round());
 
 String _trimDouble(double value) {
@@ -2292,68 +1838,6 @@ class _PeerTraceResult {
   String get status => metrics.status;
   String get unsupportedReason => metrics.unsupportedReason;
   Map<String, Object?> get measurements => metrics.measurements;
-}
-
-class _ConfidenceInterval {
-  const _ConfidenceInterval({
-    required this.lower,
-    required this.upper,
-  }) : available = true;
-
-  const _ConfidenceInterval.unavailable()
-      : lower = 0,
-        upper = 0,
-        available = false;
-
-  final double lower;
-  final double upper;
-  final bool available;
-
-  bool get excludesZero => available && (upper < 0 || lower > 0);
-}
-
-class _MannWhitneyResult {
-  const _MannWhitneyResult({
-    required this.pValue,
-    required this.direction,
-    required this.exact,
-  }) : available = true;
-
-  const _MannWhitneyResult.unavailable()
-      : pValue = 1,
-        direction = 0,
-        exact = false,
-        available = false;
-
-  final double pValue;
-  final double direction;
-  final bool exact;
-  final bool available;
-
-  bool directionMatches(double meanChangePercent) {
-    if (direction == 0 || meanChangePercent == 0) return false;
-    return direction.sign == meanChangePercent.sign;
-  }
-}
-
-class _OutlierSummary {
-  const _OutlierSummary({
-    required this.baseline,
-    required this.candidate,
-  });
-
-  final int baseline;
-  final int candidate;
-
-  String toReportCell() => '$baseline/$candidate';
-}
-
-class _RankedValue {
-  _RankedValue(this.value, this.isBaseline);
-
-  final int value;
-  final bool isBaseline;
-  double rank = 0;
 }
 
 class _SuiteProfile {
@@ -2490,42 +1974,6 @@ List<_SuiteScenario> _selectedSuiteScenarios(
   return [
     for (final scenarioName in selectedNames) scenariosByName[scenarioName]!,
   ];
-}
-
-class _DoubleSample {
-  _DoubleSample._({
-    required this.count,
-    required this.mean,
-    required this.variance,
-  });
-
-  factory _DoubleSample.fromInts(List<int> values) {
-    final count = values.length;
-    final mean = values.fold<double>(0, (sum, value) => sum + value) / count;
-    final variance = count < 2
-        ? 0.0
-        : values.fold<double>(
-              0,
-              (sum, value) => sum + math.pow(value - mean, 2),
-            ) /
-            (count - 1);
-    return _DoubleSample._(
-      count: count,
-      mean: mean,
-      variance: variance,
-    );
-  }
-
-  final int count;
-  final double mean;
-  final double variance;
-}
-
-extension _AverageIntSamples on List<int> {
-  double get average {
-    if (isEmpty) return 0;
-    return fold<double>(0, (sum, value) => sum + value) / length;
-  }
 }
 
 class _PeerRunMetrics {

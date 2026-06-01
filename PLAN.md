@@ -274,7 +274,7 @@ tracelite/
 ```
 
 The published `bin/tracelite.dart` stays small and routes core artifact commands
-to `lib/src/core_cli.dart`: `report`, `decision`, `calibrate-policy`,
+to `lib/src/core_cli.dart`: `report`, `diff`, `decision`, `calibrate-policy`,
 `export-graph-data`, `validate-graph-data`, `workload-summary`, and
 `create-region`. In a source checkout it hands peer benchmark commands to
 `tool/tracelite_dev.dart`, where the peer-heavy implementation can use dev-only
@@ -304,7 +304,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader workload noise | `tracelite calibrate-policy` produces policy artifacts and strict history validation; a ceiling-capped resqlite measured-elapsed release scope passes on the 5-run history, while broader diagnostic metrics and two micro workloads remain too noisy |
 | Benchmark artifacts can power downstream dashboards without tracelite UI | ✓ proven | `tracelite export-graph-data` emits graphable datasets from suite, decision, and workload-summary inputs |
 | Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
-| Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `test/package_boundary_test.dart` forces core CLI mode and verifies core commands still run |
+| Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `test/package_boundary_test.dart` forces core CLI mode and verifies core artifact commands including `diff` still run |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `flutter test`, `flutter analyze`, and `flutter build macos` pass |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |

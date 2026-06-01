@@ -7,6 +7,7 @@ const Set<String> traceliteCoreCommands = {
   'report',
   'workload-summary',
   'create-region',
+  'diff',
   'decision',
   'calibrate-policy',
   'export-graph-data',
@@ -29,6 +30,8 @@ void runTraceliteCoreCli(List<String> args) {
       _workloadSummary(args.skip(1).toList());
     case 'create-region':
       _createRegion(args.skip(1).toList());
+    case 'diff':
+      _diff(args.skip(1).toList());
     case 'decision':
       _decision(args.skip(1).toList());
     case 'calibrate-policy':
@@ -156,6 +159,43 @@ void _decision(List<String> args) {
   if (!benchmarkDecisionPassed(decision)) {
     exitCode = 65;
   }
+}
+
+void _diff(List<String> args) {
+  final options = _parseOptions(args);
+  final baselinePath = options['baseline'];
+  final candidatePath = options['candidate'];
+  if (baselinePath == null || candidatePath == null) {
+    stderr.writeln('diff requires --baseline and --candidate');
+    printTraceliteCoreUsage();
+  }
+  final calibrationPolicy = _readPolicyOption(options);
+  final artifact = benchmarkDiffArtifact(
+    baselineArtifact: _readJsonMap(baselinePath),
+    candidateArtifact: _readJsonMap(candidatePath),
+    baselinePath: baselinePath,
+    candidatePath: candidatePath,
+    options: BenchmarkDiffOptions(
+      metric: options['metric'] ?? 'elapsed_ns',
+      thresholdPercent: _doubleOption(
+        options,
+        'threshold-percent',
+        _policyDouble(calibrationPolicy, 'primary_threshold_percent', 5),
+      ),
+      maxCvPercent: _doubleOption(
+        options,
+        'max-cv-percent',
+        _policyDouble(calibrationPolicy, 'max_cv_percent', 15),
+      ),
+      alpha: double.tryParse(options['alpha'] ?? '0.05') ?? 0.05,
+    ),
+  );
+
+  final outJson = options['out-json'];
+  if (outJson != null && outJson.isNotEmpty) {
+    _writeJson(outJson, artifact);
+  }
+  stdout.write(benchmarkDiffMarkdown(artifact));
 }
 
 void _calibratePolicy(List<String> args) {
@@ -793,6 +833,10 @@ Never printTraceliteCoreUsage({int exitCode = 64}) {
   stderr.writeln('  dart run bin/tracelite.dart create-region --out=path');
   stderr.writeln(
     '  dart run bin/tracelite.dart decision --baseline=base.json '
+    '--candidate=change.json',
+  );
+  stderr.writeln(
+    '  dart run bin/tracelite.dart diff --baseline=base.json '
     '--candidate=change.json',
   );
   stderr

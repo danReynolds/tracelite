@@ -59,6 +59,11 @@ dart run bin/tracelite.dart decision \
   --candidate=build/candidate/manifest.json \
   --policy=build/policy-calibration.json
 
+# Published/core command: inspect benchmark deltas without peer libraries.
+dart run bin/tracelite.dart diff \
+  --baseline=build/baseline/compare.json \
+  --candidate=build/candidate/compare.json
+
 # Published/core command: export dashboard-ready graph data.
 dart run bin/tracelite.dart export-graph-data \
   --suite-history=build/history.json \
