@@ -28,6 +28,7 @@ work.
 - Dart-side spans/counters through `TraceRecorder`.
 - Common SQL workloads across validated peers.
 - Calibrated thresholds, CV gates, outlier policy, and decisions.
+- Artifact interpretation through `explain` and visualizer insight panels.
 - Schema-validated graph data for dashboards and the visualizer.
 
 ## How It Works
@@ -64,6 +65,9 @@ dart run bin/tracelite.dart decision \
 dart run bin/tracelite.dart diff \
   --baseline=build/baseline/compare.json \
   --candidate=build/candidate/compare.json
+
+# Published/core command: explain trust, noise, and bottleneck signals.
+dart run bin/tracelite.dart explain build/candidate/manifest.json
 
 # Published/core command: export dashboard-ready graph data.
 dart run bin/tracelite.dart export-graph-data \

@@ -17,6 +17,8 @@ Every production-quality experiment should preserve:
 - The `tracelite calibrate-policy` artifact or the named policy values used for
   thresholds, repetitions, and noise gates.
 - The markdown decision report.
+- Optional `tracelite explain` findings for trust, noise, trace-health,
+  guardrail, and bottleneck interpretation.
 - The raw `.tlt-region` files when the run includes external workload traces
   such as resqlite profile regions.
 - The commit SHAs, package versions, device, OS, Dart/Flutter version, scenario

@@ -6,7 +6,7 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (7 specs, ~4,000 LOC, first 6 reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, the peer harness, and the first desktop visualizer slice are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events when the local resqlite trace hook is available. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, recorder-overhead calibration, artifact-history policy calibration, and a development `visualize` launcher.
+**Status:** Design corpus complete (7 specs, ~4,000 LOC, first 6 reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, the peer harness, and the first desktop visualizer slice are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events when the local resqlite trace hook is available. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, recorder-overhead calibration, artifact-history policy calibration, artifact insight interpretation, and a development `visualize` launcher.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
@@ -218,6 +218,10 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart validate-graph-data <dir>` checks index/dataset schemas,
   counts, files, and row shapes; `export-graph-data` runs this validation before
   reporting success.
+- `bin/tracelite.dart explain <artifact-or-dir>` reads compare, diff, decision,
+  suite, suite-history, and workload-summary artifacts and emits trust,
+  trace-health, noise, peer-spread, and bottleneck findings as Markdown plus
+  optional `tracelite.insights.v1` JSON.
 - `bin/tracelite.dart doctor` checks source layout, generated files, Dart
   dependency resolution, native build artifacts, compiler availability, and the
   visualizer runtime. It prints actionable setup fixes and can write a
@@ -647,7 +651,8 @@ Work:
   table, graph-data validation rows, and workload tables. The timeline now has
   explicit zoom controls, scroll/double-click zoom, keyboard navigation, larger
   dense-span bars, wider hit targets, nearest-span picking, selected-span
-  outlines, and a linked span index.
+  outlines, and a linked span index. Workspace and compare screens now surface
+  shared artifact insights from the core interpretation layer.
 - Add true visible-range query reaggregation after the initial custom timeline
   and table views have settled.
 - Consider stack sampling for CPU attribution only after wall/span attribution

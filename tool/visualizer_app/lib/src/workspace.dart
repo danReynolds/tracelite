@@ -104,6 +104,7 @@ Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
 final class CompareDocument {
   CompareDocument({
     required this.path,
+    required this.artifact,
     required this.scenario,
     required this.rows,
     required this.repetitions,
@@ -112,6 +113,7 @@ final class CompareDocument {
   });
 
   final String path;
+  final Map<String, Object?> artifact;
   final String scenario;
   final int rows;
   final int repetitions;
@@ -124,6 +126,7 @@ final class CompareDocument {
     final peerObjects = _listOfMaps(json['peers']);
     return CompareDocument(
       path: path,
+      artifact: json,
       scenario: _string(json['scenario']) ?? displayNameForPath(path),
       rows: _int(json['rows']) ?? 0,
       repetitions: _int(json['repetitions']) ?? peerObjects.length,
@@ -378,12 +381,14 @@ final class SuiteRun {
 final class DecisionDocument {
   const DecisionDocument({
     required this.path,
+    required this.artifact,
     required this.verdict,
     required this.expectation,
     required this.summary,
   });
 
   final String path;
+  final Map<String, Object?> artifact;
   final String verdict;
   final String expectation;
   final Map<String, Object?> summary;
@@ -393,6 +398,7 @@ final class DecisionDocument {
   factory DecisionDocument.fromJson(String path, Map<String, Object?> json) {
     return DecisionDocument(
       path: path,
+      artifact: json,
       verdict:
           _string(json['verdict']) ??
           _string(json['decision']) ??

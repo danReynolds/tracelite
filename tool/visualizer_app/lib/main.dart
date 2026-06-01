@@ -266,6 +266,7 @@ class OverviewPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final insights = _workspaceInsights(workspace);
     return _PageScaffold(
       title: 'Workspace',
       subtitle: workspace.rootPath,
@@ -304,6 +305,13 @@ class OverviewPage extends StatelessWidget {
               ),
             ],
           ),
+          if (insights.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _Section(
+              title: 'Workspace Insights',
+              child: _InsightList(insights: insights.take(6).toList()),
+            ),
+          ],
           const SizedBox(height: 20),
           _Section(
             title: 'Loaded Artifacts',
@@ -371,6 +379,24 @@ class OverviewPage extends StatelessWidget {
       }
     }
     return '${peers.length} peers';
+  }
+
+  List<BenchmarkInsight> _workspaceInsights(VisualizerWorkspace workspace) {
+    final insights = <BenchmarkInsight>[];
+    for (final decision in workspace.decisions) {
+      insights.addAll(benchmarkArtifactInsights(decision.artifact));
+    }
+    for (final compare in workspace.compares) {
+      insights.addAll(benchmarkArtifactInsights(compare.artifact));
+    }
+    insights.sort((a, b) {
+      final bySeverity = _insightSeverityRank(
+        a.severity,
+      ).compareTo(_insightSeverityRank(b.severity));
+      if (bySeverity != 0) return bySeverity;
+      return a.title.compareTo(b.title);
+    });
+    return insights;
   }
 }
 
@@ -659,6 +685,9 @@ class _ComparePageState extends State<ComparePage> {
   Widget build(BuildContext context) {
     final compares = widget.workspace.compares;
     final compare = compares.isEmpty ? null : compares[_selectedIndex];
+    final insights = compare == null
+        ? const <BenchmarkInsight>[]
+        : benchmarkArtifactInsights(compare.artifact);
     return _PageScaffold(
       title: 'Peer Comparison',
       subtitle: compare == null
@@ -712,6 +741,11 @@ class _ComparePageState extends State<ComparePage> {
                   ],
                 ),
                 const SizedBox(height: 20),
+                _Section(
+                  title: 'Compare Insights',
+                  child: _InsightList(insights: insights.take(6).toList()),
+                ),
+                const SizedBox(height: 16),
                 const _Section(
                   title: 'Compare Tools',
                   child: _ToolGuide(
@@ -899,7 +933,11 @@ class _TraceTimelineState extends State<TraceTimeline> {
       _fitToTrace(notify: false);
     } else if (!identical(oldWidget.selected, widget.selected) &&
         widget.selected != null) {
-      _focusSpan(widget.selected!);
+      final selected = widget.selected!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(widget.selected, selected)) return;
+        _focusSpan(selected);
+      });
     }
   }
 
@@ -2398,6 +2436,92 @@ class _ToolGuideTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _InsightList extends StatelessWidget {
+  const _InsightList({required this.insights});
+
+  final List<BenchmarkInsight> insights;
+
+  @override
+  Widget build(BuildContext context) {
+    if (insights.isEmpty) {
+      return const Text('No interpreted findings for this artifact.');
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final insight in insights)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _InsightRow(insight: insight),
+          ),
+      ],
+    );
+  }
+}
+
+class _InsightRow extends StatelessWidget {
+  const _InsightRow({required this.insight});
+
+  final BenchmarkInsight insight;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final color = _insightColor(colors, insight.severity);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(_insightIcon(insight.severity), color: color, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                insight.title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                insight.body,
+                style: TextStyle(color: colors.onSurfaceVariant, height: 1.25),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Color _insightColor(ColorScheme colors, String severity) {
+  return switch (severity) {
+    'critical' => colors.error,
+    'warning' => const Color(0xff8a5a00),
+    'good' => const Color(0xff177245),
+    _ => colors.primary,
+  };
+}
+
+IconData _insightIcon(String severity) {
+  return switch (severity) {
+    'critical' => Icons.error_outline,
+    'warning' => Icons.warning_amber,
+    'good' => Icons.check_circle_outline,
+    _ => Icons.info_outline,
+  };
+}
+
+int _insightSeverityRank(String severity) {
+  return switch (severity) {
+    'critical' => 0,
+    'warning' => 1,
+    'info' => 2,
+    'good' => 3,
+    _ => 4,
+  };
 }
 
 class _InspectorPanel extends StatelessWidget {

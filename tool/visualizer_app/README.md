@@ -27,6 +27,8 @@ flutter run -d macos -a ../../build/visualizer-demo
 ## Use
 
 - Overview inventories loaded artifacts and load issues.
+- Workspace and Compare insights explain trust, trace-health, noise, peer
+  spread, and likely bottleneck signals before you inspect raw rows.
 - Trace inspects raw `.tlt-region` spans. Use the minimap brush to jump through
   the run, the zoom slider or `+`/`-` to resize the visible window, double-click
   or scroll over the timeline to zoom at the cursor, drag horizontally to pan,

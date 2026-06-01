@@ -9,6 +9,7 @@ const Set<String> traceliteCoreCommands = {
   'create-region',
   'diff',
   'decision',
+  'explain',
   'calibrate-policy',
   'export-graph-data',
   'validate-graph-data',
@@ -34,6 +35,8 @@ void runTraceliteCoreCli(List<String> args) {
       _diff(args.skip(1).toList());
     case 'decision':
       _decision(args.skip(1).toList());
+    case 'explain':
+      _explain(args.skip(1).toList());
     case 'calibrate-policy':
       _calibratePolicy(args.skip(1).toList());
     case 'export-graph-data':
@@ -196,6 +199,64 @@ void _diff(List<String> args) {
     _writeJson(outJson, artifact);
   }
   stdout.write(benchmarkDiffMarkdown(artifact));
+}
+
+void _explain(List<String> args) {
+  if (args.isEmpty || args.first.startsWith('--')) {
+    stderr.writeln('explain expects an artifact file, suite, or directory');
+    printTraceliteCoreUsage();
+  }
+  final path = args.first;
+  final options = _parseOptions(args.skip(1).toList());
+  final insightOptions = BenchmarkInsightOptions(
+    maxCvPercent: _doubleOption(options, 'max-cv-percent', 15),
+  );
+  final inputs = _explainInputs(path, seen: <String>{});
+  if (inputs.isEmpty) {
+    stderr.writeln('explain found no supported tracelite artifacts at $path');
+    exit(65);
+  }
+
+  final sources = [
+    for (final input in inputs)
+      {
+        'path': input.path,
+        'artifact_schema': input.schema,
+        'insights': [
+          for (final insight in benchmarkArtifactInsights(
+            input.artifact,
+            options: insightOptions,
+          ))
+            insight.toJson(),
+        ],
+      },
+  ];
+
+  final outJson = options['out-json'];
+  if (outJson != null && outJson.isNotEmpty) {
+    _writeJson(outJson, {
+      'schema': benchmarkInsightsSchema,
+      'generated_at': DateTime.now().toUtc().toIso8601String(),
+      'sources': sources,
+    });
+  }
+
+  final buffer = StringBuffer()
+    ..writeln('# tracelite insights')
+    ..writeln()
+    ..writeln('Source: `$path`');
+  for (final input in inputs) {
+    buffer
+      ..writeln()
+      ..writeln('## ${input.label}')
+      ..writeln()
+      ..write(benchmarkArtifactInsightsMarkdown(
+        input.artifact,
+        options: insightOptions,
+        heading: '### Findings',
+      ));
+  }
+  stdout.write(buffer.toString());
 }
 
 void _calibratePolicy(List<String> args) {
@@ -451,6 +512,118 @@ List<Map<String, Object?>> _readComparableArtifacts(String path) {
         '$path is not a tracelite compare artifact or suite manifest',
       ),
   };
+}
+
+List<_ExplainInput> _explainInputs(
+  String path, {
+  required Set<String> seen,
+}) {
+  final directory = Directory(path);
+  if (directory.existsSync()) {
+    final files = directory
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.json'))
+        .toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    return [
+      for (final file in files) ..._explainFile(file.path, seen: seen),
+    ];
+  }
+
+  final file = File(path);
+  if (!file.existsSync()) {
+    throw FileSystemException('explain path does not exist', path);
+  }
+  return _explainFile(file.path, seen: seen, explicit: true);
+}
+
+List<_ExplainInput> _explainFile(
+  String path, {
+  required Set<String> seen,
+  bool explicit = false,
+}) {
+  final absolute = File(path).absolute.path;
+  if (!seen.add(absolute)) return const [];
+
+  late final Map<String, Object?> root;
+  try {
+    root = _readJsonMap(path);
+  } on Object {
+    if (explicit) rethrow;
+    return const [];
+  }
+
+  final schema = root['schema'];
+  return switch (schema) {
+    'tracelite.compare.v1' ||
+    'tracelite.diff.v1' ||
+    benchmarkDecisionSchema ||
+    'tracelite.workload_summary.v1' =>
+      [
+        _ExplainInput(path: absolute, artifact: root),
+      ],
+    'tracelite.suite.v1' => [
+        _ExplainInput(path: absolute, artifact: root),
+        ..._explainSuiteArtifacts(absolute, root, seen),
+      ],
+    'tracelite.suite_history.v1' => [
+        _ExplainInput(path: absolute, artifact: root),
+        ..._explainSuiteHistoryArtifacts(absolute, root, seen),
+      ],
+    _ => explicit
+        ? throw FormatException('$path is not a supported tracelite artifact')
+        : const <_ExplainInput>[],
+  };
+}
+
+List<_ExplainInput> _explainSuiteArtifacts(
+  String manifestPath,
+  Map<String, Object?> manifest,
+  Set<String> seen,
+) {
+  final runs = manifest['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$manifestPath has no runs list');
+  }
+  return [
+    for (final run in runs.cast<Map<String, Object?>>())
+      if (run['artifact'] is String)
+        ..._explainFile(
+          _resolveManifestArtifactPath(
+              manifestPath, run['artifact']! as String),
+          seen: seen,
+        ),
+  ];
+}
+
+List<_ExplainInput> _explainSuiteHistoryArtifacts(
+  String historyPath,
+  Map<String, Object?> history,
+  Set<String> seen,
+) {
+  final runs = history['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$historyPath has no runs list');
+  }
+  return [
+    for (final run in runs.cast<Map<String, Object?>>())
+      if (run['status'] == 'ok' && run['manifest'] is String)
+        ..._explainFile(
+          _resolveManifestArtifactPath(historyPath, run['manifest']! as String),
+          seen: seen,
+        ),
+  ];
+}
+
+final class _ExplainInput {
+  const _ExplainInput({required this.path, required this.artifact});
+
+  final String path;
+  final Map<String, Object?> artifact;
+
+  String get schema => artifact['schema'] as String? ?? 'unknown';
+  String get label => '${File(path).uri.pathSegments.last} (`$schema`)';
 }
 
 List<Map<String, Object?>> _readSuiteCompareArtifacts(
@@ -839,6 +1012,7 @@ Never printTraceliteCoreUsage({int exitCode = 64}) {
     '  dart run bin/tracelite.dart diff --baseline=base.json '
     '--candidate=change.json',
   );
+  stderr.writeln('  dart run bin/tracelite.dart explain <artifact-or-dir>');
   stderr
       .writeln('  dart run bin/tracelite.dart calibrate-policy --history=dir');
   stderr.writeln(

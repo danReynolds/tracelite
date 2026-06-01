@@ -109,6 +109,15 @@ void main() {
     );
     expect(diff.stdout.toString(), contains('# tracelite diff'));
     expect(diff.stdout.toString(), contains('| `sqlite3` |'));
+
+    final explain = await _runCoreCli(['explain', baselinePath]);
+    expect(
+      explain.exitCode,
+      0,
+      reason: 'explain failed.\nstdout:\n${explain.stdout}\n'
+          'stderr:\n${explain.stderr}',
+    );
+    expect(explain.stdout.toString(), contains('# tracelite insights'));
   });
 
   test('peer commands stay out of the published core launcher', () async {

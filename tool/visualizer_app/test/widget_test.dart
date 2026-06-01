@@ -35,6 +35,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Workspace'), findsOneWidget);
+    expect(find.text('Workspace Insights'), findsOneWidget);
     expect(find.text('Loaded Artifacts'), findsOneWidget);
     expect(find.text('Tools'), findsOneWidget);
     expect(find.text('Raw Trace'), findsOneWidget);
@@ -59,6 +60,7 @@ void main() {
     await tester.tap(find.text('Compare'));
     await tester.pumpAndSettle();
     expect(find.text('Peer Comparison'), findsOneWidget);
+    expect(find.text('Compare Insights'), findsOneWidget);
     expect(find.text('Compare Tools'), findsOneWidget);
     expect(find.text('Measured Mean'), findsOneWidget);
     expect(find.text('Peer Metrics'), findsOneWidget);

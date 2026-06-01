@@ -22,6 +22,7 @@ Future<void> main(List<String> args) async {
     case 'create-region':
     case 'diff':
     case 'decision':
+    case 'explain':
     case 'calibrate-policy':
     case 'export-graph-data':
     case 'validate-graph-data':
@@ -2195,6 +2196,8 @@ Never _usage({int exitCode = 64}) {
       '[--expect=improvement|no_regression] '
       '[--primary-peer=resqlite] [--primary-metric=elapsed_ns] '
       '[--policy=policy-calibration.json] [--out-json=decision.json]');
+  stderr.writeln('  dart run bin/tracelite.dart explain '
+      '<artifact-or-dir> [--out-json=insights.json]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate-policy '
       '--history=manifest-or-directory '
       '[--metrics=elapsed_ns,measured_elapsed_ns] '

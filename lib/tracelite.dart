@@ -2,6 +2,7 @@ export 'src/builtin_spans.g.dart';
 export 'src/decision.dart';
 export 'src/diff.dart';
 export 'src/graph_data.dart';
+export 'src/insights.dart';
 export 'src/policy_calibration.dart';
 export 'src/profile_summary.dart';
 export 'src/producer.dart';
