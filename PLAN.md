@@ -152,9 +152,10 @@ doc/span-registry.generated.md     full per-category schemas with arg lists
   the measured library.
 - `package:tracelite/resqlite.dart` exposes the resqlite semantic vocabulary
   that resqlite can import instead of hard-coding IDs and names locally.
-- The public `tracelite` library is now core-only. Peer adapters live under
-  `tool/src/` behind the source-checkout launcher, and their dependencies are
-  dev-only, so a library such as
+- The public `tracelite` library is now core-only. The published `bin/`
+  executable keeps core artifact commands available without peer libraries.
+  Peer adapters live under `tool/src/` behind the source-checkout handoff, and
+  their dependencies are dev-only, so a library such as
   `resqlite` can depend on tracelite's recorder without inheriting drift,
   sqlite_async, sqlite3, or resqlite peer dependencies from tracelite itself.
   A published peer-comparison CLI should move those adapters into a companion
@@ -262,7 +263,7 @@ tracelite/
 ├── .gitignore
 ├── pubspec.yaml                 core package metadata + dev-only peer deps
 ├── doc/                         design specs + per-spec feedback
-├── bin/                         source-checkout CLI launcher
+├── bin/                         published core CLI + source-checkout handoff
 ├── tool/                       spans.yaml + generator + development CLI
 ├── native/                      C runtime + shim + generated header
 ├── lib/src/                     trace decoder, recorder, decisions, graph export
@@ -271,10 +272,13 @@ tracelite/
 └── build/                       compiled artifacts (.gitignored)
 ```
 
-The source-checkout launcher keeps existing `dart run bin/tracelite.dart ...`
-commands working while the peer-heavy benchmark implementation lives under
-`tool/` with dev-only peer dependencies. The published library dependency graph
-stays core-only until the peer benchmark CLI becomes a companion package.
+The published `bin/tracelite.dart` supports core artifact commands such as
+`report`, `decision`, `calibrate-policy`, `export-graph-data`,
+`validate-graph-data`, `workload-summary`, and `create-region` without peer
+libraries. In a source checkout it hands peer benchmark commands to
+`tool/tracelite_dev.dart`, where the peer-heavy implementation can use dev-only
+dependencies. The published library dependency graph stays core-only until the
+peer benchmark CLI becomes a companion package.
 
 ---
 
@@ -299,7 +303,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader workload noise | `tracelite calibrate-policy` produces policy artifacts and strict history validation; a ceiling-capped resqlite measured-elapsed release scope passes on the 5-run history, while broader diagnostic metrics and two micro workloads remain too noisy |
 | Benchmark artifacts can power downstream dashboards without tracelite UI | ✓ proven | `tracelite export-graph-data` emits graphable datasets from suite, decision, and workload-summary inputs |
 | Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
-| Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml` |
+| Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `test/package_boundary_test.dart` forces core CLI mode and verifies core commands still run |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
 | Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `flutter test`, `flutter analyze`, and `flutter build macos` pass |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |

@@ -23,4 +23,67 @@ void main() {
           'safe for peer libraries to depend on.',
     );
   });
+
+  test('published launcher keeps core commands available', () async {
+    final binSource = File('bin/tracelite.dart').readAsStringSync();
+    expect(binSource, isNot(contains("package:drift/")));
+    expect(binSource, isNot(contains("package:sqlite3/")));
+    expect(binSource, isNot(contains("package:sqlite_async/")));
+    expect(binSource, isNot(contains("package:resqlite/")));
+
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-core-cli-boundary-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final regionPath = '${tempDir.path}/core.tlt-region';
+    final create = await _runCoreCli([
+      'create-region',
+      '--out=$regionPath',
+      '--ring-data-words=1024',
+    ]);
+    expect(
+      create.exitCode,
+      0,
+      reason: 'create-region failed.\nstdout:\n${create.stdout}\n'
+          'stderr:\n${create.stderr}',
+    );
+    expect(File(regionPath).existsSync(), isTrue);
+
+    final report = await _runCoreCli(['report', regionPath]);
+    expect(
+      report.exitCode,
+      0,
+      reason: 'report failed.\nstdout:\n${report.stdout}\n'
+          'stderr:\n${report.stderr}',
+    );
+    expect(report.stdout.toString(), contains('# tracelite report'));
+  });
+
+  test('peer commands stay out of the published core launcher', () async {
+    final result = await _runCoreCli([
+      'compare',
+      '--scenario=narrow-batch-insert',
+      '--interfaces=sqlite3',
+      '--rows=1',
+    ]);
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr.toString(),
+      contains('requires a tracelite source checkout'),
+    );
+  });
+}
+
+Future<ProcessResult> _runCoreCli(List<String> args) {
+  return Process.run(
+    Platform.resolvedExecutable,
+    ['bin/tracelite.dart', ...args],
+    workingDirectory: Directory.current.path,
+    environment: {'TRACELITE_FORCE_CORE_CLI': 'true'},
+  );
 }

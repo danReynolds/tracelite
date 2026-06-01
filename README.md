@@ -50,19 +50,26 @@ are represented explicitly instead of hidden behind incomparable numbers.
 ## Common Commands
 
 ```bash
-dart run bin/tracelite.dart suite \
-  --profile=ci \
-  --interfaces=sqlite3,drift,sqlite_async
+# Published/core command: inspect an existing trace.
+dart run bin/tracelite.dart report build/example.tlt-region
 
+# Published/core command: make a regression decision from artifacts.
 dart run bin/tracelite.dart decision \
   --baseline=build/baseline/manifest.json \
   --candidate=build/candidate/manifest.json \
   --policy=build/policy-calibration.json
 
+# Published/core command: export dashboard-ready graph data.
 dart run bin/tracelite.dart export-graph-data \
   --suite-history=build/history.json \
   --out=build/graph-data
 
+# Source-checkout peer benchmark command.
+dart run bin/tracelite.dart suite \
+  --profile=ci \
+  --interfaces=sqlite3,drift,sqlite_async
+
+# Source-checkout desktop visualizer launcher.
 dart run bin/tracelite.dart visualize build/graph-data
 ```
 
@@ -94,9 +101,10 @@ checkout testing do not affect the publish dry-run.
 
 `native/` contains the shared-memory runtime and SQLite shim. `lib/` contains
 the recorder, trace reader, decision logic, graph-data export, and vocabularies.
-`bin/` contains the source-checkout launcher, `tool/tracelite_dev.dart` contains
-the dev-dependency-backed benchmark CLI, and `tool/visualizer_app/` contains the
-Flutter desktop visualizer.
+`bin/` contains the published core CLI plus a source-checkout handoff for peer
+benchmark commands. `tool/tracelite_dev.dart` contains the dev-dependency-backed
+benchmark implementation, and `tool/visualizer_app/` contains the Flutter
+desktop visualizer.
 
 ## Docs
 
