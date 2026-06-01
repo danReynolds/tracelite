@@ -30,10 +30,10 @@ jobs:
       - name: Pin resqlite sibling dependency
         working-directory: tracelite
         run: |
-          cat > pubspec_overrides.yaml <<'YAML'
+          cat > pubspec_overrides.yaml <<YAML
           dependency_overrides:
             resqlite:
-              path: ../resqlite
+              path: $GITHUB_WORKSPACE/resqlite
           YAML
 
       - name: Install dependencies
