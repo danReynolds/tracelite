@@ -22,10 +22,11 @@ needs a stable tracelite source pin, and old profile-only signals need explicit
 coverage or replacement in the pinned integration. Public package release still
 also needs distribution polish (publishing metadata, signed packaged visualizer
 builds, and Windows release host validation). Tracelite's own macOS CI pins and
-verifies the trace-enabled resqlite sibling checkout before peer tests, so this
-repo's gate cannot accidentally benchmark the pub package. Linux now has a
-focused package:sqlite3 shim smoke lane in CI, but the full production peer
-suite remains macOS-validated.
+verifies the trace-enabled resqlite sibling checkout at
+`a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
+gate cannot accidentally benchmark the pub package. Linux now has a focused
+package:sqlite3 shim smoke lane in CI, but the full production peer suite
+remains macOS-validated.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
