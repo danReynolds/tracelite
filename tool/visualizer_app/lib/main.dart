@@ -595,7 +595,9 @@ class _TracePageState extends State<TracePage> {
         trace.completeSpans.where((span) {
           if (filter.isEmpty) return true;
           final name = trace.trace.spanName(span.spanId).toLowerCase();
+          final args = _spanArgsSummary(trace.trace, span).toLowerCase();
           return name.contains(filter) ||
+              args.contains(filter) ||
               '${span.trackId}'.contains(filter) ||
               '${span.begin.correlationId ?? ''}'.contains(filter);
         }).toList()..sort((a, b) {
@@ -1907,32 +1909,226 @@ class _SelectedSpanDetails extends StatelessWidget {
       );
     }
     final selected = activeSpan;
+    final sql = _prepareSqlDetails(trace, selected);
     return _InspectorPanel(
       icon: Icons.manage_search,
       title: span == null ? 'Hovered Span' : 'Selected Span',
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 10,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _InlineDatum(label: 'span', value: trace.spanName(selected.spanId)),
-          _InlineDatum(label: 'duration', value: formatNs(selected.durationNs)),
-          _InlineDatum(label: 'track', value: '${selected.trackId}'),
-          if (selected.begin.correlationId != null)
-            _InlineDatum(
-              label: 'correlation',
-              value: '${selected.begin.correlationId}',
-            ),
-          _InlineDatum(
-            label: 'begin args',
-            value: selected.beginArgs.join(', '),
+          Wrap(
+            spacing: 16,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _InlineDatum(
+                label: 'span',
+                value: trace.spanName(selected.spanId),
+              ),
+              _InlineDatum(
+                label: 'duration',
+                value: formatNs(selected.durationNs),
+              ),
+              _InlineDatum(label: 'track', value: '${selected.trackId}'),
+              if (selected.begin.correlationId != null)
+                _InlineDatum(
+                  label: 'correlation',
+                  value: '${selected.begin.correlationId}',
+                ),
+              if (selected.beginArgs.isNotEmpty)
+                _InlineDatum(
+                  label: 'begin args',
+                  value: _formatSpanArgs(
+                    trace,
+                    selected,
+                    selected.beginArgs,
+                    phase: _SpanArgPhase.begin,
+                  ),
+                ),
+              if (selected.endArgs.isNotEmpty)
+                _InlineDatum(
+                  label: 'end args',
+                  value: _formatSpanArgs(
+                    trace,
+                    selected,
+                    selected.endArgs,
+                    phase: _SpanArgPhase.end,
+                  ),
+                ),
+            ],
           ),
-          if (selected.endArgs.isNotEmpty)
-            _InlineDatum(label: 'end args', value: selected.endArgs.join(', ')),
+          if (sql != null) ...[
+            const SizedBox(height: 10),
+            Divider(color: colors.outlineVariant, height: 1),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 16,
+              runSpacing: 10,
+              children: [
+                _InlineDatum(label: 'sql fingerprint', value: sql.fingerprint),
+                _InlineDatum(label: 'sql mode', value: sql.mode),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SelectableText.rich(
+              TextSpan(
+                style: DefaultTextStyle.of(context).style,
+                children: [
+                  TextSpan(
+                    text: 'normalized SQL: ',
+                    style: TextStyle(
+                      color: colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  TextSpan(text: sql.normalizedSql),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+}
+
+enum _SpanArgPhase { begin, end }
+
+final class _PrepareSqlDetails {
+  const _PrepareSqlDetails({
+    required this.fingerprint,
+    required this.normalizedSql,
+    required this.mode,
+  });
+
+  final String fingerprint;
+  final String normalizedSql;
+  final String mode;
+}
+
+_PrepareSqlDetails? _prepareSqlDetails(Trace trace, TraceSpan span) {
+  if (span.spanId != BuiltinSpans.sqlite3PrepareV2 &&
+      span.spanId != BuiltinSpans.sqlite3PrepareV3) {
+    return null;
+  }
+  if (span.beginArgs.length < 2) return null;
+  final label = trace.strings[span.beginArgs[1]];
+  if (label == null) return null;
+  if (label == '<sql:redacted>') {
+    return const _PrepareSqlDetails(
+      fingerprint: 'sqlfp:v1:redacted',
+      normalizedSql: '<redacted>',
+      mode: 'redacted',
+    );
+  }
+  final parts = label.split(':');
+  if (parts.length >= 4 && parts[0] == 'sqlfp' && parts[1] == 'v1') {
+    return _PrepareSqlDetails(
+      fingerprint: 'sqlfp:v1:${parts[2]}',
+      normalizedSql: parts.sublist(3).join(':'),
+      mode: 'fingerprinted',
+    );
+  }
+  return _PrepareSqlDetails(
+    fingerprint: 'raw',
+    normalizedSql: label,
+    mode: 'raw',
+  );
+}
+
+String _formatSpanArgs(
+  Trace trace,
+  TraceSpan span,
+  List<int> args, {
+  required _SpanArgPhase phase,
+}) {
+  switch ((span.spanId, phase)) {
+    case (BuiltinSpans.sqlite3Open, _SpanArgPhase.begin):
+      return _joinNamedArgs([('filename', _stringArg(trace, args, 0))]);
+    case (BuiltinSpans.sqlite3OpenV2, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('filename', _stringArg(trace, args, 0)),
+        ('flags', _intArg(args, 1)),
+        ('vfs', _stringArg(trace, args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3PrepareV2, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('db', _ptrArg(args, 0)),
+        ('sql', _prepareSqlSummary(trace, span)),
+      ]);
+    case (BuiltinSpans.sqlite3PrepareV3, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('db', _ptrArg(args, 0)),
+        ('sql', _prepareSqlSummary(trace, span)),
+        ('flags', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3PrepareV2, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3PrepareV3, _SpanArgPhase.end):
+      return _joinNamedArgs([
+        ('stmt', _ptrArg(args, 0)),
+        ('rc', _intArg(args, 1)),
+      ]);
+    case (BuiltinSpans.sqlite3Step, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3Reset, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3Finalize, _SpanArgPhase.begin):
+      return _joinNamedArgs([('stmt', _ptrArg(args, 0))]);
+    case (BuiltinSpans.sqlite3Step, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3Reset, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3Finalize, _SpanArgPhase.end):
+      return _joinNamedArgs([('rc', _intArg(args, 0))]);
+    default:
+      return args.join(', ');
+  }
+}
+
+String _spanArgsSummary(Trace trace, TraceSpan span) {
+  final parts = [
+    if (span.beginArgs.isNotEmpty)
+      'begin ${_formatSpanArgs(trace, span, span.beginArgs, phase: _SpanArgPhase.begin)}',
+    if (span.endArgs.isNotEmpty)
+      'end ${_formatSpanArgs(trace, span, span.endArgs, phase: _SpanArgPhase.end)}',
+  ];
+  return parts.isEmpty ? '-' : parts.join(' / ');
+}
+
+String _prepareSqlSummary(Trace trace, TraceSpan span) {
+  final details = _prepareSqlDetails(trace, span);
+  if (details == null) return _intArg(span.beginArgs, 1);
+  if (details.fingerprint == 'raw') {
+    return _truncateForTable(details.normalizedSql);
+  }
+  return '${_shortFingerprint(details.fingerprint)} ${_truncateForTable(details.normalizedSql)}';
+}
+
+String _joinNamedArgs(List<(String, String)> args) {
+  return [
+    for (final (name, value) in args)
+      if (value.isNotEmpty) '$name=$value',
+  ].join(', ');
+}
+
+String _stringArg(Trace trace, List<int> args, int index) {
+  if (index >= args.length) return '';
+  final id = args[index];
+  final value = trace.strings[id];
+  if (value == null) return '$id';
+  return '"${_truncateForTable(value)}"';
+}
+
+String _ptrArg(List<int> args, int index) {
+  if (index >= args.length) return '';
+  final value = args[index];
+  return '0x${value.toRadixString(16)}';
+}
+
+String _intArg(List<int> args, int index) {
+  if (index >= args.length) return '';
+  return '${args[index]}';
+}
+
+String _truncateForTable(String value, {int maxLength = 140}) {
+  if (value.length <= maxLength) return value;
+  return '${value.substring(0, maxLength - 1)}...';
 }
 
 class PeerComparisonTable extends StatelessWidget {
@@ -2112,7 +2308,8 @@ class SpanIndexPanel extends StatelessWidget {
                   isDense: true,
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.search),
-                  labelText: 'Filter spans by name, track, or correlation',
+                  labelText:
+                      'Filter spans by name, SQL, args, track, or correlation',
                 ),
               ),
             ),
@@ -2165,7 +2362,7 @@ class SpanIndexPanel extends StatelessWidget {
                           ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 340),
                             child: Text(
-                              _argsSummary(span),
+                              _spanArgsSummary(trace.trace, span),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -2192,14 +2389,6 @@ class SpanIndexPanel extends StatelessWidget {
     final events = trace.trace.events;
     final start = events.isEmpty ? 0 : events.first.timestampNs;
     return math.max(0, span.startNs - start);
-  }
-
-  String _argsSummary(TraceSpan span) {
-    final parts = [
-      if (span.beginArgs.isNotEmpty) 'begin ${span.beginArgs.join(',')}',
-      if (span.endArgs.isNotEmpty) 'end ${span.endArgs.join(',')}',
-    ];
-    return parts.isEmpty ? '-' : parts.join(' / ');
   }
 }
 

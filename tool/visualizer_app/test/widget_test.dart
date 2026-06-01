@@ -114,6 +114,60 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Selected Span'), findsOneWidget);
   });
+
+  testWidgets('decodes SQLite prepare SQL fingerprints in trace views', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final temp = Directory.systemTemp.createTempSync('tracelite-viz-sql-');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    await _writeSqlTraceWorkspace(temp);
+
+    await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Trace'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Span Index'), findsOneWidget);
+    expect(find.textContaining('sqlfp:v1:2a1aa0dd'), findsWidgets);
+    expect(
+      find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
+      findsWidgets,
+    );
+
+    await tester.enterText(find.byType(TextField).last, 'TRACELITE_ITEMS');
+    await tester.pumpAndSettle();
+    expect(find.text('1 matches'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, 700));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Selected Span'), findsOneWidget);
+    expect(
+      find.textContaining('sql fingerprint', findRichText: true),
+      findsWidgets,
+    );
+    expect(
+      find.textContaining('fingerprinted', findRichText: true),
+      findsWidgets,
+    );
+    expect(
+      find.textContaining(
+        'SELECT * FROM TRACELITE_ITEMS WHERE ID = ?',
+        findRichText: true,
+      ),
+      findsWidgets,
+    );
+  });
 }
 
 void _writeDemoWorkspace(Directory dir) {
@@ -212,6 +266,34 @@ Future<void> _writeDenseTraceWorkspace(
     recorder.begin(spanId, args: [i]);
     recorder.end(spanId, args: [i % 17]);
   }
+  recorder.detach();
+}
+
+Future<void> _writeSqlTraceWorkspace(Directory dir) async {
+  final runtime = await _ensureRuntimeLibrary();
+  final tracePath = '${dir.path}/sql.tlt-region';
+  TraceRegion.createFile(tracePath, ringDataWords: 1 << 14);
+  final recorder = TraceRecorder.attach(
+    regionPath: tracePath,
+    runtimeLibraryPath: runtime.absolute.path,
+    processName: 'visualizer_sql_test',
+    threadName: 'main',
+  );
+  expect(recorder.isActive, isTrue);
+
+  final sqlId = recorder.internString(
+    'sqlfp:v1:2a1aa0dda20c1116:SELECT * FROM TRACELITE_ITEMS WHERE ID = ?',
+  );
+  recorder.begin(
+    BuiltinSpans.sqlite3PrepareV3,
+    args: [0x101, sqlId, 0],
+    correlationId: 99,
+  );
+  recorder.end(
+    BuiltinSpans.sqlite3PrepareV3,
+    args: [0x202, 0],
+    correlationId: 99,
+  );
   recorder.detach();
 }
 
