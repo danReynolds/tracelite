@@ -114,7 +114,9 @@ calibration. All profiles write the same manifest and compare artifacts, so a
 run can move from quick signal to audited decision without changing artifact
 shape. Repeated source-checkout compares default to an app-JIT child runner so
 the artifact still has isolated repetitions without paying `dart run` startup
-for every sample.
+for every sample. Source-checkout suites reuse one prepared child runner across
+the selected scenario matrix, so production suites still write one compare
+artifact per scenario while avoiding repeated runner setup for every scenario.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the

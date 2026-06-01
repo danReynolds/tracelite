@@ -42,13 +42,28 @@ void main() {
     final source = manifest['tracelite_source'] as Map<String, Object?>;
     expect(source['kind'], 'git');
     expect(source['revision'], isA<String>());
+    final runner = manifest['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'app_jit');
+    expect(runner['requested_mode'], 'auto');
+    expect(runner['build_elapsed_ns'] as int, greaterThan(0));
     final runs = manifest['runs']! as List<Object?>;
     expect(runs, hasLength(4));
     for (final run in runs.cast<Map<String, Object?>>()) {
       expect(run['status'], 'ok');
       expect(File(run['artifact']! as String).existsSync(), isTrue);
       expect(File(run['log']! as String).existsSync(), isTrue);
+      expect(
+        File(run['log']! as String).readAsStringSync(),
+        contains('# tracelite compare'),
+      );
     }
+
+    final firstRun = runs.first as Map<String, Object?>;
+    final firstArtifact = jsonDecode(
+      File(firstRun['artifact']! as String).readAsStringSync(),
+    ) as Map<String, Object?>;
+    final artifactRunner = firstArtifact['runner'] as Map<String, Object?>;
+    expect(artifactRunner['mode'], 'app_jit');
   }, timeout: const Timeout(Duration(minutes: 3)));
 
   test('suite filters the actual run matrix by --scenarios', () async {
@@ -87,6 +102,8 @@ void main() {
     ) as Map<String, Object?>;
     final runs = manifest['runs']! as List<Object?>;
     expect(runs, hasLength(1));
+    final runner = manifest['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'script');
     expect(
       runs.single as Map<String, Object?>,
       containsPair('scenario', 'narrow-batch-insert'),
@@ -139,6 +156,8 @@ void main() {
     );
     final runs = manifest['runs']! as List<Object?>;
     expect(runs, hasLength(1));
+    final runner = manifest['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'app_jit');
     final run = runs.single as Map<String, Object?>;
     expect(run['scenario'], 'narrow-batch-insert');
     expect(run['rows'], 100);
@@ -197,6 +216,8 @@ void main() {
     final calibrationOptions =
         history['calibration_options']! as Map<String, Object?>;
     expect(calibrationOptions['peers'], ['sqlite3']);
+    final runner = history['runner'] as Map<String, Object?>;
+    expect(runner['requested_mode'], 'auto');
 
     final runs = history['runs']! as List<Object?>;
     expect(runs, hasLength(2));

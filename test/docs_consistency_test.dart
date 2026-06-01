@@ -33,6 +33,7 @@ void main() {
       devCli,
       contains('[--profile=ci|experiment|production] [--runs=5]'),
     );
+    expect(devCli, contains('[--runner=auto|script|app-jit]'));
   });
 
   test('visualizer release docs include package and source gate options', () {

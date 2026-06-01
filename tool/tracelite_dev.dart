@@ -278,8 +278,20 @@ Future<void> _suite(List<String> args) async {
     exit(64);
   }
   final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
+  final interfaceNames = _interfaceNames(interfaces);
+  final runnerMode = _runnerModeOption(options['runner']);
   final outDir = Directory(options['out-dir'] ?? 'build/tracelite-suite');
   outDir.createSync(recursive: true);
+
+  _ensurePeerShimAvailable();
+  final tempRoot = Directory.systemTemp.createTempSync('tracelite-suite-');
+  final totalSamples = interfaceNames.length *
+      scenarios.fold<int>(0, (sum, scenario) => sum + scenario.repetitions);
+  final runner = await _preparePeerChildRunner(
+    requestedMode: runnerMode,
+    tempRoot: tempRoot,
+    useAppJitByDefault: totalSamples > 1,
+  );
 
   final runs = <Map<String, Object?>>[];
   stdout
@@ -287,46 +299,48 @@ Future<void> _suite(List<String> args) async {
     ..writeln()
     ..writeln('Profile: `$profileName`')
     ..writeln('Interfaces: `$interfaces`')
+    ..writeln('Runner: `${runner.mode}`')
     ..writeln('Out dir: `${outDir.path}`')
     ..writeln()
     ..writeln('| scenario | rows | repetitions | status | artifact |')
     ..writeln('|---|---:|---:|---|---|');
 
   var failed = false;
-  for (final scenario in scenarios) {
-    final artifactPath = '${outDir.path}/${scenario.name}.json';
-    final result = await Process.run(
-      Platform.resolvedExecutable,
-      [
-        'tool/tracelite_dev.dart',
-        'compare',
-        '--scenario=${scenario.name}',
-        '--interfaces=$interfaces',
-        '--rows=${scenario.rows}',
-        '--repetitions=${scenario.repetitions}',
-        '--out-json=$artifactPath',
-      ],
-      workingDirectory: Directory.current.path,
-    );
-    final status = result.exitCode == 0 ? 'ok' : 'failed';
-    if (result.exitCode != 0) failed = true;
-    final logPath = '${outDir.path}/${scenario.name}.log';
-    File(logPath).writeAsStringSync(
-      'stdout:\n${result.stdout}\n\nstderr:\n${result.stderr}\n',
-    );
-    runs.add({
-      'scenario': scenario.name,
-      'rows': scenario.rows,
-      'repetitions': scenario.repetitions,
-      'artifact': artifactPath,
-      'log': logPath,
-      'exit_code': result.exitCode,
-      'status': status,
-    });
-    stdout.writeln(
-      '| `${scenario.name}` | ${scenario.rows} | '
-      '${scenario.repetitions} | $status | `$artifactPath` |',
-    );
+  try {
+    for (final scenario in scenarios) {
+      final artifactPath = '${outDir.path}/${scenario.name}.json';
+      final result = await _runPeerCompare(
+        scenario: scenario.name,
+        interfaces: interfaceNames,
+        rows: scenario.rows,
+        repetitions: scenario.repetitions,
+        tempRoot: tempRoot,
+        runner: runner,
+        source: source,
+        outJson: artifactPath,
+      );
+      final status = result.failed ? 'failed' : 'ok';
+      if (result.failed) failed = true;
+      final logPath = '${outDir.path}/${scenario.name}.log';
+      File(logPath).writeAsStringSync(result.report);
+      runs.add({
+        'scenario': scenario.name,
+        'rows': scenario.rows,
+        'repetitions': scenario.repetitions,
+        'artifact': artifactPath,
+        'log': logPath,
+        'exit_code': result.failed ? 65 : 0,
+        'status': status,
+      });
+      stdout.writeln(
+        '| `${scenario.name}` | ${scenario.rows} | '
+        '${scenario.repetitions} | $status | `$artifactPath` |',
+      );
+    }
+  } finally {
+    try {
+      tempRoot.deleteSync(recursive: true);
+    } catch (_) {}
   }
 
   final manifestPath = '${outDir.path}/manifest.json';
@@ -338,8 +352,8 @@ Future<void> _suite(List<String> args) async {
           'profile': profileName,
           'description': profile.description,
           'tracelite_source': source,
-          'interfaces':
-              interfaces.split(',').map((name) => name.trim()).toList(),
+          'runner': runner.toJson(),
+          'interfaces': interfaceNames,
           'runs': runs,
         })}\n',
   );
@@ -375,6 +389,8 @@ Future<void> _suiteHistory(List<String> args) async {
 
   final runCount = _positiveIntOption(options, 'runs', 5);
   final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
+  final interfaceNames = _interfaceNames(interfaces);
+  final runnerMode = _runnerModeOption(options['runner']);
   final outDir = Directory(
     options['out-dir'] ?? 'build/tracelite-$profileName-history',
   );
@@ -479,6 +495,7 @@ Future<void> _suiteHistory(List<String> args) async {
         'suite',
         '--profile=$profileName',
         '--interfaces=$interfaces',
+        '--runner=$runnerMode',
         if (options['scenarios'] != null)
           '--scenarios=${scenarios.map((scenario) => scenario.name).join(',')}',
         '--out-dir=${runDir.path}',
@@ -537,7 +554,10 @@ Future<void> _suiteHistory(List<String> args) async {
     'profile': profileName,
     'tracelite_source': source,
     'scenarios': scenarios.map((scenario) => scenario.name).toList(),
-    'interfaces': interfaces.split(',').map((name) => name.trim()).toList(),
+    'interfaces': interfaceNames,
+    'runner': {
+      'requested_mode': runnerMode,
+    },
     'requested_runs': runCount,
     'successful_runs':
         runs.where((run) => run['status'] == 'ok').toList().length,
@@ -580,21 +600,141 @@ Future<void> _compare(List<String> args) async {
     _requireCleanSource(source);
   }
   final scenario = options['scenario'] ?? narrowBatchInsertScenario;
-  final interfaces = (options['interfaces'] ?? defaultPeerNames.join(','))
-      .split(',')
-      .map((name) => name.trim())
-      .where((name) => name.isNotEmpty)
-      .toList();
+  final interfaces =
+      _interfaceNames(options['interfaces'] ?? defaultPeerNames.join(','));
   final rows = _positiveIntOption(options, 'rows', 100);
   final repetitions = _positiveIntOption(options, 'repetitions', 1);
   final outJson = options['out-json'];
-  final runnerMode = options['runner'] ?? 'auto';
-  if (!const {'auto', 'script', 'app-jit'}.contains(runnerMode)) {
-    stderr.writeln('--runner must be auto, script, or app-jit');
-    exit(64);
-  }
-  final ringDataWords = _ringWordsForScenario(scenario, rows);
+  final runnerMode = _runnerModeOption(options['runner']);
+  _ensurePeerShimAvailable();
 
+  final tempRoot = Directory.systemTemp.createTempSync('tracelite-compare-');
+  try {
+    final runner = await _preparePeerChildRunner(
+      requestedMode: runnerMode,
+      tempRoot: tempRoot,
+      useAppJitByDefault: interfaces.length * repetitions > 1,
+    );
+    final result = await _runPeerCompare(
+      scenario: scenario,
+      interfaces: interfaces,
+      rows: rows,
+      repetitions: repetitions,
+      tempRoot: tempRoot,
+      runner: runner,
+      source: source,
+      outJson: outJson,
+    );
+    stdout.write(result.report);
+    if (result.failed) {
+      exitCode = 65;
+    }
+  } finally {
+    try {
+      tempRoot.deleteSync(recursive: true);
+    } catch (_) {}
+  }
+}
+
+Future<_CompareRunResult> _runPeerCompare({
+  required String scenario,
+  required List<String> interfaces,
+  required int rows,
+  required int repetitions,
+  required Directory tempRoot,
+  required _PeerChildRunner runner,
+  required Map<String, Object?> source,
+  required String? outJson,
+}) async {
+  final ringDataWords = _ringWordsForScenario(scenario, rows);
+  final results = <_PeerTraceResult>[];
+  for (final peer in interfaces) {
+    for (var repetition = 1; repetition <= repetitions; repetition++) {
+      final stem = '${_fileStem(scenario)}-${_fileStem(peer)}-r$repetition';
+      final regionPath = '${tempRoot.path}/$stem.tlt-region';
+      final databasePath = '${tempRoot.path}/$stem.db';
+      final metricsPath = '${tempRoot.path}/$stem.metrics.json';
+      TraceRegion.createFile(
+        regionPath,
+        ringDataWords: ringDataWords,
+      );
+
+      final stopwatch = Stopwatch()..start();
+      final child = await Process.run(
+        Platform.resolvedExecutable,
+        runner.arguments(_runPeerArgs(
+          peer: peer,
+          scenario: scenario,
+          databasePath: databasePath,
+          rows: rows,
+          metricsPath: metricsPath,
+        )),
+        environment: _peerChildEnvironment(regionPath),
+      );
+      stopwatch.stop();
+      final metrics = _readPeerMetrics(metricsPath);
+      if (metrics.status == 'unsupported') {
+        results.add(
+          _PeerTraceResult.unsupported(
+            peer: peer,
+            repetition: repetition,
+            metrics: metrics,
+            childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+          ),
+        );
+        continue;
+      }
+
+      if (child.exitCode != 0) {
+        results.add(
+          _PeerTraceResult.failed(
+            peer: peer,
+            repetition: repetition,
+            elapsedNs: 0,
+            childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+            stderr: child.stderr.toString(),
+            stdout: child.stdout.toString(),
+          ),
+        );
+        continue;
+      }
+
+      final trace = Trace.loadRegion(regionPath);
+      results.add(
+        _PeerTraceResult(
+          peer: peer,
+          repetition: repetition,
+          trace: trace,
+          metrics: metrics,
+          childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+        ),
+      );
+    }
+  }
+
+  final artifact = _compareArtifact(
+    scenario: scenario,
+    rows: rows,
+    repetitions: repetitions,
+    ringDataWords: ringDataWords,
+    runner: runner.toJson(),
+    source: source,
+    results: results,
+  );
+  if (outJson != null && outJson.isNotEmpty) {
+    const encoder = JsonEncoder.withIndent('  ');
+    File(outJson)
+      ..createSync(recursive: true)
+      ..writeAsStringSync('${encoder.convert(artifact)}\n');
+  }
+  return _CompareRunResult(
+    artifact: artifact,
+    report: _compareReportMarkdown(artifact),
+    failed: _hasCompareFailure(artifact),
+  );
+}
+
+void _ensurePeerShimAvailable() {
   final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
   if (shimBuildCommand == null) {
     stderr.writeln(
@@ -616,102 +756,26 @@ Future<void> _compare(List<String> args) async {
   }
   final resolverShim = File(native_artifacts.sqliteShimLibraryName());
   resolverShim.writeAsBytesSync(shim.readAsBytesSync());
+}
 
-  final tempRoot = Directory.systemTemp.createTempSync('tracelite-compare-');
-  try {
-    final runner = await _preparePeerChildRunner(
-      requestedMode: runnerMode,
-      tempRoot: tempRoot,
-      useAppJitByDefault: interfaces.length * repetitions > 1,
-    );
-    final results = <_PeerTraceResult>[];
-    for (final peer in interfaces) {
-      for (var repetition = 1; repetition <= repetitions; repetition++) {
-        final regionPath = '${tempRoot.path}/$peer-r$repetition.tlt-region';
-        final databasePath = '${tempRoot.path}/$peer-r$repetition.db';
-        final metricsPath = '${tempRoot.path}/$peer-r$repetition.metrics.json';
-        TraceRegion.createFile(
-          regionPath,
-          ringDataWords: ringDataWords,
-        );
-
-        final stopwatch = Stopwatch()..start();
-        final child = await Process.run(
-          Platform.resolvedExecutable,
-          runner.arguments(_runPeerArgs(
-            peer: peer,
-            scenario: scenario,
-            databasePath: databasePath,
-            rows: rows,
-            metricsPath: metricsPath,
-          )),
-          environment: _peerChildEnvironment(regionPath),
-        );
-        stopwatch.stop();
-        final metrics = _readPeerMetrics(metricsPath);
-        if (metrics.status == 'unsupported') {
-          results.add(
-            _PeerTraceResult.unsupported(
-              peer: peer,
-              repetition: repetition,
-              metrics: metrics,
-              childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
-            ),
-          );
-          continue;
-        }
-
-        if (child.exitCode != 0) {
-          results.add(
-            _PeerTraceResult.failed(
-              peer: peer,
-              repetition: repetition,
-              elapsedNs: 0,
-              childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
-              stderr: child.stderr.toString(),
-              stdout: child.stdout.toString(),
-            ),
-          );
-          continue;
-        }
-
-        final trace = Trace.loadRegion(regionPath);
-        results.add(
-          _PeerTraceResult(
-            peer: peer,
-            repetition: repetition,
-            trace: trace,
-            metrics: _readPeerMetrics(metricsPath),
-            childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
-          ),
-        );
-      }
-    }
-
-    final artifact = _compareArtifact(
-      scenario: scenario,
-      rows: rows,
-      repetitions: repetitions,
-      ringDataWords: ringDataWords,
-      runner: runner.toJson(),
-      source: source,
-      results: results,
-    );
-    if (outJson != null && outJson.isNotEmpty) {
-      const encoder = JsonEncoder.withIndent('  ');
-      File(outJson)
-        ..createSync(recursive: true)
-        ..writeAsStringSync('${encoder.convert(artifact)}\n');
-    }
-    _printCompareReport(artifact);
-    if (_hasCompareFailure(artifact)) {
-      exitCode = 65;
-    }
-  } finally {
-    try {
-      tempRoot.deleteSync(recursive: true);
-    } catch (_) {}
+String _runnerModeOption(String? value) {
+  final mode = value ?? 'auto';
+  if (!const {'auto', 'script', 'app-jit'}.contains(mode)) {
+    stderr.writeln('--runner must be auto, script, or app-jit');
+    exit(64);
   }
+  return mode;
+}
+
+List<String> _interfaceNames(String value) => value
+    .split(',')
+    .map((name) => name.trim())
+    .where((name) => name.isNotEmpty)
+    .toList();
+
+String _fileStem(String value) {
+  final sanitized = value.replaceAll(RegExp(r'[^A-Za-z0-9_.-]+'), '_');
+  return sanitized.isEmpty ? 'run' : sanitized;
 }
 
 Future<_PeerChildRunner> _preparePeerChildRunner({
@@ -1347,7 +1411,7 @@ List<Map<String, Object?>> _sqlFingerprintGroups(Trace trace) {
   ];
 }
 
-void _printCompareReport(Map<String, Object?> artifact) {
+String _compareReportMarkdown(Map<String, Object?> artifact) {
   final scenario = artifact['scenario'] as String;
   final rows = artifact['rows'] as int;
   final repetitions = artifact['repetitions'] as int;
@@ -1356,7 +1420,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
       ? Map<String, Object?>.from(artifact['runner']! as Map)
       : const <String, Object?>{};
 
-  stdout
+  final buffer = StringBuffer()
     ..writeln('# tracelite compare')
     ..writeln()
     ..writeln('Scenario: `$scenario`')
@@ -1392,7 +1456,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
     final dropped = _metric(summary, 'dropped_events');
     final unmatchedBegin = _metric(summary, 'unmatched_begin_events');
     final unmatchedEnd = _metric(summary, 'unmatched_end_events');
-    stdout.writeln(
+    buffer.writeln(
       '| `${peer['peer']}` | ${peer['status']} | $successful/$repetitions | '
       '${_formatMean(events)} | ${_formatMean(spans)} | '
       '${_formatMean(steps)} | ${_formatDurationMean(measuredElapsed)} | '
@@ -1401,12 +1465,12 @@ void _printCompareReport(Map<String, Object?> artifact) {
       '${dropped.max}/${unmatchedBegin.max}/${unmatchedEnd.max} |',
     );
     if (failed > 0) {
-      stdout.writeln();
-      stdout.writeln('`${peer['peer']}` had $failed failed repetition(s).');
+      buffer.writeln();
+      buffer.writeln('`${peer['peer']}` had $failed failed repetition(s).');
     }
     if (unsupported > 0) {
-      stdout.writeln();
-      stdout.writeln('`${peer['peer']}` does not support this scenario.');
+      buffer.writeln();
+      buffer.writeln('`${peer['peer']}` does not support this scenario.');
     }
   }
 
@@ -1416,7 +1480,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
       .map((peer) => peer['peer'])
       .toList();
   if (missingTrace.isNotEmpty) {
-    stdout
+    buffer
       ..writeln()
       ..writeln('## Trace gaps')
       ..writeln()
@@ -1435,7 +1499,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
     for (final sampleObj in samples) {
       final sample = sampleObj! as Map<String, Object?>;
       if (sample['status'] != 'failed') continue;
-      stdout
+      buffer
         ..writeln()
         ..writeln(
             '## ${peer['peer']} repetition ${sample['repetition']} failure')
@@ -1447,6 +1511,7 @@ void _printCompareReport(Map<String, Object?> artifact) {
         ..writeln('```');
     }
   }
+  return buffer.toString();
 }
 
 Map<String, Object?> _calibrationArtifact({
@@ -2101,6 +2166,18 @@ class _PeerTraceResult {
   Map<String, Object?> get measurements => metrics.measurements;
 }
 
+class _CompareRunResult {
+  const _CompareRunResult({
+    required this.artifact,
+    required this.report,
+    required this.failed,
+  });
+
+  final Map<String, Object?> artifact;
+  final String report;
+  final bool failed;
+}
+
 class _PeerChildRunner {
   _PeerChildRunner._({
     required this.mode,
@@ -2503,11 +2580,13 @@ Never _usage({int exitCode = 64}) {
       '[--profile=ci|experiment|production] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
+      '[--runner=auto|script|app-jit] '
       '[--require-clean-source=true] [--out-dir=build/tracelite-suite]');
   stderr.writeln('  dart run bin/tracelite.dart suite-history '
       '[--profile=ci|experiment|production] [--runs=5] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
+      '[--runner=auto|script|app-jit] '
       '[--metrics=elapsed_ns,...] [--target-rse-percent=2.5] '
       '[--within-run-noise-percentile=0.75] '
       '[--policy-peers=resqlite] [--policy-scenarios=feed-paging,...] '
