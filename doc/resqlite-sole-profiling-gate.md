@@ -74,8 +74,8 @@ scope drift: `suite-history` could calibrate a scenario subset while the nested
 
 The highest-priority integration blocker found later was source reproducibility.
 That is now closed in PR #109: the resqlite wrappers pin Tracelite to
-`resqlite-profiling-gate-2026-06-01`
-(`1fc321113c5a3a1598fc2908b52ed401eb65737c`), reject dirty or mismatched
+`resqlite-profiling-gate-2026-06-01-r2`
+(`06c00ac126b54027c14c96deb5634e5a38104973`), reject dirty or mismatched
 checkouts by default, record both source states in wrapper manifests, and verify
 that Tracelite resolves `resqlite` to the checkout under test.
 

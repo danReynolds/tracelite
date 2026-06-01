@@ -7,16 +7,21 @@ void main() {
     final readme = File('README.md').readAsStringSync();
     final productionReadiness =
         File('doc/production-benchmark-readiness.md').readAsStringSync();
-    const currentTag = 'resqlite-profiling-gate-2026-06-01';
-    const currentRevision = '1fc321113c5a3a1598fc2908b52ed401eb65737c';
+    const currentTag = 'resqlite-profiling-gate-2026-06-01-r2';
+    const currentRevision = '06c00ac126b54027c14c96deb5634e5a38104973';
 
     for (final text in [readme, productionReadiness]) {
       expect(text, contains(currentTag));
       expect(text, contains(currentRevision));
       expect(text, isNot(contains('resqlite-profiling-gate-2026-05-31')));
+      expect(text, isNot(contains('resqlite-profiling-gate-2026-06-01`')));
       expect(
         text,
         isNot(contains('bcb3f3f419a09aa682948595fdb8ab002af637dc')),
+      );
+      expect(
+        text,
+        isNot(contains('1fc321113c5a3a1598fc2908b52ed401eb65737c')),
       );
     }
   });

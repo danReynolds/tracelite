@@ -12,8 +12,8 @@ profiling framework. The current resqlite integration has a top-level
 capture, graph-data export for the dashboard, and build-hook smoke coverage for
 the native SQLite shim path, and Tracelite insight artifacts for operator
 review. PR #109 now pins the Tracelite source state to
-`resqlite-profiling-gate-2026-06-01`
-(`1fc321113c5a3a1598fc2908b52ed401eb65737c`); sole-framework acceptance still
+`resqlite-profiling-gate-2026-06-01-r2`
+(`06c00ac126b54027c14c96deb5634e5a38104973`); sole-framework acceptance still
 depends on the remaining adoption and portability checks below.
 
 The core direction held up: one trace format can capture sqlite3, drift,
@@ -441,7 +441,7 @@ Keep for now:
 ### 1. Stable source and CI state
 
 The dirty-checkout blocker is closed in the integration branch: PR #109 pins
-Tracelite to `resqlite-profiling-gate-2026-06-01` and the wrapper records
+Tracelite to `resqlite-profiling-gate-2026-06-01-r2` and the wrapper records
 `tracelite_source`, `resqlite_source`, and the resolved resqlite dependency
 binding in every run manifest. This should stay an acceptance criterion, not a
 removed concern: future pin bumps must continue to pass resqlite CI with the
@@ -516,7 +516,7 @@ every Dart target.
 
 ## Recommended next iteration
 
-1. Keep PR #109 green at the pinned `resqlite-profiling-gate-2026-06-01` tag,
+1. Keep PR #109 green at the pinned `resqlite-profiling-gate-2026-06-01-r2` tag,
    including the Tracelite smoke lane.
 2. Decide whether to delete, archive, or demote resqlite's old direct profile
    runner now that tracelite emits workload summaries, graph data, decisions,

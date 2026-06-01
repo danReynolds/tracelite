@@ -554,7 +554,7 @@ Work:
 - Add side-by-side parity tests between current resqlite profile output and
   tracelite artifacts for a small initial matrix.
 - Done in the resqlite integration PR: benchmark, decision, and profile wrappers
-  pin Tracelite to `resqlite-profiling-gate-2026-06-01`, record both source
+  pin Tracelite to `resqlite-profiling-gate-2026-06-01-r2`, record both source
   states, verify the resqlite dependency binding, and preserve `insights.md` /
   `insights.json` from `tracelite explain`.
 
