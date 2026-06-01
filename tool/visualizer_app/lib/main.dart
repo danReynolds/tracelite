@@ -595,7 +595,7 @@ class _TracePageState extends State<TracePage> {
         trace.completeSpans.where((span) {
           if (filter.isEmpty) return true;
           final name = trace.trace.spanName(span.spanId).toLowerCase();
-          final args = _spanArgsSummary(trace.trace, span).toLowerCase();
+          final args = _spanArgsSummary(trace, span).toLowerCase();
           return name.contains(filter) ||
               args.contains(filter) ||
               '${span.trackId}'.contains(filter) ||
@@ -1054,7 +1054,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
         ),
         const SizedBox(height: 10),
         _SelectedSpanDetails(
-          trace: trace,
+          trace: widget.trace,
           span: widget.selected,
           hoveredSpan: _hoveredSpan,
         ),
@@ -1890,7 +1890,7 @@ class _SelectedSpanDetails extends StatelessWidget {
     required this.hoveredSpan,
   });
 
-  final Trace trace;
+  final TraceDocument trace;
   final TraceSpan? span;
   final TraceSpan? hoveredSpan;
 
@@ -1909,7 +1909,7 @@ class _SelectedSpanDetails extends StatelessWidget {
       );
     }
     final selected = activeSpan;
-    final sql = _prepareSqlDetails(trace, selected);
+    final sql = trace.sqlForSpan(selected);
     return _InspectorPanel(
       icon: Icons.manage_search,
       title: span == null ? 'Hovered Span' : 'Selected Span',
@@ -1923,7 +1923,7 @@ class _SelectedSpanDetails extends StatelessWidget {
             children: [
               _InlineDatum(
                 label: 'span',
-                value: trace.spanName(selected.spanId),
+                value: trace.trace.spanName(selected.spanId),
               ),
               _InlineDatum(
                 label: 'duration',
@@ -1994,50 +1994,8 @@ class _SelectedSpanDetails extends StatelessWidget {
 
 enum _SpanArgPhase { begin, end }
 
-final class _PrepareSqlDetails {
-  const _PrepareSqlDetails({
-    required this.fingerprint,
-    required this.normalizedSql,
-    required this.mode,
-  });
-
-  final String fingerprint;
-  final String normalizedSql;
-  final String mode;
-}
-
-_PrepareSqlDetails? _prepareSqlDetails(Trace trace, TraceSpan span) {
-  if (span.spanId != BuiltinSpans.sqlite3PrepareV2 &&
-      span.spanId != BuiltinSpans.sqlite3PrepareV3) {
-    return null;
-  }
-  if (span.beginArgs.length < 2) return null;
-  final label = trace.strings[span.beginArgs[1]];
-  if (label == null) return null;
-  if (label == '<sql:redacted>') {
-    return const _PrepareSqlDetails(
-      fingerprint: 'sqlfp:v1:redacted',
-      normalizedSql: '<redacted>',
-      mode: 'redacted',
-    );
-  }
-  final parts = label.split(':');
-  if (parts.length >= 4 && parts[0] == 'sqlfp' && parts[1] == 'v1') {
-    return _PrepareSqlDetails(
-      fingerprint: 'sqlfp:v1:${parts[2]}',
-      normalizedSql: parts.sublist(3).join(':'),
-      mode: 'fingerprinted',
-    );
-  }
-  return _PrepareSqlDetails(
-    fingerprint: 'raw',
-    normalizedSql: label,
-    mode: 'raw',
-  );
-}
-
 String _formatSpanArgs(
-  Trace trace,
+  TraceDocument trace,
   TraceSpan span,
   List<int> args, {
   required _SpanArgPhase phase,
@@ -2071,17 +2029,71 @@ String _formatSpanArgs(
     case (BuiltinSpans.sqlite3Step, _SpanArgPhase.begin):
     case (BuiltinSpans.sqlite3Reset, _SpanArgPhase.begin):
     case (BuiltinSpans.sqlite3Finalize, _SpanArgPhase.begin):
-      return _joinNamedArgs([('stmt', _ptrArg(args, 0))]);
+      return _joinNamedArgs([('stmt', _stmtArg(trace, span, args, 0))]);
     case (BuiltinSpans.sqlite3Step, _SpanArgPhase.end):
     case (BuiltinSpans.sqlite3Reset, _SpanArgPhase.end):
     case (BuiltinSpans.sqlite3Finalize, _SpanArgPhase.end):
       return _joinNamedArgs([('rc', _intArg(args, 0))]);
+    case (BuiltinSpans.sqlite3BindNull, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+      ]);
+    case (BuiltinSpans.sqlite3BindInt, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3BindInt64, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+        ('value', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3BindDouble, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+        ('bits', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3BindText, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3BindBlob, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+        ('len', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3ClearBindings, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnCount, _SpanArgPhase.begin):
+      return _joinNamedArgs([('stmt', _stmtArg(trace, span, args, 0))]);
+    case (BuiltinSpans.sqlite3ColumnInt, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnInt64, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnDouble, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnText, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnBlob, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnBytes, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('col', _intArg(args, 1)),
+      ]);
+    case (BuiltinSpans.sqlite3BindNull, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindInt, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindInt64, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindDouble, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindText, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindBlob, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ClearBindings, _SpanArgPhase.end):
+      return _joinNamedArgs([('rc', _intArg(args, 0))]);
+    case (BuiltinSpans.sqlite3ColumnCount, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnInt, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnInt64, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnDouble, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnText, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnBlob, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnBytes, _SpanArgPhase.end):
+      return _joinNamedArgs([('value', _intArg(args, 0))]);
     default:
       return args.join(', ');
   }
 }
 
-String _spanArgsSummary(Trace trace, TraceSpan span) {
+String _spanArgsSummary(TraceDocument trace, TraceSpan span) {
   final parts = [
     if (span.beginArgs.isNotEmpty)
       'begin ${_formatSpanArgs(trace, span, span.beginArgs, phase: _SpanArgPhase.begin)}',
@@ -2091,8 +2103,8 @@ String _spanArgsSummary(Trace trace, TraceSpan span) {
   return parts.isEmpty ? '-' : parts.join(' / ');
 }
 
-String _prepareSqlSummary(Trace trace, TraceSpan span) {
-  final details = _prepareSqlDetails(trace, span);
+String _prepareSqlSummary(TraceDocument trace, TraceSpan span) {
+  final details = trace.prepareSqlForSpan(span);
   if (details == null) return _intArg(span.beginArgs, 1);
   if (details.fingerprint == 'raw') {
     return _truncateForTable(details.normalizedSql);
@@ -2107,12 +2119,24 @@ String _joinNamedArgs(List<(String, String)> args) {
   ].join(', ');
 }
 
-String _stringArg(Trace trace, List<int> args, int index) {
+String _stringArg(TraceDocument trace, List<int> args, int index) {
   if (index >= args.length) return '';
   final id = args[index];
-  final value = trace.strings[id];
+  final value = trace.trace.strings[id];
   if (value == null) return '$id';
   return '"${_truncateForTable(value)}"';
+}
+
+String _stmtArg(
+  TraceDocument trace,
+  TraceSpan span,
+  List<int> args,
+  int index,
+) {
+  final pointer = _ptrArg(args, index);
+  final sql = trace.sqlForSpan(span);
+  if (sql == null) return pointer;
+  return '$pointer ${_shortFingerprint(sql.fingerprint)} ${_truncateForTable(sql.normalizedSql, maxLength: 96)}';
 }
 
 String _ptrArg(List<int> args, int index) {
@@ -2362,7 +2386,7 @@ class SpanIndexPanel extends StatelessWidget {
                           ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 340),
                             child: Text(
-                              _spanArgsSummary(trace.trace, span),
+                              _spanArgsSummary(trace, span),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),

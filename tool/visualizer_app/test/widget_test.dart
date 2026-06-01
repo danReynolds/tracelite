@@ -115,7 +115,7 @@ void main() {
     expect(find.text('Selected Span'), findsOneWidget);
   });
 
-  testWidgets('decodes SQLite prepare SQL fingerprints in trace views', (
+  testWidgets('decodes SQLite statement SQL fingerprints in trace views', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1100);
@@ -144,7 +144,15 @@ void main() {
 
     await tester.enterText(find.byType(TextField).last, 'TRACELITE_ITEMS');
     await tester.pumpAndSettle();
+    expect(find.text('2 matches'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
+    await tester.pumpAndSettle();
     expect(find.text('1 matches'), findsOneWidget);
+    expect(
+      find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
+      findsWidgets,
+    );
 
     await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
     await tester.pumpAndSettle();
@@ -152,6 +160,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Selected Span'), findsOneWidget);
+    expect(find.text('sqlite3_step'), findsWidgets);
     expect(
       find.textContaining('sql fingerprint', findRichText: true),
       findsWidgets,
@@ -294,6 +303,8 @@ Future<void> _writeSqlTraceWorkspace(Directory dir) async {
     args: [0x202, 0],
     correlationId: 99,
   );
+  recorder.begin(BuiltinSpans.sqlite3Step, args: [0x202], correlationId: 99);
+  recorder.end(BuiltinSpans.sqlite3Step, args: [101], correlationId: 99);
   recorder.detach();
 }
 

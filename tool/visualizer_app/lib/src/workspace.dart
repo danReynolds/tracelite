@@ -77,6 +77,8 @@ final class TraceDocument {
   late final Map<int, List<TraceSpan>> completeSpansByTrack = _spansByTrack(
     completeSpans,
   );
+  late final Map<int, SqlTraceLabel> statementSqlByPointer =
+      _statementSqlByPointer(trace);
 
   String get name => displayNameForPath(path);
   int get durationNs => trace.duration.inMicroseconds * 1000;
@@ -88,6 +90,23 @@ final class TraceDocument {
       trace.diagnostics.droppedEvents > 0 ||
       trace.diagnostics.unmatchedBeginEvents > 0 ||
       trace.diagnostics.unmatchedEndEvents > 0;
+
+  SqlTraceLabel? sqlForSpan(TraceSpan span) {
+    final prepare = prepareSqlForSpan(span);
+    if (prepare != null) return prepare;
+    final stmt = _statementPointerForSpan(span);
+    return stmt == null ? null : statementSqlByPointer[stmt];
+  }
+
+  SqlTraceLabel? prepareSqlForSpan(TraceSpan span) {
+    if (span.spanId != BuiltinSpans.sqlite3PrepareV2 &&
+        span.spanId != BuiltinSpans.sqlite3PrepareV3) {
+      return null;
+    }
+    if (span.beginArgs.length < 2) return null;
+    final label = trace.strings[span.beginArgs[1]];
+    return label == null ? null : SqlTraceLabel.fromTraceString(label);
+  }
 }
 
 Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
@@ -99,6 +118,80 @@ Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
     for (final entry in result.entries)
       entry.key: List.unmodifiable(entry.value),
   };
+}
+
+Map<int, SqlTraceLabel> _statementSqlByPointer(Trace trace) {
+  final result = <int, SqlTraceLabel>{};
+  for (final span in trace.spans.where((span) => span.isComplete)) {
+    if (span.spanId != BuiltinSpans.sqlite3PrepareV2 &&
+        span.spanId != BuiltinSpans.sqlite3PrepareV3) {
+      continue;
+    }
+    if (span.beginArgs.length < 2 || span.endArgs.length < 2) continue;
+    final rc = span.endArgs[1];
+    final stmt = span.endArgs[0];
+    if (rc != 0 || stmt == 0) continue;
+    final label = trace.strings[span.beginArgs[1]];
+    if (label == null) continue;
+    result[stmt] = SqlTraceLabel.fromTraceString(label);
+  }
+  return Map.unmodifiable(result);
+}
+
+int? _statementPointerForSpan(TraceSpan span) {
+  switch (span.spanId) {
+    case BuiltinSpans.sqlite3Step:
+    case BuiltinSpans.sqlite3Reset:
+    case BuiltinSpans.sqlite3Finalize:
+    case BuiltinSpans.sqlite3BindNull:
+    case BuiltinSpans.sqlite3BindInt:
+    case BuiltinSpans.sqlite3BindInt64:
+    case BuiltinSpans.sqlite3BindDouble:
+    case BuiltinSpans.sqlite3BindText:
+    case BuiltinSpans.sqlite3BindBlob:
+    case BuiltinSpans.sqlite3ClearBindings:
+    case BuiltinSpans.sqlite3ColumnCount:
+    case BuiltinSpans.sqlite3ColumnInt:
+    case BuiltinSpans.sqlite3ColumnInt64:
+    case BuiltinSpans.sqlite3ColumnDouble:
+    case BuiltinSpans.sqlite3ColumnText:
+    case BuiltinSpans.sqlite3ColumnBlob:
+    case BuiltinSpans.sqlite3ColumnBytes:
+      return span.beginArgs.isEmpty ? null : span.beginArgs.first;
+    default:
+      return null;
+  }
+}
+
+final class SqlTraceLabel {
+  const SqlTraceLabel({
+    required this.fingerprint,
+    required this.normalizedSql,
+    required this.mode,
+  });
+
+  final String fingerprint;
+  final String normalizedSql;
+  final String mode;
+
+  factory SqlTraceLabel.fromTraceString(String label) {
+    if (label == '<sql:redacted>') {
+      return const SqlTraceLabel(
+        fingerprint: 'sqlfp:v1:redacted',
+        normalizedSql: '<redacted>',
+        mode: 'redacted',
+      );
+    }
+    final parts = label.split(':');
+    if (parts.length >= 4 && parts[0] == 'sqlfp' && parts[1] == 'v1') {
+      return SqlTraceLabel(
+        fingerprint: 'sqlfp:v1:${parts[2]}',
+        normalizedSql: parts.sublist(3).join(':'),
+        mode: 'fingerprinted',
+      );
+    }
+    return SqlTraceLabel(fingerprint: 'raw', normalizedSql: label, mode: 'raw');
+  }
 }
 
 final class CompareDocument {
