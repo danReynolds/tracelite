@@ -20,8 +20,8 @@ The contract has to satisfy six properties:
 | **Comparable wall** | Two libraries running the same scenario must spend wall in comparable phases. The scenario contract excludes setup wall from the comparison window. |
 | **Reproducible** | Same machine, same library version, same scenario → same trace within noise. Determinism in the workload (no randomness without explicit seeding). |
 | **Extensible** | Adding a new peer (e.g., a new Dart SQLite library) is a matter of writing a single adapter file. |
-| **No reactive bias** | Resqlite has reactive streams; drift has watchers; sqlite_async has neither. The interface excludes reactive features so the comparison is on shared SQL execution paths. |
-| **Honest about what it doesn't measure** | If a feature isn't in the interface, it isn't in the comparison. Differences in reactivity, encryption, type system, or developer ergonomics aren't visible in tracelite output. |
+| **No reactive bias** | Core SQL comparisons stay SQL-only, while reactive workloads are separate capability-gated lanes for peers with real watch semantics. |
+| **Honest about what it doesn't measure** | If a feature isn't in the selected lane, it isn't in the comparison. Unsupported reactivity, encryption, type system, or developer ergonomics differences must stay explicit. |
 
 ## Outline
 
@@ -659,10 +659,11 @@ narrow-batch-insert (10000 rows × 2 params):
 Readers see what they're comparing. "sqlite_async is 3x slower" is contextualized: it doesn't have a native batch API, so it's running the slow fallback. Comparing the two means comparing "drift's batch" vs "sqlite_async's transaction-wrapped loop" — both are valid implementations, but the fairness flag tells you that.
 
 For optional capability lanes, the harness should prefer `unsupported` over a
-fallback that changes the feature being measured. For example, the current
-raw-SQL drift adapter does not implement the reactive lane because drift's
-stream semantics depend on generated/table-registry-aware queries; pretending a
-raw `NativeDatabase` watch is equivalent would make the benchmark misleading.
+fallback that changes the feature being measured. For example, the `drift`
+reactive adapter uses explicit table registry entries and
+`customSelect(..., readsFrom: ...).watch()` so it exercises Drift's stream-query
+invalidation path. A raw `NativeDatabase` watch or polling wrapper would make
+the benchmark misleading.
 
 ### Fixed-version requirement
 

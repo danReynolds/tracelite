@@ -95,6 +95,27 @@ void main() {
     expect(markdown, contains('| severity | finding | detail |'));
     expect(markdown, contains('SQLite-step dominated'));
   });
+
+  test('suite insight does not hide peer-level unsupported lanes', () {
+    final insights = benchmarkArtifactInsights({
+      'schema': 'tracelite.suite.v1',
+      'profile': 'ci',
+      'runs': [
+        {
+          'scenario': 'keyed-pk-subscriptions',
+          'status': 'ok',
+          'artifact': 'keyed-pk-subscriptions.json',
+        },
+      ],
+    });
+
+    final suiteStatus = insights.singleWhere(
+      (insight) => insight.id == 'suite_status',
+    );
+    expect(suiteStatus.body, contains('failed/non-ok run commands'));
+    expect(suiteStatus.body, contains('linked compare artifacts'));
+    expect(suiteStatus.body, isNot(contains('0 unsupported')));
+  });
 }
 
 Map<String, Object?> _compareArtifact({

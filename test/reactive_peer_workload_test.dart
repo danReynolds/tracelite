@@ -31,15 +31,13 @@ void main() {
       );
 
       final output = result.stdout as String;
-      for (final peer in ['sqlite3', 'drift']) {
-        expect(
-          _lineFor(output, peer),
-          contains('| `$peer` | unsupported |'),
-          reason: '$peer should be reported as unsupported for $scenario.\n'
-              '$output',
-        );
-      }
-      for (final peer in ['sqlite_async', 'resqlite']) {
+      expect(
+        _lineFor(output, 'sqlite3'),
+        contains('| `sqlite3` | unsupported |'),
+        reason: 'sqlite3 should be reported as unsupported for $scenario.\n'
+            '$output',
+      );
+      for (final peer in ['drift', 'sqlite_async', 'resqlite']) {
         final line = _lineFor(output, peer);
         expect(
           line,

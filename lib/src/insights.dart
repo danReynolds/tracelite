@@ -576,15 +576,17 @@ List<BenchmarkInsight> _suiteInsights(Map<String, Object?> artifact) {
     final status = _string(run['status']) ?? 'unknown';
     return status != 'ok' && status != 'unsupported';
   }).toList();
-  final unsupported =
+  final unsupportedRuns =
       runs.where((run) => _string(run['status']) == 'unsupported').length;
+  final statusDetail = unsupportedRuns == 0
+      ? '`$profile` suite has ${runs.length} run(s) and ${bad.length} failed/non-ok run commands. Peer-level unsupported capability lanes are reported in the linked compare artifacts.'
+      : '`$profile` suite has ${runs.length} run(s), ${bad.length} failed/non-ok run commands, and $unsupportedRuns unsupported run command(s). Peer-level unsupported capability lanes are reported in the linked compare artifacts.';
   final insights = <BenchmarkInsight>[
     BenchmarkInsight(
       severity: bad.isEmpty ? 'good' : 'critical',
       id: 'suite_status',
       title: bad.isEmpty ? 'Suite completed' : 'Suite has failed runs',
-      body:
-          '`$profile` suite has ${runs.length} run(s), ${bad.length} failed/non-ok, and $unsupported unsupported.',
+      body: statusDetail,
     ),
   ];
   return insights;

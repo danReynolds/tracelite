@@ -579,9 +579,8 @@ Work:
   each peer's advertised capabilities.
 - Done in the peer harness: initial reactive scenarios cover keyed primary-key
   subscriptions, high-cardinality fan-out, and many-stream writer throughput
-  for peers with a stream/watch API. The current `sqlite_async` and `resqlite`
-  adapters implement this lane; `sqlite3` and the current raw-SQL `drift`
-  adapter report unsupported.
+  for peers with a stream/watch API. The current `drift`, `sqlite_async`, and
+  `resqlite` adapters implement this lane; `sqlite3` reports unsupported.
 - Done in the resqlite vocabulary: `recordResqliteDiagnostics` records
   `Database.diagnostics()` snapshots as tracelite gauges, and the
   `sqlite-diagnostics` scenario validates the path through resqlite.
@@ -601,10 +600,10 @@ Work:
 - Document each peer's traced mode. In particular, `sqlite_async` currently
   validates through a traced `singleConnection` wrapper; default native-pool
   coverage needs separate validation or explicit exclusion.
-- Add a real drift reactive adapter backed by generated/table-registry-aware
-  drift queries before claiming drift support for the optional reactive lane.
-  The current raw `NativeDatabase` adapter cannot honestly model drift's stream
-  invalidation semantics.
+- Done first slice: the `drift` adapter now uses a small generated-database
+  harness with explicit table registry entries so reactive workloads flow
+  through Drift's `customSelect(..., readsFrom: ...).watch()` stream-query
+  invalidation instead of pretending raw `NativeDatabase` SQL is reactive.
 - Scale ring sizing from expected event volume and fail loudly if any producer
   drops events.
 - Done first slice: source-checkout compare uses direct script launches for
