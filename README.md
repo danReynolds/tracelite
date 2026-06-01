@@ -166,6 +166,8 @@ size, SHA-256 checksum, and signing/notarization status. Add
 Developer ID signing, notarytool submission, stapling, and final archive path.
 Linux and Windows signing remain release-system responsibilities and are
 recorded as external in the manifest.
+For visualizer-only source-checkout validation, `dart tool/visualizer_check.dart`
+runs the same checks directly without rebuilding the root peer native assets.
 
 ## Architecture
 

@@ -48,15 +48,17 @@ flutter run -d macos -a ../../build/visualizer-demo
 From the repository root:
 
 ```bash
-dart run bin/tracelite.dart visualizer-check
-dart run bin/tracelite.dart visualizer-check --build=host
-dart run bin/tracelite.dart visualizer-check --package=host
+dart tool/visualizer_check.dart
+dart tool/visualizer_check.dart --build=host
+dart tool/visualizer_check.dart --package=host
 ```
 
-The first command resolves app dependencies, analyzes, and runs the widget/unit
-tests. The second command also builds the release bundle for the current desktop
-host and verifies that the expected artifact exists. The third command also
-creates a release archive and manifest under `build/visualizer-release/`.
+These direct source-checkout commands resolve app dependencies, analyze, and run
+the widget/unit tests without rebuilding the root peer native assets. The second
+command also builds the release bundle for the current desktop host and verifies
+that the expected artifact exists. The third command also creates a release
+archive and manifest under `build/visualizer-release/`. The equivalent routed
+CLI is `dart run bin/tracelite.dart visualizer-check`.
 
 During app development:
 
@@ -68,7 +70,7 @@ flutter build macos
 
 ## Release Boundary
 
-`dart run bin/tracelite.dart visualizer-check --package=host` is the release
+`dart tool/visualizer_check.dart --package=host` is the source-checkout release
 artifact command. It runs the same health checks, builds the host release app,
 packages the platform bundle, and writes
 `tracelite_visualizer-<abi>.manifest.json` with the source revision, dirty
@@ -79,7 +81,7 @@ Default archives are unsigned local developer artifacts. For a credentialed
 macOS release, add:
 
 ```bash
-dart run bin/tracelite.dart visualizer-check \
+dart tool/visualizer_check.dart \
   --package=host \
   --require-clean-source=true \
   --macos-sign-identity="Developer ID Application: Example" \

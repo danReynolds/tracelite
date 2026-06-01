@@ -12,11 +12,14 @@ void main() {
 
     expect(result.exitCode, 0);
     expect(result.stderr.toString(), contains('visualizer-check'));
+    expect(
+        result.stderr.toString(), contains('dart tool/visualizer_check.dart'));
     expect(result.stderr.toString(), contains('--build=none|host'));
     expect(result.stderr.toString(), contains('--package=none|host'));
     expect(result.stderr.toString(),
         contains('--out-dir=build/visualizer-release'));
     expect(result.stderr.toString(), contains('--require-clean-source=true'));
+    expect(result.stderr.toString(), contains('root peer native assets'));
   });
 
   test('visualizer check reports missing Flutter with an action', () async {

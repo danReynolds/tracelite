@@ -601,6 +601,13 @@ String _joinPath(String first, String second) {
 Never _usage({int exitCode = 64}) {
   stderr.writeln('usage:');
   stderr.writeln(
+    '  dart tool/visualizer_check.dart '
+    '[--flutter=/path/to/flutter] [--build=none|host] '
+    '[--package=none|host] [--out-dir=build/visualizer-release] '
+    '[--require-clean-source=true] '
+    '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
+  );
+  stderr.writeln(
     '  dart run bin/tracelite.dart visualizer-check '
     '[--flutter=/path/to/flutter] [--build=none|host] '
     '[--package=none|host] [--out-dir=build/visualizer-release] '
@@ -615,6 +622,10 @@ Never _usage({int exitCode = 64}) {
   );
   stderr.writeln(
     'On macOS, signing and notarization are optional credential-backed steps.',
+  );
+  stderr.writeln(
+    'In a source checkout, the direct tool script is the visualizer-only path '
+    'and avoids rebuilding root peer native assets.',
   );
   exit(exitCode);
 }
