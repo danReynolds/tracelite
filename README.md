@@ -1,124 +1,120 @@
 # tracelite
 
-> **Status:** Prototype implementation in progress. The native runtime, Dart recorder, span generator, macOS SQLite shim, aggregator/report CLI, peer harness, and first desktop visualizer slice are working. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build all produce SQLite traces for baseline plus initial resqlite-derived feed-paging, sync-burst, chat-sim, and large-working-set scenarios when the local trace hook is available. Capability-aware reactive and diagnostic scenarios now report unsupported peers explicitly instead of forcing every library into the same feature model.
+Standalone SQLite profiling and benchmark-decision tooling for Dart.
 
-Cross-library SQLite profiling and tracing for the Dart ecosystem. Point it at any Dart program that uses SQLite — Resqlite, drift, sqlite_async, the raw `sqlite3` package, anything — and see the full call timeline: into FFI, through SQLite's C internals, and back. On a single shared clock, with no instrumentation in the libraries being measured.
-
-## What it is
-
-tracelite is a profiling system designed around three observations about Dart's SQLite ecosystem:
-
-1. **Every Dart SQLite library FFI-links to the same SQLite C library.** That FFI boundary is shared infrastructure. Instrumenting it once captures every library that uses it — no library-specific code, no coordination, no maintenance forks.
-
-2. **Wall-time numbers without per-call attribution are hard to learn from.** "Library A is 1.5× faster than Library B" is a finding without an explanation. "Library A avoids 999 prepare/finalize cycles per workload run" is a finding *with* a fix.
-
-3. **Profiling clutter accumulates in source code over time.** If we get the design right, every future metric is harness-only work. Source code stays clean; new measurements never edit hot paths.
-
-## How it works
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                       tracelite package                                   │
-├──────────────────────────────────────────────────────────────────────────┤
-│   ┌─────────────────┐  ┌─────────────────┐  ┌────────────────┐          │
-│   │  C SHIM         │  │  DART RECORDER  │  │  STACK SAMPLER │          │
-│   │  drop-in        │  │  one-line       │  │  per-package   │          │
-│   │  libsqlite3 ABI │  │  trace() calls  │  │  attribution   │          │
-│   └────────┬────────┘  └────────┬────────┘  └───────┬────────┘          │
-│            └────────────────────┼────────────────────┘                   │
-│                                 ▼                                         │
-│                ┌────────────────────────────┐                             │
-│                │    SHARED-MEMORY RING      │                             │
-│                │    monotonic clock         │                             │
-│                │    lock-free append        │                             │
-│                └────────────┬───────────────┘                             │
-│                             ▼                                             │
-│                ┌────────────────────────────┐                             │
-│                │   AGGREGATOR (pure Dart)   │                             │
-│                │   spans, joins, stats      │                             │
-│                └────────────┬───────────────┘                             │
-│                             ▼                                             │
-│       ┌──────────┬──────────┼──────────┬───────────┐                      │
-│       ▼          ▼          ▼          ▼           ▼                      │
-│    JSONL     Markdown   Diff/CI    Visualizer   Perfetto                  │
-│    on disk    report     check     (desktop)    export                    │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-The C shim is a drop-in `libsqlite3` replacement that wraps SQLite C API calls with timing and emits to a shared-memory ring buffer. The current macOS prototype loads the shim through sqlite3 native-asset configuration, with the shim re-exporting the real SQLite library and overriding traced symbols. For `resqlite`, which compiles SQLite into `libresqlite`, the local trace build compiles sqlite3mc under private symbols and embeds the same wrappers inside that native asset. Linux `LD_PRELOAD` and Windows substitution are planned but not yet validated. Peer libraries don't know they're being traced — they FFI into "SQLite" and the shim is what answers.
-
-Dart code can also emit events for its own boundaries via `TraceRecorder`. C and Dart events use the same monotonic clock, so they merge by timestamp into one unified timeline. Libraries can register lightweight vocabularies of span/counter/gauge names; `package:tracelite/resqlite.dart` provides the resqlite vocabulary plus helpers for decode metrics, stream invalidation metrics, dispatcher pressure, and diagnostics so resqlite can emit semantic facts without owning report or metadata plumbing. Optional stack sampling adds per-Dart-package attribution on top.
-
-The aggregator is pure Dart and operates on the resulting event stream. Every metric — counts, durations, percentiles, histograms, per-library splits, regression diffs — is a query, not source instrumentation. The current CLI can emit markdown reports, run repeated peer comparisons, write JSON artifacts, diff those artifacts with confidence-interval plus non-parametric repetition gates, turn baseline/candidate artifacts into accepted/rejected/inconclusive decisions, export graph-ready JSON for downstream dashboards, run CI/production benchmark suites, calibrate recorder overhead, and calibrate benchmark decision policy from artifact history.
-Graph-data exports are schema-validated before the command succeeds, and
-`tracelite validate-graph-data <dir>` can re-check a bundle before publishing it
-to a downstream site.
-`tracelite calibrate-policy --history=<manifest-or-dir>` scans compare and suite
-history, recommends repetition counts, primary/guardrail thresholds, and CV noise
-gates, and can fail closed with `--strict=true` when the history is too thin for
-production use. Ceiling flags such as `--threshold-ceiling-percent=50` reject
-policies whose recommended gates are too loose to be useful.
-`--peers` and `--scenarios` scope the release gate explicitly, while broad suite
-artifacts can still retain unsupported peers, optional workloads, and diagnostic
-metrics for investigation.
-`tracelite decision --policy=<policy-calibration.json>` and
-`tracelite diff --policy=<policy-calibration.json>` then apply those calibrated
-thresholds; non-ready policy artifacts are rejected unless explicitly allowed for
-exploratory analysis.
-`tracelite suite-history --profile=production --runs=5` automates that evidence
-loop by running independent suites into timestamped run directories, writing a
-history manifest, and generating the policy-calibration JSON/markdown sidecars.
-
-The peer harness has a narrow common SQL lane and optional capability lanes. Shared SQL scenarios run across all peers; reactive scenarios currently run on `sqlite_async` and `resqlite`; the resqlite diagnostics scenario records semantic gauges from `Database.diagnostics()`. Peers that do not support a scenario are marked `unsupported` in the report and JSON artifact.
-
-## What it makes possible
-
-- **See into SQLite from Dart.** "What's the p99 of `sqlite3_step` during the executeBatch interval, broken down by parameter count?" answerable without modifying SQLite or any peer library.
-- **Apples-to-apples library comparison.** Same workload, same shim, same format. drift and Resqlite stop being a wall-time horse race; they become a structural comparison ("drift prepares per query; Resqlite caches statements").
-- **Causal chains across isolates.** A request's full lifecycle — main isolate → writer isolate → SQLite C → response → main isolate — observable as one chain.
-- **Tail-latency distributions, not just medians.** p99, histogram, distribution shape; effect-size and significance testing built in.
-- **Cross-commit regression detection.** `tracelite diff --baseline=base.json --candidate=change.json` explains deltas, and `tracelite decision --baseline=base.json --candidate=change.json` turns those artifacts into a trace-health, primary-metric, noise, significance, and guardrail decision.
+tracelite records SQLite C API timing, optional Dart spans/counters, calibrated
+regression decisions, graph-data exports, and desktop visualizer inputs from one
+workflow. It can profile any supported Dart SQLite peer that routes through the
+SQLite C API shim, and it can also accept library-specific semantic events.
 
 ## Status
 
-The design corpus is in `doc/`, and the implementation is present in `native/`, `tool/`, `lib/src/`, `bin/`, `example/`, and `test/`. `PLAN.md` is the canonical implementation and status tracker.
+Production-calibrated for the validated macOS/Dart SQLite path. Current peer
+lanes cover `sqlite3`, `drift`, `sqlite_async`, and `resqlite`.
 
-| Spec | Status | What it defines |
-|---|---|---|
-| [Trace format](doc/format-spec.md) | Draft v0.1 | Wire format, file format, JSONL archival, tags, tracks, spans, args, correlation IDs |
-| [Aggregator API](doc/aggregator-api.md) | Draft v0.1 | Loading, selection, filtering, aggregation, grouping, chains, attribution, diff, live queries |
-| [Visualizer binding](doc/visualizer-binding.md) | Draft v0.1 | Probes, scope, derivation, frame coalescing, isolate offload, Flutter widget integration |
-| [Visualizer product design](doc/visualizer-product-design.md) | Draft v0.1 | Desktop-first inspector, peer comparison, experiment review, artifact forensics, implementation milestones |
-| [Runtime mmap protocol](doc/runtime-protocol.md) | Draft v0.1 | Cross-language shared buffer, slot reservation, drainage, crash safety, lifecycle |
-| [Span ID registry](doc/span-registry.md) | Draft v0.2 | Reserved span IDs across SQLite C, Dart recorder, FFI bridge, user ranges |
-| [Peer interface contract](doc/peer-interface-contract.md) | Draft v0.1 | The `SqliteInterface` API, scenarios, adapters, fairness rules, standard scenario library |
+resqlite is the first production integration and the current pre-publish gate
+consumer. It is mentioned because it validates the end-to-end workflow, not
+because tracelite's runtime or artifact model depends on resqlite.
 
-The latest production benchmark replacement audit is in
-[`doc/production-benchmark-readiness.md`](doc/production-benchmark-readiness.md).
-The acceptance gate for making tracelite resqlite's sole regular profiling
-framework is in
-[`doc/resqlite-sole-profiling-gate.md`](doc/resqlite-sole-profiling-gate.md).
-The decision standard for accepting, rejecting, or marking experiments
-inconclusive is in
-[`doc/profiling-decision-standard.md`](doc/profiling-decision-standard.md).
-The graph-data contract for downstream dashboards is in
-[`doc/graph-data-export.md`](doc/graph-data-export.md).
-The desktop visualizer app lives in [`tool/visualizer_app`](tool/visualizer_app)
-and can be launched in development with
-`dart run bin/tracelite.dart visualize <path>`.
-The resqlite deletion/parity gate is tracked in
-[`doc/resqlite-replacement-checklist.md`](doc/resqlite-replacement-checklist.md).
+This is not a universal, language-agnostic SQLite profiler or a finalized
+multi-package distribution yet. macOS and the Dart SQLite package ecosystem are
+the validated path; Linux/Windows shim validation and non-Dart bindings are
+future work.
 
-## Non-goals
+## What It Does
 
-- **Replacement for Dart DevTools.** DevTools is the right tool for interactive debugging during development. tracelite is for synthetic-benchmark and offline-analysis workflows.
-- **Production telemetry.** This is for synthetic workloads and dev-time profiling, not live observability.
-- **Tied to any single library.** Resqlite is one peer interface among several; this package treats all libraries equally and isn't privileged toward any of them.
+- Native SQLite timing through a `libsqlite3` shim or embedded-library wrapper.
+- Dart-side spans/counters through `TraceRecorder`.
+- Common SQL workloads across validated peers.
+- Calibrated thresholds, CV gates, outlier policy, and decisions.
+- Schema-validated graph data for dashboards and the visualizer.
+
+## How It Works
+
+tracelite treats SQLite as the shared boundary between database libraries. For
+packages that FFI-link to SQLite, a `libsqlite3` shim wraps high-value calls such
+as prepare, step, bind, reset, finalize, and close. For libraries that embed
+SQLite into their own native asset, the same wrapper layer can be compiled into
+that asset with the real SQLite symbols renamed behind it.
+
+Native events and Dart `TraceRecorder` events write into one shared-memory
+region on the same monotonic clock. After a workload finishes, tracelite reads
+that region into artifacts: span timings, workload summaries, peer comparisons,
+policy calibration, regression decisions, and graph-data datasets.
+
+The key design choice is that profiling data is queried from artifacts, not
+hand-coded into each benchmark. A release gate can keep broad diagnostic data
+while calibrating a narrow blocking policy, and unsupported peer capabilities
+are represented explicitly instead of hidden behind incomparable numbers.
+
+## Common Commands
+
+```bash
+dart run bin/tracelite.dart suite \
+  --profile=ci \
+  --interfaces=sqlite3,drift,sqlite_async
+
+dart run bin/tracelite.dart decision \
+  --baseline=build/baseline/manifest.json \
+  --candidate=build/candidate/manifest.json \
+  --policy=build/policy-calibration.json
+
+dart run bin/tracelite.dart export-graph-data \
+  --suite-history=build/history.json \
+  --out=build/graph-data
+
+dart run bin/tracelite.dart visualize build/graph-data
+```
+
+## Integrations
+
+The core runtime, trace format, recorder, decision logic, graph export, and
+visualizer are standalone. The repository also ships peer adapters so one CLI
+can run comparable workloads against Dart SQLite packages. That is why
+`pubspec.yaml` includes peer libraries, including `resqlite`.
+
+The long-term package split is core library plus peer-benchmark CLI. Today the
+public recorder APIs are standalone, while the source checkout keeps the peer
+CLI in-tree so resqlite and other Dart SQLite libraries can run one benchmark
+workflow during the pre-1.0 phase.
+
+resqlite has the deepest integration today: it can emit semantic spans/counters
+for its reader pool, writer isolate, stream invalidation, diagnostics, and old
+profile-parity metrics. Its current gate is pinned to
+`bcb3f3f419a09aa682948595fdb8ab002af637dc`
+(`resqlite-profiling-gate-2026-05-31`) and has validated repeated production
+runs, policy calibration, no-regression acceptance, injected-regression
+rejection, graph-data export, and clean-clone publish dry-run behavior.
+
+For release hygiene, run `dart run tool/publish_check.dart` from a clean commit.
+It validates a clean git archive, so ignored local overrides used for sibling
+checkout testing do not affect the publish dry-run.
+
+## Architecture
+
+`native/` contains the shared-memory runtime and SQLite shim. `lib/` contains
+the recorder, trace reader, decision logic, graph-data export, and vocabularies.
+`bin/` contains the CLI. `tool/visualizer_app/` contains the Flutter desktop
+visualizer.
+
+## Docs
+
+- [Production readiness](doc/production-benchmark-readiness.md)
+- [resqlite gate](doc/resqlite-sole-profiling-gate.md)
+- [Decision standard](doc/profiling-decision-standard.md)
+- [Graph-data contract](doc/graph-data-export.md)
+- [Trace/runtime specs](doc/format-spec.md), [runtime](doc/runtime-protocol.md),
+  and [peer contract](doc/peer-interface-contract.md)
+- [Visualizer design](doc/visualizer-product-design.md)
+
+`PLAN.md` remains the detailed implementation/status tracker.
+
+## Non-Goals
+
+- Live production telemetry.
+- A replacement for Dart DevTools.
+- A universal SQLite profiler across every language/runtime today.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Contributing
-
-This is early-stage. Feedback on the design specs is the most valuable contribution right now. Open an issue with concerns about the format, the API, or any design decision that seems load-bearing.
