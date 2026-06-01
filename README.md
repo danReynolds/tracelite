@@ -72,12 +72,20 @@ dart run bin/tracelite.dart export-graph-data \
 
 # Source-checkout peer benchmark command.
 dart run bin/tracelite.dart suite \
-  --profile=ci \
+  --profile=experiment \
   --interfaces=sqlite3,drift,sqlite_async
 
 # Source-checkout desktop visualizer launcher.
 dart run bin/tracelite.dart visualize build/graph-data
 ```
+
+## Benchmark Profiles
+
+Use `ci` for routine pull-request smoke checks, `experiment` for a new
+performance idea's baseline/candidate run, and `production` for release-gate
+calibration. All profiles write the same manifest and compare artifacts, so a
+run can move from quick signal to audited decision without changing artifact
+shape.
 
 ## Integrations
 

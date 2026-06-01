@@ -50,9 +50,10 @@ The explicit resqlite merge gate is documented in
   repetition samples and per-side Tukey outlier counts; threshold-sized changes
   require both the mean interval and non-parametric repetition evidence to agree
   before they are called `improved` or `regressed`.
-- `tracelite suite --profile=ci|production` now runs a repeatable benchmark
-  matrix and writes a suite manifest plus per-scenario compare artifacts and
-  logs.
+- `tracelite suite --profile=ci|experiment|production` now runs a repeatable
+  benchmark matrix and writes a suite manifest plus per-scenario compare
+  artifacts and logs. `experiment` is the medium repeated preset for
+  baseline/candidate work that should not pay the full release-gate cost yet.
 - `.github/workflows/ci.yml` now defines the intended macOS CI baseline:
   generated-span freshness, native runtime/shim build, analysis, tests, and the
   four-peer `ci` suite. It assumes a sibling resqlite repository checkout and

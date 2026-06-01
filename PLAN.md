@@ -231,10 +231,12 @@ Run both: `dart test`. Both pass.
   `.dart_tool/package_config.json`, the resolved git SHA, and the
   `trace_sqlite` hook before running peer tests, so the macOS gate cannot
   silently fall back to the pub package and lose trace hooks.
-- `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
-  repeatable scenario matrix and writes a manifest plus per-scenario artifacts
-  and logs.
-- `bin/tracelite.dart suite-history --profile=production --runs=5 --out-dir=...`
+- `bin/tracelite.dart suite --profile=ci|experiment|production --out-dir=...`
+  runs a repeatable scenario matrix and writes a manifest plus per-scenario
+  artifacts and logs. `ci` is the small PR smoke, `experiment` is the medium
+  repeated baseline/candidate workflow, and `production` is the release-gate
+  matrix.
+- `bin/tracelite.dart suite-history --profile=experiment|production --runs=5 --out-dir=...`
   runs independent suites into timestamped run directories, writes a
   `tracelite.suite_history.v1` manifest, and emits policy-calibration JSON and
   markdown sidecars.
@@ -311,6 +313,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Current wrapped SQLite API subset is sufficient for non-trivial sqlite3/drift/sqlite_async/resqlite workloads | ✓ proven | full INSERT + SELECT cycle and peer scenarios work |
 | Aggregator skeleton loads region traces and reports stats | ✓ proven | `Trace.loadRegion`, report CLI, runtime/shim/CLI tests |
 | Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
+| Benchmark presets cover smoke, experiment, and release-gate workflows | ✓ proven | `suite --profile=ci|experiment|production` emits the same manifest shape with profile-scaled rows/repetitions; `test/suite_command_test.dart` validates the experiment preset |
 | Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
 | Benchmark decisions are machine-gated | ✓ proven | `tracelite decision` over compare JSON and suite manifests, command tests for accepted/rejected/inconclusive outcomes |
 | Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader workload noise | `tracelite calibrate-policy` produces policy artifacts and strict history validation; a ceiling-capped resqlite measured-elapsed release scope passes on the 5-run history, while broader diagnostic metrics and two micro workloads remain too noisy |
@@ -776,6 +779,12 @@ dart run bin/tracelite.dart suite \
   --profile=ci \
   --interfaces=sqlite3,drift,sqlite_async,resqlite \
   --out-dir=build/tracelite-ci-suite
+
+# Run the day-to-day experiment matrix
+dart run bin/tracelite.dart suite \
+  --profile=experiment \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --out-dir=build/tracelite-experiment-suite
 
 # Run the production-oriented replacement matrix
 dart run bin/tracelite.dart suite \

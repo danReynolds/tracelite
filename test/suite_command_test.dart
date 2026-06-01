@@ -95,6 +95,54 @@ void main() {
     expect(File('${tempDir.path}/point-select.json').existsSync(), isFalse);
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  test('experiment profile is a medium repeated preset', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-suite-experiment-profile-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'suite',
+        '--profile=experiment',
+        '--interfaces=sqlite3',
+        '--scenarios=narrow-batch-insert',
+        '--out-dir=${tempDir.path}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'suite failed.\nstdout:\n${result.stdout}\n'
+          'stderr:\n${result.stderr}',
+    );
+
+    final manifest = jsonDecode(
+      File('${tempDir.path}/manifest.json').readAsStringSync(),
+    ) as Map<String, Object?>;
+    expect(manifest['profile'], 'experiment');
+    expect(
+      manifest['description'],
+      contains('day-to-day performance experiments'),
+    );
+    final runs = manifest['runs']! as List<Object?>;
+    expect(runs, hasLength(1));
+    final run = runs.single as Map<String, Object?>;
+    expect(run['scenario'], 'narrow-batch-insert');
+    expect(run['rows'], 100);
+    expect(run['repetitions'], 5);
+    expect(run['status'], 'ok');
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
   test('suite-history writes repeated runs and calibration artifacts',
       () async {
     final tempDir = await Directory.systemTemp.createTemp(

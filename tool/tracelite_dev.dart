@@ -238,7 +238,7 @@ Future<void> _suite(List<String> args) async {
   try {
     profile = _suiteProfile(profileName);
   } on ArgumentError {
-    stderr.writeln('--profile must be ci or production');
+    stderr.writeln('--profile must be ci, experiment, or production');
     exit(64);
   }
   late final List<_SuiteScenario> scenarios;
@@ -329,7 +329,7 @@ Future<void> _suiteHistory(List<String> args) async {
   try {
     profile = _suiteProfile(profileName);
   } on ArgumentError {
-    stderr.writeln('--profile must be ci or production');
+    stderr.writeln('--profile must be ci, experiment, or production');
     exit(64);
   }
   late final List<_SuiteScenario> scenarios;
@@ -1878,6 +1878,62 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
         ],
       ),
+    'experiment' => const _SuiteProfile(
+        description:
+            'Medium repeated matrix for day-to-day performance experiments.',
+        scenarios: [
+          _SuiteScenario(
+            name: narrowBatchInsertScenario,
+            rows: 100,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: pointSelectScenario,
+            rows: 100,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: feedPagingScenario,
+            rows: 300,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: syncBurstScenario,
+            rows: 50,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: chatSimScenario,
+            rows: 100,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: largeWorkingSetScenario,
+            rows: 1000,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: keyedPkSubscriptionsScenario,
+            rows: 12,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: highCardinalityFanoutScenario,
+            rows: 20,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: manyStreamsWriterThroughputScenario,
+            rows: 12,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: sqliteDiagnosticsScenario,
+            rows: 50,
+            repetitions: 5,
+          ),
+        ],
+      ),
     'production' => const _SuiteProfile(
         description: 'Production-oriented matrix for benchmark replacement.',
         scenarios: [
@@ -1936,7 +1992,7 @@ _SuiteProfile _suiteProfile(String profileName) {
     _ => throw ArgumentError.value(
         profileName,
         'profile',
-        'expected ci or production',
+        'expected ci, experiment, or production',
       ),
   };
 }
@@ -2116,11 +2172,13 @@ Never _usage({int exitCode = 64}) {
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
       '[--repetitions=5] [--out-json=compare.json]');
   stderr.writeln('  dart run bin/tracelite.dart suite '
-      '[--profile=ci|production] [--interfaces=sqlite3,drift,...] '
+      '[--profile=ci|experiment|production] '
+      '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
       '[--out-dir=build/tracelite-suite]');
   stderr.writeln('  dart run bin/tracelite.dart suite-history '
-      '[--profile=production] [--runs=5] [--interfaces=sqlite3,drift,...] '
+      '[--profile=experiment|production] [--runs=5] '
+      '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
       '[--metrics=elapsed_ns,...] [--target-rse-percent=2.5] '
       '[--within-run-noise-percentile=0.75] '
