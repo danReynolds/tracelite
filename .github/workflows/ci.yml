@@ -15,12 +15,12 @@ jobs:
 
     steps:
       - name: Check out tracelite
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           path: tracelite
 
       - name: Check out resqlite sibling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           repository: ${{ github.repository_owner }}/resqlite
           ref: a2e684c6861980e2fbbbc437dd7a4797ae984f2f
@@ -116,7 +116,7 @@ jobs:
 
     steps:
       - name: Check out tracelite
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Install native dependencies
         run: |
