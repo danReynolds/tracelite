@@ -117,6 +117,10 @@ The explicit resqlite merge gate is documented in
   graph-data bundle from a single history manifest.
 - `tracelite suite-history` and `calibrate-policy` now support a robust p75
   within-run noise policy plus total and per-run outlier ceilings.
+- Source-checkout `compare`, `suite`, `suite-history`, and `calibrate`
+  artifacts now record `tracelite_source` with the git revision and dirty
+  state, and production/release commands can pass `--require-clean-source=true`
+  to fail fast on unauditable local changes.
 - resqlite now has `benchmark/run_tracelite.dart`, a package-local wrapper
   around `tracelite suite-history` that fixes the release-gate scope to
   measured elapsed time, resqlite-owned scenarios, bounded threshold/noise
@@ -436,7 +440,10 @@ Tracelite to `resqlite-profiling-gate-2026-06-01` and the wrapper records
 `tracelite_source`, `resqlite_source`, and the resolved resqlite dependency
 binding in every run manifest. This should stay an acceptance criterion, not a
 removed concern: future pin bumps must continue to pass resqlite CI with the
-same wrapper defaults.
+same wrapper defaults. Native tracelite source-checkout benchmark commands now
+also write their own `tracelite_source` section and can enforce
+`--require-clean-source=true`, so standalone artifacts no longer depend on a
+downstream wrapper for source auditability.
 
 ### 2. Workload coverage is broader, but still needs production scale
 

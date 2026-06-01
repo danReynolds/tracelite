@@ -32,6 +32,8 @@ work.
 - Artifact interpretation through `explain` and visualizer insight panels:
   trace health, noise, bottlenecks, peer spread, and harness overhead.
 - Schema-validated graph data for dashboards and the visualizer.
+- Source-checkout benchmark artifacts record the tracelite git revision and
+  dirty state; release gates can require a clean checkout.
 
 ## How It Works
 
@@ -109,6 +111,12 @@ run can move from quick signal to audited decision without changing artifact
 shape. Repeated source-checkout compares default to an app-JIT child runner so
 the artifact still has isolated repetitions without paying `dart run` startup
 for every sample.
+
+For publish or release evidence, add `--require-clean-source=true` to
+`compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the
+tracelite checkout is dirty or not auditable, and successful artifacts include
+`tracelite_source` with the git revision, branch, tag when present, and
+dirty-file count.
 
 ## Integrations
 

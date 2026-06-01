@@ -43,6 +43,11 @@ void main() {
     expect(artifact['schema'], 'tracelite.compare.v1');
     expect(artifact['workload'], isA<Map<String, Object?>>());
     expect(artifact['environment'], isA<Map<String, Object?>>());
+    final source = artifact['tracelite_source'] as Map<String, Object?>;
+    expect(source['kind'], 'git');
+    expect(source['revision'], isA<String>());
+    expect(source['dirty'], isA<bool>());
+    expect(source['dirty_count'], isA<int>());
     final runner = artifact['runner'] as Map<String, Object?>;
     expect(runner['mode'], 'app_jit');
     expect(runner['requested_mode'], 'auto');
@@ -95,4 +100,34 @@ void main() {
     expect(diff.stdout.toString(), contains('delta 95% CI'));
     expect(diff.stdout.toString(), contains('neutral'));
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('require-clean-source rejects dirty source checkouts', () async {
+    final marker = File(
+      '.tracelite-clean-source-test-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    marker.writeAsStringSync('temporary dirty marker for test\n');
+    addTearDown(() {
+      if (marker.existsSync()) marker.deleteSync();
+    });
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=narrow-batch-insert',
+        '--interfaces=sqlite3',
+        '--rows=1',
+        '--require-clean-source=true',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(
+      result.stderr.toString(),
+      contains('tracelite source has uncommitted changes'),
+    );
+  });
 }

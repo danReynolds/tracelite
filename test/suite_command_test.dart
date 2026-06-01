@@ -39,6 +39,9 @@ void main() {
     ) as Map<String, Object?>;
     expect(manifest['schema'], 'tracelite.suite.v1');
     expect(manifest['profile'], 'ci');
+    final source = manifest['tracelite_source'] as Map<String, Object?>;
+    expect(source['kind'], 'git');
+    expect(source['revision'], isA<String>());
     final runs = manifest['runs']! as List<Object?>;
     expect(runs, hasLength(4));
     for (final run in runs.cast<Map<String, Object?>>()) {
@@ -187,6 +190,9 @@ void main() {
     expect(history['requested_runs'], 2);
     expect(history['successful_runs'], 2);
     expect(history['calibration_status'], 'ready');
+    final source = history['tracelite_source'] as Map<String, Object?>;
+    expect(source['kind'], 'git');
+    expect(source['revision'], isA<String>());
     final calibrationOptions =
         history['calibration_options']! as Map<String, Object?>;
     expect(calibrationOptions['peers'], ['sqlite3']);

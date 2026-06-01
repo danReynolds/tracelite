@@ -243,6 +243,10 @@ Future<void> _doctor(List<String> args) async {
 
 Future<void> _suite(List<String> args) async {
   final options = _parseOptions(args);
+  final source = _traceliteSourceArtifact();
+  if (_boolOption(options, 'require-clean-source', false)) {
+    _requireCleanSource(source);
+  }
   final profileName = options['profile'] ?? 'ci';
   late final _SuiteProfile profile;
   try {
@@ -318,6 +322,7 @@ Future<void> _suite(List<String> args) async {
           'generated_at': DateTime.now().toUtc().toIso8601String(),
           'profile': profileName,
           'description': profile.description,
+          'tracelite_source': source,
           'interfaces':
               interfaces.split(',').map((name) => name.trim()).toList(),
           'runs': runs,
@@ -333,6 +338,10 @@ Future<void> _suite(List<String> args) async {
 
 Future<void> _suiteHistory(List<String> args) async {
   final options = _parseOptions(args);
+  final source = _traceliteSourceArtifact();
+  if (_boolOption(options, 'require-clean-source', false)) {
+    _requireCleanSource(source);
+  }
   final profileName = options['profile'] ?? 'production';
   late final _SuiteProfile profile;
   try {
@@ -511,6 +520,7 @@ Future<void> _suiteHistory(List<String> args) async {
     'schema': 'tracelite.suite_history.v1',
     'generated_at': generatedAt.toIso8601String(),
     'profile': profileName,
+    'tracelite_source': source,
     'scenarios': scenarios.map((scenario) => scenario.name).toList(),
     'interfaces': interfaces.split(',').map((name) => name.trim()).toList(),
     'requested_runs': runCount,
@@ -550,6 +560,10 @@ Future<void> _suiteHistory(List<String> args) async {
 
 Future<void> _compare(List<String> args) async {
   final options = _parseOptions(args);
+  final source = _traceliteSourceArtifact();
+  if (_boolOption(options, 'require-clean-source', false)) {
+    _requireCleanSource(source);
+  }
   final scenario = options['scenario'] ?? narrowBatchInsertScenario;
   final interfaces = (options['interfaces'] ?? defaultPeerNames.join(','))
       .split(',')
@@ -665,6 +679,7 @@ Future<void> _compare(List<String> args) async {
       repetitions: repetitions,
       ringDataWords: ringDataWords,
       runner: runner.toJson(),
+      source: source,
       results: results,
     );
     if (outJson != null && outJson.isNotEmpty) {
@@ -769,6 +784,82 @@ Map<String, String> _peerChildEnvironment(String regionPath) {
   };
 }
 
+Map<String, Object?> _traceliteSourceArtifact() {
+  final revision = _gitOutput(const ['rev-parse', 'HEAD']);
+  if (revision == null || revision.isEmpty) {
+    return {
+      'kind': 'unavailable',
+      'reason': 'git revision unavailable',
+    };
+  }
+
+  final statusLines = (_gitOutput(const ['status', '--porcelain=v1']) ?? '')
+      .split('\n')
+      .map((line) => line.trimRight())
+      .where((line) => line.isNotEmpty)
+      .toList();
+  final branch = _gitOutput(const ['rev-parse', '--abbrev-ref', 'HEAD']);
+  final tag = _gitOutput(
+    const ['describe', '--tags', '--exact-match', 'HEAD'],
+    allowFailure: true,
+  );
+
+  return {
+    'kind': 'git',
+    'revision': revision,
+    if (branch != null && branch.isNotEmpty) 'branch': branch,
+    if (tag != null && tag.isNotEmpty) 'tag': tag,
+    'dirty': statusLines.isNotEmpty,
+    'dirty_count': statusLines.length,
+    if (statusLines.isNotEmpty) ...{
+      'dirty_files': statusLines.take(50).toList(),
+      if (statusLines.length > 50) 'dirty_files_truncated': true,
+    },
+  };
+}
+
+String? _gitOutput(List<String> args, {bool allowFailure = false}) {
+  final result = Process.runSync(
+    'git',
+    ['-C', Directory.current.absolute.path, ...args],
+  );
+  if (result.exitCode != 0) {
+    if (allowFailure) return null;
+    return null;
+  }
+  return result.stdout.toString().trim();
+}
+
+void _requireCleanSource(Map<String, Object?> source) {
+  if (source['kind'] != 'git') {
+    stderr.writeln(
+      'cannot verify clean tracelite source state; source kind is '
+      '`${source['kind']}`',
+    );
+    exit(65);
+  }
+  if (source['dirty'] == true) {
+    stderr
+      ..writeln('tracelite source has uncommitted changes')
+      ..writeln('revision: ${source['revision']}')
+      ..writeln('dirty files: ${source['dirty_count']}');
+    final dirtyFiles = source['dirty_files'];
+    if (dirtyFiles is List<Object?>) {
+      for (final file in dirtyFiles.take(20)) {
+        stderr.writeln('- $file');
+      }
+      if (source['dirty_files_truncated'] == true) {
+        stderr.writeln('- ...');
+      }
+    }
+    stderr.writeln(
+      'Commit or stash changes, or omit --require-clean-source for '
+      'exploratory local runs.',
+    );
+    exit(65);
+  }
+}
+
 Future<void> _visualize(List<String> args) async {
   var release = false;
   var profile = false;
@@ -828,6 +919,10 @@ Future<void> _visualize(List<String> args) async {
 
 Future<void> _calibrate(List<String> args) async {
   final options = _parseOptions(args);
+  final source = _traceliteSourceArtifact();
+  if (_boolOption(options, 'require-clean-source', false)) {
+    _requireCleanSource(source);
+  }
   final iterations = _positiveIntOption(options, 'iterations', 10000);
   final repetitions = _positiveIntOption(options, 'repetitions', 5);
   final outJson = options['out-json'];
@@ -904,6 +999,7 @@ Future<void> _calibrate(List<String> args) async {
     iterations: iterations,
     repetitions: repetitions,
     runtimePath: runtime.absolute.path,
+    source: source,
     samples: samples,
   );
   if (outJson != null && outJson.isNotEmpty) {
@@ -1009,6 +1105,7 @@ Map<String, Object?> _compareArtifact({
   required int repetitions,
   required int ringDataWords,
   required Map<String, Object?> runner,
+  required Map<String, Object?> source,
   required List<_PeerTraceResult> results,
 }) {
   final peers = <String, List<_PeerTraceResult>>{};
@@ -1023,6 +1120,7 @@ Map<String, Object?> _compareArtifact({
     'rows': rows,
     'workload': peerScenarioParameters(scenario, rows: rows),
     'environment': _environmentArtifact(),
+    'tracelite_source': source,
     'runner': runner,
     'repetitions': repetitions,
     'ring_data_words': ringDataWords,
@@ -1311,6 +1409,7 @@ Map<String, Object?> _calibrationArtifact({
   required int iterations,
   required int repetitions,
   required String runtimePath,
+  required Map<String, Object?> source,
   required List<Map<String, Object?>> samples,
 }) {
   Iterable<int> values(String key) =>
@@ -1334,6 +1433,7 @@ Map<String, Object?> _calibrationArtifact({
     'iterations': iterations,
     'repetitions': repetitions,
     'runtime_path': runtimePath,
+    'tracelite_source': source,
     'summary': {
       'body_only_ns': body.toJson(),
       'disabled_recorder_ns': disabled.toJson(),
@@ -2347,12 +2447,12 @@ Never _usage({int exitCode = 64}) {
       '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
       '[--repetitions=5] [--runner=auto|script|app-jit] '
-      '[--out-json=compare.json]');
+      '[--require-clean-source=true] [--out-json=compare.json]');
   stderr.writeln('  dart run bin/tracelite.dart suite '
       '[--profile=ci|experiment|production] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
-      '[--out-dir=build/tracelite-suite]');
+      '[--require-clean-source=true] [--out-dir=build/tracelite-suite]');
   stderr.writeln('  dart run bin/tracelite.dart suite-history '
       '[--profile=ci|experiment|production] [--runs=5] '
       '[--interfaces=sqlite3,drift,...] '
@@ -2362,6 +2462,7 @@ Never _usage({int exitCode = 64}) {
       '[--policy-peers=resqlite] [--policy-scenarios=feed-paging,...] '
       '[--threshold-ceiling-percent=50] '
       '[--max-outlier-percent=10] [--max-run-outlier-percent=20] '
+      '[--require-clean-source=true] '
       '[--out-dir=build/tracelite-production-history]');
   stderr.writeln('  dart run bin/tracelite.dart diff '
       '--baseline=base.json --candidate=change.json '
@@ -2396,7 +2497,8 @@ Never _usage({int exitCode = 64}) {
     '<trace-or-artifact-path>',
   );
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
-      '[--iterations=10000] [--repetitions=5] [--out-json=calibration.json]');
+      '[--iterations=10000] [--repetitions=5] '
+      '[--require-clean-source=true] [--out-json=calibration.json]');
   stderr.writeln('  dart run bin/tracelite.dart create-region '
       '--out=trace.tlt-region [--ring-data-words=1048576]');
   exit(exitCode);
