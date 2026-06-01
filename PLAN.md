@@ -650,8 +650,11 @@ Acceptance gates:
 
 Work:
 
-- Add SQL fingerprinting and redaction. Raw SQL capture must be explicit and
-  unsafe/detail-gated; grouping should default to normalized fingerprints.
+- Done first slice: SQLite prepare calls default to normalized `sqlfp:v1`
+  fingerprints in the string pool, raw SQL capture requires
+  `TRACELITE_SQL_CAPTURE=raw` or `TRACELITE_RAW_SQL=1`, and compare samples now
+  include `sql_fingerprint_groups` for prepare-cost attribution without
+  committing literal values.
 - Add causal-chain reporting from public Dart operation to reader/writer
   dispatch, worker handling, stream invalidation, decode, and SQLite C spans.
 - Improve counter/gauge reports for semantic resqlite signals.

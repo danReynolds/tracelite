@@ -69,6 +69,9 @@ The explicit resqlite merge gate is documented in
 - Compare artifacts now include deterministic workload parameters and
   child-process setup, warmup, measured phase timings, and Dart/OS environment
   metadata.
+- SQLite prepare calls now use `sqlfp:v1` normalized fingerprints by default,
+  and compare samples include `sql_fingerprint_groups` for prepare-cost
+  attribution without committing raw SQL literal values.
 - `tracelite compare` now exits non-zero when any peer fails, emits no trace, or
   reports dropped/unmatched trace diagnostics.
 - The peer harness now includes initial shared-SQL ports of resqlite's
@@ -90,8 +93,9 @@ The explicit resqlite merge gate is documented in
   as resqlite profile harnesses.
 - Reactive production scenarios now size trace rings from the expected event
   count instead of under-provisioning high-event stream workloads.
-- The generic markdown report now recognizes `*.profile.workload` spans and
-  renders workload-scoped nested span and counter summaries.
+- The generic markdown report now recognizes `*.profile.workload` spans,
+  renders workload-scoped nested span and counter summaries, and shows
+  prepare-cost SQL fingerprint groups without raw literal values.
 - The resqlite PR bridge now caches interned string IDs so repeated SQL strings
   do not exhaust the tracelite string pool during large profile runs.
 - `tracelite workload-summary` now exports old-compatible resqlite profile

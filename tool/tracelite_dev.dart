@@ -1140,6 +1140,7 @@ Map<String, Object?> _sampleArtifact(_PeerTraceResult result) {
       'stderr': result.stderr,
     };
   }
+  final sqlFingerprintGroups = _sqlFingerprintGroups(trace);
   return {
     'repetition': result.repetition,
     'status': trace.events.isEmpty ? 'no_trace' : 'ok',
@@ -1184,7 +1185,24 @@ Map<String, Object?> _sampleArtifact(_PeerTraceResult result) {
           'max': group.stats.max,
         },
     ],
+    if (sqlFingerprintGroups.isNotEmpty)
+      'sql_fingerprint_groups': sqlFingerprintGroups,
   };
+}
+
+List<Map<String, Object?>> _sqlFingerprintGroups(Trace trace) {
+  return [
+    for (final group in trace.sqlFingerprintGroups())
+      {
+        'fingerprint': group.fingerprint,
+        'normalized_sql': group.normalizedSql,
+        'prepare_count': group.stats.count,
+        'prepare_total_ns': group.stats.totalNs,
+        'prepare_p50_ns': group.stats.p50Ns,
+        'prepare_p90_ns': group.stats.p90Ns,
+        'prepare_p99_ns': group.stats.p99Ns,
+      },
+  ];
 }
 
 void _printCompareReport(Map<String, Object?> artifact) {

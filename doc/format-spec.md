@@ -649,7 +649,19 @@ Producers and exporters MUST support three redaction modes:
 | `fingerprinted` | default for committed artifacts | normalized SQL fingerprints (literals → `?`), structural metadata | SQL literal values, paths beyond a configurable root, pointer values (replaced with stable per-trace IDs) |
 | `redacted` | for traces shared externally | structural metadata only | all string-pool entries replaced with `<redacted>` except built-in identifiers; pointers nulled |
 
-The redaction mode is recorded as a `m.process_info` extension arg. Decoders display the mode prominently; tools that compare or aggregate traces refuse to mix raw and redacted unless explicitly opted in.
+Current SQLite shim behavior implements the `fingerprinted` default for
+`sqlite3_prepare_v2` and `sqlite3_prepare_v3`: the `sql` string-pool entry is a
+`sqlfp:v1:<hash>:<normalized-sql>` label, not the raw SQL text. The normalizer
+collapses whitespace, strips comments, uppercases tokens, and replaces string,
+numeric, blob, boolean, null, and bind-parameter literals with `?`. Set
+`TRACELITE_SQL_CAPTURE=raw` or `TRACELITE_RAW_SQL=1` only for local debugging
+when the raw SQL text is required. Set `TRACELITE_SQL_CAPTURE=redacted` to
+store `<sql:redacted>` for prepare calls.
+
+The redaction mode should be recorded in a metadata extension before raw and
+redacted traces are mixed in offline diff tooling. Until that metadata lands,
+committed compare artifacts should rely on the default fingerprinted prepare
+labels and treat raw trace regions as local-debug evidence.
 
 Default mode for committed artifacts is `fingerprinted`. The CLI's `tracelite export` flips to `redacted` when the user passes `--redact-shared`.
 

@@ -63,6 +63,14 @@ void main() {
       expect(sample['measured_elapsed_ns'] as int, greaterThan(0));
       expect(sample['child_elapsed_ns'] as int, greaterThan(0));
       expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      final fingerprints = sample['sql_fingerprint_groups'] as List<Object?>;
+      expect(fingerprints, isNotEmpty);
+      final normalizedSql = fingerprints
+          .cast<Map<String, Object?>>()
+          .map((group) => group['normalized_sql'])
+          .join('\n');
+      expect(normalizedSql, contains('INSERT INTO TRACELITE_ITEMS'));
+      expect(normalizedSql, isNot(contains('name_')));
     }
 
     final diff = await Process.run(

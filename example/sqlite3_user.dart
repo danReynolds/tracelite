@@ -16,6 +16,7 @@ void main() {
   db.execute('INSERT INTO t VALUES (?, ?)', [1, 'alice']);
   db.execute('INSERT INTO t VALUES (?, ?)', [2, 'bob']);
   db.execute('INSERT INTO t VALUES (?, ?)', [3, 'carol']);
+  db.select("SELECT 'literal_secret' AS hidden");
 
   final rs = db.select('SELECT id, name FROM t WHERE id > ?', [1]);
   for (final row in rs) {

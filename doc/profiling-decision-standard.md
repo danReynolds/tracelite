@@ -25,6 +25,11 @@ Every production-quality experiment should preserve:
   parameters, warmups, repetitions, and threshold policy embedded in the
   artifacts or experiment write-up.
 
+Committed artifacts should use the default SQL fingerprinting mode. Raw SQL
+capture is for local debugging only; it requires `TRACELITE_SQL_CAPTURE=raw` or
+`TRACELITE_RAW_SQL=1` and should be treated as unsafe to publish without a
+separate review.
+
 Console output is not enough. The durable artifact is the evidence.
 
 ## Command

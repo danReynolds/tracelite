@@ -27,6 +27,7 @@ work.
 - Native SQLite timing through a `libsqlite3` shim or embedded-library wrapper.
 - Dart-side spans/counters through `TraceRecorder`.
 - Common SQL workloads across validated peers.
+- SQL query-shape fingerprints by default; raw SQL capture is explicit opt-in.
 - Calibrated thresholds, CV gates, outlier policy, and decisions.
 - Artifact interpretation through `explain` and visualizer insight panels:
   trace health, noise, bottlenecks, peer spread, and harness overhead.
@@ -44,6 +45,11 @@ Native events and Dart `TraceRecorder` events write into one shared-memory
 region on the same monotonic clock. After a workload finishes, tracelite reads
 that region into artifacts: span timings, workload summaries, peer comparisons,
 policy calibration, regression decisions, and graph-data datasets.
+
+SQLite prepare calls are grouped by normalized `sqlfp:v1` fingerprints by
+default. Literal values are replaced with `?` before the query shape is interned
+or written to compare artifacts. Raw SQL is only captured for local debugging
+when `TRACELITE_SQL_CAPTURE=raw` or `TRACELITE_RAW_SQL=1` is set.
 
 The key design choice is that profiling data is queried from artifacts, not
 hand-coded into each benchmark. A release gate can keep broad diagnostic data
