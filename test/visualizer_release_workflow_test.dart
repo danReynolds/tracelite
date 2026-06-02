@@ -22,6 +22,23 @@ void main() {
     expect(workflow, contains('actions/upload-artifact@v7.0.1'));
   });
 
+  test('visualizer release workflow audits package evidence before publish', () {
+    final workflow =
+        File('.github/workflows/visualizer-release.yml').readAsStringSync();
+
+    expect(workflow, contains('name: Audit visualizer release evidence'));
+    expect(workflow, contains('needs: package'));
+    expect(workflow, contains('actions/download-artifact@v8.0.1'));
+    expect(workflow, contains('--visualizer-release=build/visualizer-release'));
+    expect(
+      workflow,
+      contains('--require-visualizer-release-platforms=macos,linux,windows'),
+    );
+    expect(workflow, contains('--require-signed-macos-release=true'));
+    expect(workflow, contains('name: visualizer-release-audit'));
+    expect(workflow, contains('needs: audit'));
+  });
+
   test('visualizer release workflow supports credentialed macOS release', () {
     final workflow =
         File('.github/workflows/visualizer-release.yml').readAsStringSync();

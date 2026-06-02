@@ -174,11 +174,14 @@ Linux and Windows signing remain release-system responsibilities and are
 recorded as external in the manifest.
 The `Visualizer Release` GitHub workflow runs this package path on macOS,
 Linux, and Windows, uploads the archive/manifest evidence, and can publish
-those artifacts to a draft GitHub release from a tag or manual dispatch. macOS
+those artifacts to a draft GitHub release from a tag or manual dispatch. Before
+publish, the workflow downloads the uploaded package artifacts and runs doctor
+with required macOS/Linux/Windows coverage, archive size/SHA validation, clean
+source validation, and signed macOS validation when `sign_macos=true`. macOS
 signing/notarization is optional and requires the release secrets documented in
 the workflow. Hosted release packaging skips only the tagged heavyweight
-dense-trace widget stress test; run the direct visualizer check or
-`flutter test` locally for full visualizer stress coverage.
+dense-trace widget stress test; run the direct visualizer check or `flutter test`
+locally for full visualizer stress coverage.
 After downloading release artifacts, `tracelite doctor --visualizer-release=...`
 audits manifest schema, platform coverage, archive size, SHA-256, clean source,
 and macOS signing/notarization evidence.
