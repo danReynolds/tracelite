@@ -1397,6 +1397,7 @@ Future<_PeerChildRunner> _preparePeerChildRunner({
     return await _PeerChildRunner.startWorker(
       requestedMode: requestedMode,
       interfaces: interfaces,
+      tempRoot: tempRoot,
     );
   }
 
@@ -2909,6 +2910,7 @@ class _PeerChildRunner {
     this.workerProcess,
     this.runtimeLibraryPaths = const [],
     this.nativeAssets = const [],
+    this.preflight,
   });
 
   factory _PeerChildRunner.script({
@@ -2938,6 +2940,7 @@ class _PeerChildRunner {
   static Future<_PeerChildRunner> startWorker({
     required String requestedMode,
     required List<String> interfaces,
+    required Directory tempRoot,
   }) async {
     final runtimeLibraryPaths = workerRuntimeLibraryPaths(peers: interfaces);
     if (runtimeLibraryPaths.isEmpty) {
@@ -2977,6 +2980,22 @@ class _PeerChildRunner {
       },
     );
     stopwatch.stop();
+    final preflight = await _workerPreflight(
+      workerProcess: workerProcess,
+      interfaces: interfaces,
+      tempRoot: tempRoot,
+    );
+    if (preflight['status'] != 'ok') {
+      await workerProcess.close();
+      stderr
+        ..writeln('peer worker preflight failed before benchmark samples.')
+        ..writeln(const JsonEncoder.withIndent('  ').convert({
+          'preflight': preflight,
+          'runtime_libraries': ready.runtimeLibraryPaths,
+          'native_assets': ready.nativeAssets,
+        }));
+      exit(66);
+    }
     return _PeerChildRunner._(
       mode: 'worker',
       requestedMode: requestedMode,
@@ -2984,6 +3003,7 @@ class _PeerChildRunner {
       workerProcess: workerProcess,
       runtimeLibraryPaths: ready.runtimeLibraryPaths,
       nativeAssets: ready.nativeAssets,
+      preflight: preflight,
     );
   }
 
@@ -2995,6 +3015,7 @@ class _PeerChildRunner {
   final _PeerWorkerProcess? workerProcess;
   final List<String> runtimeLibraryPaths;
   final List<Map<String, Object?>> nativeAssets;
+  final Map<String, Object?>? preflight;
 
   Future<_PeerChildRunResult> runPeer({
     required String peer,
@@ -3058,6 +3079,7 @@ class _PeerChildRunner {
         if (runtimeLibraryPaths.isNotEmpty)
           'runtime_libraries': runtimeLibraryPaths,
         if (nativeAssets.isNotEmpty) 'native_assets': nativeAssets,
+        if (preflight != null) 'preflight': preflight,
       };
 }
 
@@ -3069,6 +3091,95 @@ class _PeerWorkerReady {
 
   final List<String> runtimeLibraryPaths;
   final List<Map<String, Object?>> nativeAssets;
+}
+
+Future<Map<String, Object?>> _workerPreflight({
+  required _PeerWorkerProcess workerProcess,
+  required List<String> interfaces,
+  required Directory tempRoot,
+}) async {
+  final peer = _workerPreflightPeer(interfaces);
+  final stem = 'worker-preflight-${_fileStem(peer)}';
+  final regionPath = '${tempRoot.path}/$stem.tlt-region';
+  final databasePath = '${tempRoot.path}/$stem.db';
+  final metricsPath = '${tempRoot.path}/$stem.metrics.json';
+  final stopwatch = Stopwatch()..start();
+  try {
+    TraceRegion.createFile(
+      regionPath,
+      ringDataWords: _ringWordsForScenario(narrowBatchInsertScenario, 1),
+    );
+    final child = await workerProcess.runPeer(
+      peer: peer,
+      scenario: narrowBatchInsertScenario,
+      databasePath: databasePath,
+      rows: 1,
+      metricsPath: metricsPath,
+      regionPath: regionPath,
+    );
+    stopwatch.stop();
+    final base = <String, Object?>{
+      'peer': peer,
+      'scenario': narrowBatchInsertScenario,
+      'rows': 1,
+      'elapsed_ns': stopwatch.elapsedMicroseconds * 1000,
+      'child_elapsed_ns': child.elapsedNs,
+    };
+    if (child.exitCode != 0) {
+      return {
+        ...base,
+        'status': 'failed',
+        'exit_code': child.exitCode,
+        if (child.stdout.isNotEmpty) 'stdout': child.stdout,
+        if (child.stderr.isNotEmpty) 'stderr': child.stderr,
+      };
+    }
+
+    final trace = Trace.loadRegion(regionPath);
+    final diagnostics = trace.diagnostics;
+    final hasDiagnostics = diagnostics.droppedEvents != 0 ||
+        diagnostics.unmatchedBeginEvents != 0 ||
+        diagnostics.unmatchedEndEvents != 0;
+    final status = trace.events.isEmpty
+        ? 'no_trace'
+        : hasDiagnostics
+            ? 'trace_diagnostics'
+            : 'ok';
+    return {
+      ...base,
+      'status': status,
+      'events': trace.events.length,
+      'spans': trace.spans.length,
+      'diagnostics': {
+        'dropped_events': diagnostics.droppedEvents,
+        'unmatched_begin_events': diagnostics.unmatchedBeginEvents,
+        'unmatched_end_events': diagnostics.unmatchedEndEvents,
+      },
+    };
+  } on Object catch (error, stackTrace) {
+    if (stopwatch.isRunning) stopwatch.stop();
+    return {
+      'peer': peer,
+      'scenario': narrowBatchInsertScenario,
+      'rows': 1,
+      'status': 'failed',
+      'elapsed_ns': stopwatch.elapsedMicroseconds * 1000,
+      'stderr': '$error\n$stackTrace',
+    };
+  } finally {
+    _deletePeerSampleScratch(
+      regionPath: regionPath,
+      databasePath: databasePath,
+      metricsPath: metricsPath,
+    );
+  }
+}
+
+String _workerPreflightPeer(List<String> interfaces) {
+  for (final candidate in ['sqlite3', 'drift', 'sqlite_async', 'resqlite']) {
+    if (interfaces.contains(candidate)) return candidate;
+  }
+  return interfaces.isEmpty ? 'sqlite3' : interfaces.first;
 }
 
 class _PeerWorkerProcess {

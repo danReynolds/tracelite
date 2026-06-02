@@ -139,13 +139,15 @@ stay on the direct script runner in `auto` mode because prepared snapshots do
 not preserve the native-assets metadata they need. For repeated native-assets
 runs, pass `--runner=worker`: it keeps one child process alive, retargets each
 sample to a fresh trace region, and records startup in `runner.build_elapsed_ns`
-instead of hiding it in repetition timings. Worker artifacts also record the
-filtered `runner.native_assets` binding used for the selected peers, so shim
-path problems are auditable from the artifact instead of local `.dart_tool`
-state. Source-checkout suites reuse one prepared child runner across the
-selected scenario matrix when available, so production suites still write one
-compare artifact per scenario while avoiding repeated runner setup for every
-scenario.
+instead of hiding it in repetition timings. Worker startup also runs a tiny
+preflight trace in that same long-lived process; if the selected peer cannot
+emit shim events, the command fails before any benchmark sample is trusted.
+Worker artifacts record both `runner.preflight` and the filtered
+`runner.native_assets` binding used for the selected peers, so shim path problems
+are auditable from the artifact instead of local `.dart_tool` state.
+Source-checkout suites reuse one prepared child runner across the selected
+scenario matrix when available, so production suites still write one compare
+artifact per scenario while avoiding repeated runner setup for every scenario.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the

@@ -141,6 +141,12 @@ void main() {
     expect(runner['mode'], 'worker');
     expect(runner['requested_mode'], 'worker');
     expect(runner['runtime_libraries'] as List<Object?>, isNotEmpty);
+    final preflight = runner['preflight'] as Map<String, Object?>;
+    expect(preflight['status'], 'ok');
+    expect(preflight['peer'], 'sqlite3');
+    expect(preflight['scenario'], 'narrow-batch-insert');
+    expect(preflight['events'] as int, greaterThan(0));
+    expect(preflight['spans'] as int, greaterThan(0));
     final nativeAssets = runner['native_assets'] as List<Object?>;
     final sqliteNativeAsset = nativeAssets.cast<Map<String, Object?>>().single;
     expect(
