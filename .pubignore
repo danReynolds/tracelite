@@ -1,9 +1,9 @@
 build/
+dart_test.yaml
+doc/*.feedback.md
 libsqlite_traced.dylib
+native/test_producer.c
 pubspec_overrides.yaml
-tool/visualizer_app/
-tool/visualizer_check.dart
-tool/verify_resqlite_source.dart
-tool/src/
-tool/tracelite_dev.dart
+test/
+tool/
 tools/

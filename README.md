@@ -133,10 +133,10 @@ The published dependency graph is core-only: runtime code depends on `ffi` and
 peer adapters so one CLI can run comparable workloads against Dart SQLite
 packages during development and resqlite release-gate validation.
 
-The pub archive excludes the source-checkout peer runner
-(`tool/tracelite_dev.dart` and `tool/src/`). Published users get the
-recorder/runtime library and artifact CLI; repository checkouts get the peer
-benchmark suite.
+The pub archive excludes source-checkout tests and tools (`test/` and `tool/`),
+including the peer runner, visualizer app, release checks, and CI smoke scripts.
+Published users get the recorder/runtime library and artifact CLI; repository
+checkouts get the peer benchmark suite and visualizer workflow.
 
 The long-term package split is core library plus peer-benchmark CLI. Today the
 public recorder APIs are standalone, while the source checkout keeps the
@@ -152,9 +152,11 @@ production runs, policy calibration, no-regression acceptance,
 injected-regression rejection, graph-data export, insight artifacts, and
 clean-clone publish dry-run behavior.
 
-For release hygiene, run `dart run tool/publish_check.dart` from a clean commit.
-It validates a clean git archive, so ignored local overrides used for sibling
-checkout testing do not affect the publish dry-run.
+For release hygiene, run `dart run tool/publish_check.dart` from a clean
+repository checkout. It validates a clean git archive, so ignored local
+overrides used for sibling checkout testing do not affect the publish dry-run.
+The check script itself is a checkout-only tool and is not shipped in the pub
+archive.
 
 For visualizer release hygiene, run
 `dart run bin/tracelite.dart visualizer-check --package=host`. It resolves the

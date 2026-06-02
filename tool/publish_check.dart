@@ -92,8 +92,19 @@ Future<void> _copyTrackedFiles(String root, String targetRoot) async {
 
 List<String> _forbiddenArchiveEntries(String stdoutText) {
   return [
+    if (stdoutText.contains('dart_test.yaml')) 'dart_test.yaml',
+    if (stdoutText.contains('runtime-protocol.feedback.md'))
+      'doc/*.feedback.md',
+    if (stdoutText.contains('test_producer.c')) 'native/test_producer.c',
+    if (stdoutText.contains('package_boundary_test.dart')) 'test/',
     if (stdoutText.contains('tracelite_dev.dart')) 'tool/tracelite_dev.dart',
     if (stdoutText.contains('peer.dart')) 'tool/src/peer.dart',
+    if (stdoutText.contains('native_runtime_smoke.dart'))
+      'tool/native_runtime_smoke.dart',
+    if (stdoutText.contains('platform_core_smoke.dart'))
+      'tool/platform_core_smoke.dart',
+    if (stdoutText.contains('publish_check.dart')) 'tool/publish_check.dart',
+    if (stdoutText.contains('spans.yaml')) 'tool/spans.yaml',
   ];
 }
 

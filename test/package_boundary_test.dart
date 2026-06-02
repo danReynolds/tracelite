@@ -26,17 +26,15 @@ void main() {
     );
   });
 
-  test('publish archive excludes source-checkout peer adapters', () {
+  test('publish archive excludes source-checkout tests and tools', () {
     final pubignoreLines = File('.pubignore')
         .readAsLinesSync()
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty && !line.startsWith('#'))
         .toSet();
 
-    expect(pubignoreLines, contains('tool/src/'));
-    expect(pubignoreLines, contains('tool/tracelite_dev.dart'));
-    expect(pubignoreLines, contains('tool/visualizer_check.dart'));
-    expect(pubignoreLines, contains('tool/verify_resqlite_source.dart'));
+    expect(pubignoreLines, contains('test/'));
+    expect(pubignoreLines, contains('tool/'));
   });
 
   test('published launcher keeps core commands available', () async {
