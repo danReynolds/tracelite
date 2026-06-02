@@ -154,6 +154,11 @@ class _VisualizerHomeState extends State<VisualizerHome> {
                             label: Text('Compare'),
                           ),
                           NavigationRailDestination(
+                            icon: Icon(Icons.fact_check_outlined),
+                            selectedIcon: Icon(Icons.fact_check),
+                            label: Text('Decision'),
+                          ),
+                          NavigationRailDestination(
                             icon: Icon(Icons.inventory_2_outlined),
                             selectedIcon: Icon(Icons.inventory_2),
                             label: Text('Artifacts'),
@@ -168,6 +173,7 @@ class _VisualizerHomeState extends State<VisualizerHome> {
                             OverviewPage(workspace: workspace),
                             TracePage(workspace: workspace),
                             ComparePage(workspace: workspace),
+                            DecisionPage(workspace: workspace),
                             ArtifactsPage(workspace: workspace),
                           ],
                         ),
@@ -339,6 +345,12 @@ class OverviewPage extends StatelessWidget {
                   title: 'Peer Compare',
                   body:
                       'Compare peers by measured elapsed time, scenario time, SQLite work, and trace health.',
+                ),
+                _ToolGuideEntry(
+                  icon: Icons.fact_check,
+                  title: 'Decision Review',
+                  body:
+                      'Audit accepted, rejected, or inconclusive benchmark decisions by gate, metric, and guardrail.',
                 ),
                 _ToolGuideEntry(
                   icon: Icons.inventory_2,
@@ -842,6 +854,425 @@ class _ComparePageState extends State<ComparePage> {
         .map((entry) => '${entry.key}: ${entry.value}')
         .join(', ');
   }
+}
+
+class DecisionPage extends StatefulWidget {
+  const DecisionPage({super.key, required this.workspace});
+
+  final VisualizerWorkspace workspace;
+
+  @override
+  State<DecisionPage> createState() => _DecisionPageState();
+}
+
+class _DecisionPageState extends State<DecisionPage> {
+  int _selectedIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant DecisionPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedIndex >= widget.workspace.decisions.length) {
+      _selectedIndex = math.max(0, widget.workspace.decisions.length - 1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decisions = widget.workspace.decisions;
+    final decision = decisions.isEmpty ? null : decisions[_selectedIndex];
+    final insights = decision == null
+        ? const <BenchmarkInsight>[]
+        : benchmarkArtifactInsights(decision.artifact);
+    final primaryRows = decision == null
+        ? const <Map<String, Object?>>[]
+        : _decisionRows(decision, 'primary');
+    final guardrailRows = decision == null
+        ? const <Map<String, Object?>>[]
+        : _guardrailFindings(decision);
+    final traceIssues = decision == null
+        ? const <Map<String, Object?>>[]
+        : _traceIssues(decision);
+
+    return _PageScaffold(
+      title: 'Decision Review',
+      subtitle: decision == null
+          ? 'Open a tracelite.decision.v1 artifact to audit benchmark gates'
+          : '${decision.verdict} - ${decision.expectation} - ${decision.name}',
+      child: decision == null
+          ? const _EmptyState(
+              icon: Icons.fact_check,
+              title: 'No decision artifact loaded',
+              body: 'Open a decision JSON or a directory containing decisions.',
+            )
+          : ListView(
+              key: const ValueKey('decision-page-scroll'),
+              padding: const EdgeInsets.all(20),
+              children: [
+                if (decisions.length > 1) ...[
+                  _ArtifactPicker(
+                    label: 'Decision artifact',
+                    value: _selectedIndex,
+                    itemCount: decisions.length,
+                    itemLabel: (index) =>
+                        '${decisions[index].verdict} (${decisions[index].name})',
+                    onChanged: (index) {
+                      if (index == null) return;
+                      setState(() => _selectedIndex = index);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _MetricTile(
+                      icon: _decisionIcon(decision.verdict),
+                      label: 'decision',
+                      value: decision.verdict,
+                      detail: decision.generatedAt ?? decision.name,
+                    ),
+                    _MetricTile(
+                      icon: Icons.rule,
+                      label: 'expectation',
+                      value: decision.expectation,
+                      detail: _primaryPolicyDetail(decision),
+                    ),
+                    _MetricTile(
+                      icon: Icons.route,
+                      label: 'scenarios',
+                      value: '${decision.scenarioCount}',
+                      detail: _sourcePairDetail(decision),
+                    ),
+                    _MetricTile(
+                      icon: Icons.fact_check,
+                      label: 'gates passed',
+                      value: _gateSummaryValue(decision),
+                      detail: _gateSummaryDetail(decision),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _Section(
+                  title: 'Decision Insights',
+                  child: _InsightList(insights: insights.take(6).toList()),
+                ),
+                const SizedBox(height: 16),
+                const _Section(
+                  title: 'Decision Tools',
+                  child: _ToolGuide(
+                    entries: [
+                      _ToolGuideEntry(
+                        icon: Icons.check_circle_outline,
+                        title: 'Verdict',
+                        body:
+                            'Accepted means the primary gate passed and trace/guardrail gates did not block it.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.track_changes,
+                        title: 'Primary Gate',
+                        body:
+                            'The experiment metric under review, usually the peer and metric named in the policy.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.shield_outlined,
+                        title: 'Guardrails',
+                        body:
+                            'Secondary metrics that can reject or mark a run inconclusive even when the primary improves.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.health_and_safety,
+                        title: 'Trace Health',
+                        body:
+                            'Missing scenarios, unsupported peers, dropped events, or bad statuses that make timings unsafe to trust.',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Decision Policy',
+                  child: _decisionPolicyTable(decision),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Gate Status',
+                  child: _gateStatusTable(decision),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Primary Comparisons',
+                  child: _decisionComparisonTable(
+                    primaryRows,
+                    emptyMessage: 'No primary comparisons in this decision.',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Guardrail Findings',
+                  child: _decisionComparisonTable(
+                    guardrailRows,
+                    emptyMessage: 'No failing or inconclusive guardrails.',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Trace Health Findings',
+                  child: _traceIssueTable(traceIssues),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _decisionPolicyTable(DecisionDocument decision) {
+    return _SimpleArtifactTable(
+      headers: const ['setting', 'value', 'detail'],
+      rows: [
+        ['expectation', decision.expectation, 'primary gate direction'],
+        [
+          'primary metric',
+          _primaryPolicyDetail(decision),
+          _formatPercentSetting(
+            decision.policy['primary_threshold_percent'],
+            label: 'threshold',
+          ),
+        ],
+        [
+          'max regression',
+          _formatPercentSetting(decision.policy['max_regression_percent']),
+          'guardrail budget',
+        ],
+        [
+          'max CV',
+          _formatPercentSetting(decision.policy['max_cv_percent']),
+          'noise gate',
+        ],
+        [
+          'baseline',
+          decision.baselinePath == null
+              ? '-'
+              : displayNameForPath(decision.baselinePath!),
+          decision.baselinePath ?? '-',
+        ],
+        [
+          'candidate',
+          decision.candidatePath == null
+              ? '-'
+              : displayNameForPath(decision.candidatePath!),
+          decision.candidatePath ?? '-',
+        ],
+      ],
+    );
+  }
+
+  Widget _gateStatusTable(DecisionDocument decision) {
+    return _SimpleArtifactTable(
+      headers: const ['gate', 'status', 'evidence'],
+      rows: [
+        [
+          'trace health',
+          _gateStatus(decision, 'trace_health'),
+          '${_traceIssues(decision).length} issues',
+        ],
+        [
+          'primary',
+          _gateStatus(decision, 'primary'),
+          '${_decisionRows(decision, 'primary').length} comparisons',
+        ],
+        [
+          'guardrails',
+          _gateStatus(decision, 'guardrails'),
+          '${_decisionRows(decision, 'guardrails').length} comparisons',
+        ],
+      ],
+    );
+  }
+
+  Widget _decisionComparisonTable(
+    List<Map<String, Object?>> rows, {
+    required String emptyMessage,
+  }) {
+    if (rows.isEmpty) return Text(emptyMessage);
+    return _SimpleArtifactTable(
+      headers: const [
+        'scenario',
+        'peer',
+        'metric',
+        'baseline',
+        'candidate',
+        'change',
+        'cv',
+        'p',
+        'status',
+        'effect',
+      ],
+      rows: [
+        for (final row in rows.take(80))
+          [
+            _textValue(row['scenario']),
+            _textValue(row['peer']),
+            _textValue(row['metric']),
+            _metricMean(row, 'baseline_mean'),
+            _metricMean(row, 'candidate_mean'),
+            _signedPercent(row['change_percent']),
+            _formatPercentSetting(row['max_cv_percent']),
+            _pValue(row['nonparametric_p_value']),
+            _textValue(row['status']),
+            _textValue(row['gate_effect']),
+          ],
+      ],
+    );
+  }
+
+  Widget _traceIssueTable(List<Map<String, Object?>> rows) {
+    if (rows.isEmpty) return const Text('No trace-health findings.');
+    return _SimpleArtifactTable(
+      headers: const ['scenario', 'peer', 'baseline', 'candidate', 'effect'],
+      rows: [
+        for (final row in rows)
+          [
+            _textValue(row['scenario']),
+            _textValue(row['peer']),
+            _textValue(row['baseline_status']),
+            _textValue(row['candidate_status']),
+            _textValue(row['gate_effect']),
+          ],
+      ],
+    );
+  }
+
+  List<Map<String, Object?>> _guardrailFindings(DecisionDocument decision) {
+    return _decisionRows(
+      decision,
+      'guardrails',
+    ).where((row) => row['gate_effect'] != 'pass').toList();
+  }
+
+  List<Map<String, Object?>> _decisionRows(
+    DecisionDocument decision,
+    String gateName,
+  ) {
+    return _objectListOfMaps(
+      _objectMap(decision.gates[gateName])['comparisons'],
+    );
+  }
+
+  List<Map<String, Object?>> _traceIssues(DecisionDocument decision) {
+    return _objectListOfMaps(
+      _objectMap(decision.gates['trace_health'])['issues'],
+    );
+  }
+
+  String _gateStatus(DecisionDocument decision, String gateName) {
+    return _textValue(_objectMap(decision.gates[gateName])['status']);
+  }
+
+  String _gateSummaryValue(DecisionDocument decision) {
+    final statuses = [
+      _gateStatus(decision, 'trace_health'),
+      _gateStatus(decision, 'primary'),
+      _gateStatus(decision, 'guardrails'),
+    ];
+    final passed = statuses.where((status) => status == 'passed').length;
+    return '$passed/${statuses.length}';
+  }
+
+  String _gateSummaryDetail(DecisionDocument decision) {
+    return [
+      'trace ${_gateStatus(decision, 'trace_health')}',
+      'primary ${_gateStatus(decision, 'primary')}',
+      'guardrails ${_gateStatus(decision, 'guardrails')}',
+    ].join(', ');
+  }
+
+  String _primaryPolicyDetail(DecisionDocument decision) {
+    final peer = _textValue(decision.policy['primary_peer']);
+    final metric = _textValue(decision.policy['primary_metric']);
+    return '$peer $metric'.trim();
+  }
+
+  String _sourcePairDetail(DecisionDocument decision) {
+    final baseline = decision.baselinePath == null
+        ? 'baseline -'
+        : 'base ${displayNameForPath(decision.baselinePath!)}';
+    final candidate = decision.candidatePath == null
+        ? 'candidate -'
+        : 'candidate ${displayNameForPath(decision.candidatePath!)}';
+    return '$baseline -> $candidate';
+  }
+
+  IconData _decisionIcon(String verdict) {
+    return switch (verdict) {
+      'accepted' => Icons.check_circle,
+      'rejected' => Icons.error_outline,
+      _ => Icons.warning_amber,
+    };
+  }
+}
+
+Map<String, Object?> _objectMap(Object? value) {
+  if (value is Map) return Map<String, Object?>.from(value);
+  return const {};
+}
+
+List<Map<String, Object?>> _objectListOfMaps(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map) Map<String, Object?>.from(item),
+  ];
+}
+
+String _textValue(Object? value) {
+  if (value == null) return '-';
+  if (value is num) return _trimNumber(value);
+  final text = value.toString();
+  return text.isEmpty ? '-' : text;
+}
+
+String _metricMean(Map<String, Object?> row, String key) {
+  final value = row[key];
+  if (value is! num) return '-';
+  final metric = row['metric'];
+  final metricName = metric is String ? metric : '';
+  if (metricName.endsWith('_ns')) return formatNs(value.round());
+  if (metricName.endsWith('_bytes')) return '${_trimNumber(value)} B';
+  if (metricName.endsWith('_mb')) return '${_trimNumber(value)} MB';
+  if (metricName.endsWith('_percent')) return '${_trimNumber(value)}%';
+  return _trimNumber(value);
+}
+
+String _formatPercentSetting(Object? value, {String? label}) {
+  if (value is! num) return '-';
+  final formatted = '${_trimNumber(value)}%';
+  return label == null ? formatted : '$label $formatted';
+}
+
+String _signedPercent(Object? value) {
+  if (value is! num) return '-';
+  final number = value.toDouble();
+  if (!number.isFinite) return number.isNegative ? '-inf%' : '+inf%';
+  final prefix = number > 0 ? '+' : '';
+  return '$prefix${_trimNumber(number)}%';
+}
+
+String _pValue(Object? value) {
+  if (value is! num) return '-';
+  final number = value.toDouble();
+  if (!number.isFinite) return '-';
+  if (number < 0.001) return '<0.001';
+  return number.toStringAsFixed(3);
+}
+
+String _trimNumber(num value) {
+  final number = value.toDouble();
+  if (!number.isFinite) return number.isNegative ? '-inf' : 'inf';
+  if (number == number.roundToDouble()) return number.toStringAsFixed(0);
+  final magnitude = number.abs();
+  if (magnitude >= 100) return number.toStringAsFixed(1);
+  if (magnitude >= 10) return number.toStringAsFixed(2);
+  return number.toStringAsFixed(3);
 }
 
 class ArtifactsPage extends StatelessWidget {

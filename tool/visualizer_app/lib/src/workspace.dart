@@ -572,6 +572,12 @@ final class DecisionDocument {
     required this.artifact,
     required this.verdict,
     required this.expectation,
+    required this.policy,
+    required this.gates,
+    required this.scenarioCount,
+    required this.generatedAt,
+    required this.baselinePath,
+    required this.candidatePath,
     required this.summary,
   });
 
@@ -579,11 +585,19 @@ final class DecisionDocument {
   final Map<String, Object?> artifact;
   final String verdict;
   final String expectation;
+  final Map<String, Object?> policy;
+  final Map<String, Object?> gates;
+  final int scenarioCount;
+  final String? generatedAt;
+  final String? baselinePath;
+  final String? candidatePath;
   final Map<String, Object?> summary;
 
   String get name => displayNameForPath(path);
 
   factory DecisionDocument.fromJson(String path, Map<String, Object?> json) {
+    final policy = _map(json['policy']);
+    final gates = _map(json['gates']);
     return DecisionDocument(
       path: path,
       artifact: json,
@@ -592,10 +606,28 @@ final class DecisionDocument {
           _string(json['decision']) ??
           _string(json['status']) ??
           'unknown',
-      expectation: _string(json['expectation']) ?? 'unknown',
+      expectation:
+          _string(json['expectation']) ??
+          _string(policy['expectation']) ??
+          'unknown',
+      policy: policy,
+      gates: gates,
+      scenarioCount:
+          _int(json['scenario_count']) ?? _decisionScenarioCount(gates),
+      generatedAt: _string(json['generated_at']),
+      baselinePath: _string(json['baseline_path']),
+      candidatePath: _string(json['candidate_path']),
       summary: _map(json['summary']),
     );
   }
+}
+
+int _decisionScenarioCount(Map<String, Object?> gates) {
+  final primary = _map(gates['primary']);
+  return {
+    for (final comparison in _listOfMaps(primary['comparisons']))
+      if (comparison['scenario'] is String) comparison['scenario']! as String,
+  }.length;
 }
 
 final class WorkloadSummaryDocument {

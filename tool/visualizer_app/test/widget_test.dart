@@ -24,56 +24,83 @@ void main() {
     expect(find.text('Open'), findsOneWidget);
   });
 
-  testWidgets('renders loaded trace and compare views at desktop size', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 920);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'renders loaded trace, compare, and decision views at desktop size',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 920);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final temp = Directory.systemTemp.createTempSync('tracelite-viz-ui-');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    _writeDemoWorkspace(temp);
+      final temp = Directory.systemTemp.createTempSync('tracelite-viz-ui-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      _writeDemoWorkspace(temp);
 
-    await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Workspace'), findsOneWidget);
-    expect(find.text('Workspace Insights'), findsOneWidget);
-    expect(find.text('Loaded Artifacts'), findsOneWidget);
-    expect(find.text('Tools'), findsOneWidget);
-    expect(find.text('Raw Trace'), findsOneWidget);
-    expect(find.text('Peer Compare'), findsOneWidget);
-    expect(find.textContaining('point-select'), findsWidgets);
+      expect(find.text('Workspace'), findsOneWidget);
+      expect(find.text('Workspace Insights'), findsOneWidget);
+      expect(find.text('Loaded Artifacts'), findsOneWidget);
+      expect(find.text('Tools'), findsOneWidget);
+      expect(find.text('Raw Trace'), findsOneWidget);
+      expect(find.text('Peer Compare'), findsOneWidget);
+      expect(find.text('Decision Review'), findsOneWidget);
+      expect(find.textContaining('point-select'), findsWidgets);
 
-    await tester.tap(find.text('Trace'));
-    await tester.pumpAndSettle();
-    expect(find.text('Trace Inspector'), findsOneWidget);
-    expect(find.text('Trace Tools'), findsOneWidget);
-    expect(find.text('Minimap'), findsOneWidget);
-    expect(find.text('Zoom'), findsWidgets);
-    expect(find.text('Pan'), findsOneWidget);
-    expect(find.text('Preview'), findsOneWidget);
-    expect(find.text('Keyboard'), findsOneWidget);
-    expect(find.text('Timeline'), findsOneWidget);
-    expect(find.byType(Slider), findsOneWidget);
-    expect(find.text('click select'), findsOneWidget);
-    expect(find.byIcon(Icons.center_focus_strong), findsOneWidget);
-    expect(find.text('No span selected'), findsOneWidget);
+      await tester.tap(find.text('Trace'));
+      await tester.pumpAndSettle();
+      expect(find.text('Trace Inspector'), findsOneWidget);
+      expect(find.text('Trace Tools'), findsOneWidget);
+      expect(find.text('Minimap'), findsOneWidget);
+      expect(find.text('Zoom'), findsWidgets);
+      expect(find.text('Pan'), findsOneWidget);
+      expect(find.text('Preview'), findsOneWidget);
+      expect(find.text('Keyboard'), findsOneWidget);
+      expect(find.text('Timeline'), findsOneWidget);
+      expect(find.byType(Slider), findsOneWidget);
+      expect(find.text('click select'), findsOneWidget);
+      expect(find.byIcon(Icons.center_focus_strong), findsOneWidget);
+      expect(find.text('No span selected'), findsOneWidget);
 
-    await tester.tap(find.text('Compare'));
-    await tester.pumpAndSettle();
-    expect(find.text('Peer Comparison'), findsOneWidget);
-    expect(find.text('Compare Insights'), findsOneWidget);
-    expect(find.text('Compare Tools'), findsOneWidget);
-    expect(find.text('Measured Mean'), findsOneWidget);
-    expect(find.text('Peer Metrics'), findsOneWidget);
-    expect(find.text('SQL Query Shapes'), findsOneWidget);
-    expect(find.text('SQL Fingerprints'), findsOneWidget);
-    expect(find.textContaining('INSERT INTO TRACELITE_ITEMS'), findsOneWidget);
-    expect(find.text('sqlite3'), findsWidgets);
-  });
+      await tester.tap(find.text('Compare'));
+      await tester.pumpAndSettle();
+      expect(find.text('Peer Comparison'), findsOneWidget);
+      expect(find.text('Compare Insights'), findsOneWidget);
+      expect(find.text('Compare Tools'), findsOneWidget);
+      expect(find.text('Measured Mean'), findsOneWidget);
+      expect(find.text('Peer Metrics'), findsOneWidget);
+      expect(find.text('SQL Query Shapes'), findsOneWidget);
+      expect(find.text('SQL Fingerprints'), findsOneWidget);
+      expect(
+        find.textContaining('INSERT INTO TRACELITE_ITEMS'),
+        findsOneWidget,
+      );
+      expect(find.text('sqlite3'), findsWidgets);
+
+      await tester.tap(find.text('Decision'));
+      await tester.pumpAndSettle();
+      expect(find.text('Decision Review'), findsOneWidget);
+      expect(find.text('Decision Insights'), findsOneWidget);
+      expect(find.text('Decision Tools'), findsOneWidget);
+      expect(find.text('accepted'), findsWidgets);
+      expect(find.text('improvement'), findsWidgets);
+      expect(find.text('Primary Gate'), findsOneWidget);
+      expect(find.text('Guardrails'), findsOneWidget);
+
+      await tester.drag(
+        find.byKey(const ValueKey('decision-page-scroll')),
+        const Offset(0, -800),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Decision Policy'), findsOneWidget);
+      expect(find.text('Gate Status'), findsOneWidget);
+      expect(find.text('Primary Comparisons'), findsOneWidget);
+      expect(find.text('Guardrail Findings'), findsOneWidget);
+      expect(find.text('elapsed_ns'), findsWidgets);
+      expect(find.text('-6%'), findsWidgets);
+    },
+  );
 
   testWidgets(
     'renders dense trace with searchable linked span index',
@@ -331,6 +358,73 @@ void _writeDemoWorkspace(Directory dir) {
           'capabilities': ['sql'],
         },
       ],
+    }),
+  );
+  File('${dir.path}/decision.json').writeAsStringSync(
+    jsonEncode({
+      'schema': 'tracelite.decision.v1',
+      'generated_at': '2026-05-12T00:05:00Z',
+      'decision': 'accepted',
+      'baseline_path': 'baseline/manifest.json',
+      'candidate_path': 'candidate/manifest.json',
+      'scenario_count': 1,
+      'policy': {
+        'expectation': 'improvement',
+        'primary_peer': 'sqlite3',
+        'primary_metric': 'elapsed_ns',
+        'primary_threshold_percent': 5.0,
+        'max_regression_percent': 3.0,
+        'max_cv_percent': 15.0,
+      },
+      'gates': {
+        'trace_health': {'status': 'passed', 'issues': []},
+        'primary': {
+          'status': 'passed',
+          'comparisons': [
+            {
+              'role': 'primary',
+              'scenario': 'point-select',
+              'peer': 'sqlite3',
+              'metric': 'elapsed_ns',
+              'status': 'improved',
+              'gate_effect': 'pass',
+              'baseline_status': 'ok',
+              'candidate_status': 'ok',
+              'baseline_samples': 5,
+              'candidate_samples': 5,
+              'baseline_mean': 1000000.0,
+              'candidate_mean': 940000.0,
+              'delta': -60000.0,
+              'change_percent': -6.0,
+              'max_cv_percent': 2.0,
+              'nonparametric_p_value': 0.031,
+            },
+          ],
+        },
+        'guardrails': {
+          'status': 'passed',
+          'comparisons': [
+            {
+              'role': 'guardrail',
+              'scenario': 'point-select',
+              'peer': 'sqlite3',
+              'metric': 'sqlite3_step_total_ns',
+              'status': 'similar',
+              'gate_effect': 'pass',
+              'baseline_status': 'ok',
+              'candidate_status': 'ok',
+              'baseline_samples': 5,
+              'candidate_samples': 5,
+              'baseline_mean': 900000.0,
+              'candidate_mean': 880000.0,
+              'delta': -20000.0,
+              'change_percent': -2.2,
+              'max_cv_percent': 2.8,
+              'nonparametric_p_value': 0.250,
+            },
+          ],
+        },
+      },
     }),
   );
 }
