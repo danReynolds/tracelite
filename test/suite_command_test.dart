@@ -310,7 +310,8 @@ void main() {
     expect(log, contains('suite-history timeout'));
   }, timeout: const Timeout(Duration(minutes: 2)));
 
-  test('suite-history forwards --scenarios into each suite run', () async {
+  test('suite-history forwards scenario and repetition floor into suite runs',
+      () async {
     final tempDir = await Directory.systemTemp.createTemp(
       'tracelite-suite-history-scenario-filter-test-',
     );
@@ -332,7 +333,7 @@ void main() {
         '--runs=1',
         '--metrics=elapsed_ns',
         '--policy-peers=sqlite3',
-        '--min-repetitions=1',
+        '--min-repetitions=2',
         '--target-rse-percent=1000',
         '--out-dir=${tempDir.path}',
       ],
@@ -361,6 +362,10 @@ void main() {
     expect(
       suiteRuns.single as Map<String, Object?>,
       containsPair('scenario', 'narrow-batch-insert'),
+    );
+    expect(
+      suiteRuns.single as Map<String, Object?>,
+      containsPair('repetitions', 2),
     );
   }, timeout: const Timeout(Duration(minutes: 3)));
 }

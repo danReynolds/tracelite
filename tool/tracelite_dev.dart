@@ -691,7 +691,11 @@ Future<void> _suite(List<String> args) async {
   }
   late final List<_SuiteScenario> scenarios;
   try {
-    scenarios = _selectedSuiteScenarios(profile, options['scenarios']);
+    scenarios = _selectedSuiteScenarios(
+      profile,
+      options['scenarios'],
+      minRepetitions: _positiveIntOptionOrNull(options, 'min-repetitions'),
+    );
   } on ArgumentError catch (error) {
     stderr.writeln(error.message);
     exit(64);
@@ -833,12 +837,13 @@ Future<void> _suiteHistory(List<String> args) async {
   );
   final minHistoryRuns =
       _positiveIntOptionOrNull(options, 'min-history-runs') ?? runCount;
+  final minRepetitions = _positiveIntOption(options, 'min-repetitions', 5);
   final calibrationOptions = BenchmarkPolicyCalibrationOptions(
     metrics: metrics,
     scenarios: calibrationScenarios,
     peers: calibrationPeers,
     minHistoryRuns: minHistoryRuns,
-    minRepetitions: _positiveIntOption(options, 'min-repetitions', 5),
+    minRepetitions: minRepetitions,
     maxRepetitions: _positiveIntOption(options, 'max-repetitions', 30),
     targetRelativeStandardErrorPercent: _positiveDoubleOption(
       options,
@@ -923,6 +928,7 @@ Future<void> _suiteHistory(List<String> args) async {
         '--runner=$runnerMode',
         if (options['scenarios'] != null)
           '--scenarios=${scenarios.map((scenario) => scenario.name).join(',')}',
+        '--min-repetitions=$minRepetitions',
         '--out-dir=${runDir.path}',
       ],
       workingDirectory: Directory.current.path,
@@ -2915,6 +2921,15 @@ class _SuiteScenario {
   final String name;
   final int rows;
   final int repetitions;
+
+  _SuiteScenario withMinRepetitions(int minimum) {
+    if (repetitions >= minimum) return this;
+    return _SuiteScenario(
+      name: name,
+      rows: rows,
+      repetitions: minimum,
+    );
+  }
 }
 
 _SuiteProfile _suiteProfile(String profileName) {
@@ -3067,11 +3082,18 @@ _SuiteProfile _suiteProfile(String profileName) {
 }
 
 List<_SuiteScenario> _selectedSuiteScenarios(
-  _SuiteProfile profile,
-  String? scenarioOption,
-) {
+    _SuiteProfile profile, String? scenarioOption,
+    {int? minRepetitions}) {
   final selectedNames = _csvOption(scenarioOption);
-  if (selectedNames.isEmpty) return profile.scenarios;
+  List<_SuiteScenario> applyRepetitionFloor(List<_SuiteScenario> scenarios) {
+    final minimum = minRepetitions;
+    if (minimum == null) return scenarios;
+    return [
+      for (final scenario in scenarios) scenario.withMinRepetitions(minimum),
+    ];
+  }
+
+  if (selectedNames.isEmpty) return applyRepetitionFloor(profile.scenarios);
 
   final scenariosByName = {
     for (final scenario in profile.scenarios) scenario.name: scenario,
@@ -3085,9 +3107,9 @@ List<_SuiteScenario> _selectedSuiteScenarios(
     );
   }
 
-  return [
+  return applyRepetitionFloor([
     for (final scenarioName in selectedNames) scenariosByName[scenarioName]!,
-  ];
+  ]);
 }
 
 class _PeerRunMetrics {
@@ -3249,6 +3271,7 @@ Never _usage({int exitCode = 64}) {
       '[--profile=ci|experiment|production] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
+      '[--min-repetitions=5] '
       '[--runner=auto|script|app-jit] '
       '[--require-clean-source=true] [--out-dir=build/tracelite-suite]');
   output.writeln('  dart run bin/tracelite.dart suite-history '
@@ -3257,6 +3280,7 @@ Never _usage({int exitCode = 64}) {
       '[--scenarios=narrow-batch-insert,...] '
       '[--runner=auto|script|app-jit] '
       '[--metrics=elapsed_ns,...] [--target-rse-percent=2.5] '
+      '[--min-repetitions=5] [--max-repetitions=30] '
       '[--within-run-noise-percentile=0.75] '
       '[--policy-peers=resqlite] [--policy-scenarios=feed-paging,...] '
       '[--threshold-ceiling-percent=50] '
