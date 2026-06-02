@@ -1174,8 +1174,54 @@ void _ensurePeerShimAvailable() {
     stderr.writeln(shimBuildCommand);
     exit(66);
   }
+  _ensureSqliteNativeAssetUsesShim(shim.absolute.path);
   final resolverShim = File(native_artifacts.sqliteShimLibraryName());
   resolverShim.writeAsBytesSync(shim.readAsBytesSync());
+}
+
+void _ensureSqliteNativeAssetUsesShim(String absoluteShimPath) {
+  final nativeAssets = File('.dart_tool/native_assets.yaml');
+  if (!nativeAssets.existsSync()) {
+    stderr.writeln(
+      'missing ${nativeAssets.path}; run `dart pub get` before peer suites.',
+    );
+    exit(66);
+  }
+
+  final raw = nativeAssets.readAsStringSync();
+  final jsonStart = raw.indexOf('{');
+  if (jsonStart < 0) {
+    stderr.writeln('malformed ${nativeAssets.path}; expected JSON payload.');
+    exit(66);
+  }
+
+  final prefix = raw.substring(0, jsonStart);
+  final decoded = jsonDecode(raw.substring(jsonStart)) as Map<String, Object?>;
+  final allAssets = decoded['native-assets'];
+  var patched = false;
+  if (allAssets is Map) {
+    for (final platformAssets in allAssets.values) {
+      if (platformAssets is! Map) continue;
+      final sqliteAsset =
+          platformAssets['package:sqlite3/src/ffi/libsqlite3.g.dart'];
+      if (sqliteAsset is! List || sqliteAsset.length < 2) continue;
+      sqliteAsset[0] = 'absolute';
+      sqliteAsset[1] = absoluteShimPath;
+      patched = true;
+    }
+  }
+
+  if (!patched) {
+    stderr.writeln(
+      'missing sqlite3 native asset entry in ${nativeAssets.path}; '
+      'run `dart pub get` after enabling sqlite3 hook configuration.',
+    );
+    exit(66);
+  }
+
+  nativeAssets.writeAsStringSync(
+    '$prefix${const JsonEncoder.withIndent('  ').convert(decoded)}\n',
+  );
 }
 
 String _runnerModeOption(String? value) {

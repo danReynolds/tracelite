@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
+import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 
 void main() {
   test('compare validates sqlite3, drift, sqlite_async, and resqlite traces',
@@ -43,5 +44,11 @@ void main() {
     }
     expect(output, isNot(contains('no trace')));
     expect(output, isNot(contains('Trace gaps')));
+
+    final nativeAssets =
+        File('.dart_tool/native_assets.yaml').readAsStringSync();
+    expect(nativeAssets, contains('"absolute"'));
+    expect(nativeAssets,
+        contains(File(native_artifacts.sqliteShimLibraryPath()).absolute.path));
   }, timeout: const Timeout(Duration(minutes: 2)));
 }
