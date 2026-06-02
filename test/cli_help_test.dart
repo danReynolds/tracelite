@@ -16,8 +16,9 @@ void main() {
       reason: 'help failed.\nstdout:\n${result.stdout}\n'
           'stderr:\n${result.stderr}',
     );
-    expect(result.stderr.toString(), contains('dart run bin/tracelite.dart'));
-    expect(result.stderr.toString(), contains('visualizer-check'));
+    expect(result.stdout.toString(), contains('dart run bin/tracelite.dart'));
+    expect(result.stdout.toString(), contains('visualizer-check'));
+    expect(result.stderr.toString(), isEmpty);
   });
 
   test('source-checkout subcommand help exits before command validation',
@@ -34,8 +35,9 @@ void main() {
       reason: 'doctor --help failed.\nstdout:\n${result.stdout}\n'
           'stderr:\n${result.stderr}',
     );
-    expect(result.stderr.toString(), contains('doctor'));
+    expect(result.stdout.toString(), contains('doctor'));
     expect(result.stdout.toString(), isNot(contains('# tracelite doctor')));
+    expect(result.stderr.toString(), isEmpty);
   });
 
   test('forced core subcommand help exits before artifact loading', () async {
@@ -55,7 +57,7 @@ void main() {
       reason: 'core report --help failed.\nstdout:\n${result.stdout}\n'
           'stderr:\n${result.stderr}',
     );
-    expect(result.stderr.toString(), contains('report <region>'));
+    expect(result.stdout.toString(), contains('report <region>'));
     expect(result.stderr.toString(), isNot(contains('No such file')));
   });
 }

@@ -1009,30 +1009,31 @@ void _writeJson(String path, Map<String, Object?> artifact) {
 }
 
 Never printTraceliteCoreUsage({int exitCode = 64}) {
-  stderr.writeln('Usage:');
-  stderr.writeln('  dart run bin/tracelite.dart report <region>');
-  stderr.writeln('  dart run bin/tracelite.dart workload-summary <region>');
-  stderr.writeln('  dart run bin/tracelite.dart create-region --out=path');
-  stderr.writeln(
+  final output = exitCode == 0 ? stdout : stderr;
+  output.writeln('Usage:');
+  output.writeln('  dart run bin/tracelite.dart report <region>');
+  output.writeln('  dart run bin/tracelite.dart workload-summary <region>');
+  output.writeln('  dart run bin/tracelite.dart create-region --out=path');
+  output.writeln(
     '  dart run bin/tracelite.dart decision --baseline=base.json '
     '--candidate=change.json',
   );
-  stderr.writeln(
+  output.writeln(
     '  dart run bin/tracelite.dart diff --baseline=base.json '
     '--candidate=change.json',
   );
-  stderr.writeln('  dart run bin/tracelite.dart explain <artifact-or-dir>');
-  stderr
+  output.writeln('  dart run bin/tracelite.dart explain <artifact-or-dir>');
+  output
       .writeln('  dart run bin/tracelite.dart calibrate-policy --history=dir');
-  stderr.writeln(
+  output.writeln(
     '  dart run bin/tracelite.dart export-graph-data --out=dir '
     '[--compare=compare.json] [--suite=manifest.json] '
     '[--suite-history=history.json] [--decision=decision.json] '
     '[--workload-summary=summary.json]',
   );
-  stderr.writeln('  dart run bin/tracelite.dart validate-graph-data <dir>');
-  stderr.writeln('');
-  stderr.writeln(
+  output.writeln('  dart run bin/tracelite.dart validate-graph-data <dir>');
+  output.writeln('');
+  output.writeln(
     'Source-checkout peer commands: compare, suite, suite-history.',
   );
   exit(exitCode);

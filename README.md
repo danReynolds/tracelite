@@ -155,8 +155,9 @@ clean-clone publish dry-run behavior.
 For release hygiene, run `dart run tool/publish_check.dart` from a clean
 repository checkout. It validates a clean git archive, so ignored local
 overrides used for sibling checkout testing do not affect the publish dry-run.
-The check script itself is a checkout-only tool and is not shipped in the pub
-archive.
+It also runs the core CLI from an archive-shaped tree after source-checkout
+tools are removed. The check script itself is a checkout-only tool and is not
+shipped in the pub archive.
 
 For visualizer release hygiene, run
 `dart run bin/tracelite.dart visualizer-check --package=host`. It resolves the

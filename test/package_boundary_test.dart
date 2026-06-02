@@ -35,6 +35,8 @@ void main() {
 
     expect(pubignoreLines, contains('test/'));
     expect(pubignoreLines, contains('tool/'));
+    expect(pubignoreLines, contains('doc/*.feedback.md'));
+    expect(pubignoreLines, contains('native/test_producer.c'));
   });
 
   test('published launcher keeps core commands available', () async {

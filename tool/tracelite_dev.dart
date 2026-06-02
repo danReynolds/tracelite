@@ -2565,24 +2565,25 @@ class _IntStats {
 }
 
 Never _usage({int exitCode = 64}) {
-  stderr.writeln('usage:');
-  stderr.writeln('  dart run bin/tracelite.dart doctor '
+  final output = exitCode == 0 ? stdout : stderr;
+  output.writeln('usage:');
+  output.writeln('  dart run bin/tracelite.dart doctor '
       '[--root=/path/to/tracelite] [--strict=true] [--json=doctor.json]');
-  stderr.writeln('  dart run bin/tracelite.dart report <region-path>');
-  stderr.writeln('  dart run bin/tracelite.dart workload-summary <region-path> '
+  output.writeln('  dart run bin/tracelite.dart report <region-path>');
+  output.writeln('  dart run bin/tracelite.dart workload-summary <region-path> '
       '[--out-json=summary.json]');
-  stderr.writeln('  dart run bin/tracelite.dart compare '
+  output.writeln('  dart run bin/tracelite.dart compare '
       '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
       '[--repetitions=5] [--runner=auto|script|app-jit] '
       '[--require-clean-source=true] [--out-json=compare.json]');
-  stderr.writeln('  dart run bin/tracelite.dart suite '
+  output.writeln('  dart run bin/tracelite.dart suite '
       '[--profile=ci|experiment|production] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
       '[--runner=auto|script|app-jit] '
       '[--require-clean-source=true] [--out-dir=build/tracelite-suite]');
-  stderr.writeln('  dart run bin/tracelite.dart suite-history '
+  output.writeln('  dart run bin/tracelite.dart suite-history '
       '[--profile=ci|experiment|production] [--runs=5] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
@@ -2594,18 +2595,18 @@ Never _usage({int exitCode = 64}) {
       '[--max-outlier-percent=10] [--max-run-outlier-percent=20] '
       '[--require-clean-source=true] '
       '[--out-dir=build/tracelite-production-history]');
-  stderr.writeln('  dart run bin/tracelite.dart diff '
+  output.writeln('  dart run bin/tracelite.dart diff '
       '--baseline=base.json --candidate=change.json '
       '[--metric=elapsed_ns] [--policy=policy-calibration.json] '
       '[--max-cv-percent=15] [--alpha=0.05]');
-  stderr.writeln('  dart run bin/tracelite.dart decision '
+  output.writeln('  dart run bin/tracelite.dart decision '
       '--baseline=base.json --candidate=change.json '
       '[--expect=improvement|no_regression] '
       '[--primary-peer=resqlite] [--primary-metric=elapsed_ns] '
       '[--policy=policy-calibration.json] [--out-json=decision.json]');
-  stderr.writeln('  dart run bin/tracelite.dart explain '
+  output.writeln('  dart run bin/tracelite.dart explain '
       '<artifact-or-dir> [--out-json=insights.json]');
-  stderr.writeln('  dart run bin/tracelite.dart calibrate-policy '
+  output.writeln('  dart run bin/tracelite.dart calibrate-policy '
       '--history=manifest-or-directory '
       '[--metrics=elapsed_ns,measured_elapsed_ns] '
       '[--peers=resqlite] [--scenarios=feed-paging,...] [--strict=true] '
@@ -2613,29 +2614,29 @@ Never _usage({int exitCode = 64}) {
       '[--threshold-ceiling-percent=50] '
       '[--max-outlier-percent=10] [--max-run-outlier-percent=20] '
       '[--out-json=policy-calibration.json]');
-  stderr.writeln('  dart run bin/tracelite.dart export-graph-data '
+  output.writeln('  dart run bin/tracelite.dart export-graph-data '
       '--out=graph-data '
       '[--suite=manifest.json] [--suite-history=history.json] '
       '[--compare=compare.json] '
       '[--decision=decision.json] '
       '[--workload-summary=profile-summary.json] [--run-id=id]');
-  stderr.writeln(
+  output.writeln(
     '  dart run bin/tracelite.dart validate-graph-data graph-data',
   );
-  stderr.writeln(
+  output.writeln(
     '  dart run bin/tracelite.dart visualize [--release|--profile] '
     '<trace-or-artifact-path>',
   );
-  stderr.writeln('  dart run bin/tracelite.dart visualizer-check '
+  output.writeln('  dart run bin/tracelite.dart visualizer-check '
       '[--flutter=/path/to/flutter] [--build=none|host] '
       '[--package=none|host] [--out-dir=build/visualizer-release] '
       '[--require-clean-source=true] '
       '[--skip-heavy-visualizer-tests=true] '
       '[--skip-native-visualizer-tests=true]');
-  stderr.writeln('  dart run bin/tracelite.dart calibrate '
+  output.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] '
       '[--require-clean-source=true] [--out-json=calibration.json]');
-  stderr.writeln('  dart run bin/tracelite.dart create-region '
+  output.writeln('  dart run bin/tracelite.dart create-region '
       '--out=trace.tlt-region [--ring-data-words=1048576]');
   exit(exitCode);
 }

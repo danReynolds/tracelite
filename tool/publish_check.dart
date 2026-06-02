@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 Future<void> main(List<String> args) async {
   final allowDirty = args.contains('--allow-dirty');
@@ -37,7 +39,14 @@ Future<void> main(List<String> args) async {
         return;
       }
     }
-    exitCode = result.exitCode;
+    if (result.exitCode != 0) {
+      exitCode = result.exitCode;
+      return;
+    }
+
+    await _applyPubIgnore(temp.path);
+    final smokeExitCode = await _runPublishedCoreSmoke(temp.path);
+    exitCode = smokeExitCode;
   } finally {
     await temp.delete(recursive: true);
   }
@@ -90,6 +99,193 @@ Future<void> _copyTrackedFiles(String root, String targetRoot) async {
   }
 }
 
+Future<void> _applyPubIgnore(String root) async {
+  final pubignore = File(_join(root, '.pubignore'));
+  if (!pubignore.existsSync()) return;
+  final lines = pubignore
+      .readAsLinesSync()
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty && !line.startsWith('#'));
+  for (final pattern in lines) {
+    if (pattern.endsWith('/')) {
+      await _deleteIfExists(
+        _join(root, pattern.substring(0, pattern.length - 1)),
+      );
+    } else if (pattern.contains('*')) {
+      await _deleteGlob(root, pattern);
+    } else {
+      await _deleteIfExists(_join(root, pattern));
+    }
+  }
+}
+
+Future<void> _deleteGlob(String root, String pattern) async {
+  final slash = pattern.lastIndexOf('/');
+  final directoryPath =
+      slash < 0 ? root : _join(root, pattern.substring(0, slash));
+  final glob = slash < 0 ? pattern : pattern.substring(slash + 1);
+  final star = glob.indexOf('*');
+  if (star < 0) {
+    await _deleteIfExists(_join(root, pattern));
+    return;
+  }
+  final prefix = glob.substring(0, star);
+  final suffix = glob.substring(star + 1);
+  final directory = Directory(directoryPath);
+  if (!directory.existsSync()) return;
+  await for (final entity in directory.list()) {
+    final name = entity.uri.pathSegments.last;
+    if (name.startsWith(prefix) && name.endsWith(suffix)) {
+      await _deleteEntity(entity);
+    }
+  }
+}
+
+Future<void> _deleteIfExists(String path) async {
+  final file = File(path);
+  if (file.existsSync()) {
+    await file.delete();
+    return;
+  }
+  final directory = Directory(path);
+  if (directory.existsSync()) {
+    await directory.delete(recursive: true);
+  }
+}
+
+Future<void> _deleteEntity(FileSystemEntity entity) async {
+  if (entity is Directory) {
+    await entity.delete(recursive: true);
+  } else {
+    await entity.delete();
+  }
+}
+
+Future<int> _runPublishedCoreSmoke(String root) async {
+  stdout.writeln('Running published core CLI smoke in archive-shaped tree');
+  final get = await _runStreaming(
+    Platform.resolvedExecutable,
+    const ['pub', 'get'],
+    workingDirectory: root,
+  );
+  if (!_expectExit(
+    get,
+    expectedExitCode: 0,
+    label: 'dart pub get',
+  )) {
+    return 65;
+  }
+
+  final artifactDir = Directory(_join(root, 'build/publish-smoke'));
+  await artifactDir.create(recursive: true);
+  final regionPath = _join(artifactDir.path, 'core.tlt-region');
+  final baselinePath = _join(artifactDir.path, 'baseline.json');
+  final candidatePath = _join(artifactDir.path, 'candidate.json');
+  File(baselinePath).writeAsStringSync(
+    jsonEncode(_compareArtifact([1000000, 1010000, 1020000])),
+  );
+  File(candidatePath).writeAsStringSync(
+    jsonEncode(_compareArtifact([900000, 910000, 920000])),
+  );
+
+  final checks = [
+    _CoreSmokeCheck(
+      label: 'help',
+      args: const ['bin/tracelite.dart', 'help'],
+      stdoutContains: 'tracelite',
+    ),
+    _CoreSmokeCheck(
+      label: 'create-region',
+      args: [
+        'bin/tracelite.dart',
+        'create-region',
+        '--out=$regionPath',
+        '--ring-data-words=1024',
+      ],
+      stdoutContains: 'Created tracelite region',
+    ),
+    _CoreSmokeCheck(
+      label: 'report',
+      args: ['bin/tracelite.dart', 'report', regionPath],
+      stdoutContains: '# tracelite report',
+    ),
+    _CoreSmokeCheck(
+      label: 'diff',
+      args: [
+        'bin/tracelite.dart',
+        'diff',
+        '--baseline=$baselinePath',
+        '--candidate=$candidatePath',
+        '--max-cv-percent=1000',
+      ],
+      stdoutContains: '# tracelite diff',
+    ),
+    _CoreSmokeCheck(
+      label: 'explain',
+      args: ['bin/tracelite.dart', 'explain', baselinePath],
+      stdoutContains: '# tracelite insights',
+    ),
+    _CoreSmokeCheck(
+      label: 'peer command boundary',
+      args: const [
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=narrow-batch-insert',
+        '--interfaces=sqlite3',
+      ],
+      expectedExitCode: 64,
+      stderrContains: 'requires a tracelite source checkout',
+    ),
+  ];
+
+  for (final check in checks) {
+    final result = await _runStreaming(
+      Platform.resolvedExecutable,
+      check.args,
+      workingDirectory: root,
+    );
+    if (!_expectExit(
+      result,
+      expectedExitCode: check.expectedExitCode,
+      label: check.label,
+      stdoutContains: check.stdoutContains,
+      stderrContains: check.stderrContains,
+    )) {
+      return 65;
+    }
+  }
+  return 0;
+}
+
+bool _expectExit(
+  _RunResult result, {
+  required int expectedExitCode,
+  required String label,
+  String? stdoutContains,
+  String? stderrContains,
+}) {
+  final stdoutOk =
+      stdoutContains == null || result.stdout.contains(stdoutContains);
+  final stderrOk =
+      stderrContains == null || result.stderr.contains(stderrContains);
+  if (result.exitCode == expectedExitCode && stdoutOk && stderrOk) {
+    return true;
+  }
+
+  stderr.writeln('Publish archive core smoke failed: $label');
+  stderr.writeln('expected exit: $expectedExitCode');
+  stderr.writeln('actual exit: ${result.exitCode}');
+  if (stdoutContains != null) {
+    stderr.writeln('expected stdout to contain: $stdoutContains');
+  }
+  if (stderrContains != null) {
+    stderr.writeln('expected stderr to contain: $stderrContains');
+  }
+  stderr.writeln('stdout:\n${result.stdout}');
+  stderr.writeln('stderr:\n${result.stderr}');
+  return false;
+}
+
 List<String> _forbiddenArchiveEntries(String stdoutText) {
   return [
     if (stdoutText.contains('dart_test.yaml')) 'dart_test.yaml',
@@ -119,13 +315,15 @@ Future<_RunResult> _runStreaming(
     workingDirectory: workingDirectory,
   );
   final stdoutBuffer = StringBuffer();
+  final stderrBuffer = StringBuffer();
   await Future.wait([
     _tee(process.stdout, stdout, stdoutBuffer),
-    _tee(process.stderr, stderr),
+    _tee(process.stderr, stderr, stderrBuffer),
   ]);
   return _RunResult(
     exitCode: await process.exitCode,
     stdout: stdoutBuffer.toString(),
+    stderr: stderrBuffer.toString(),
   );
 }
 
@@ -151,8 +349,70 @@ final class _RunResult {
   const _RunResult({
     required this.exitCode,
     required this.stdout,
+    required this.stderr,
   });
 
   final int exitCode;
   final String stdout;
+  final String stderr;
+}
+
+final class _CoreSmokeCheck {
+  const _CoreSmokeCheck({
+    required this.label,
+    required this.args,
+    this.expectedExitCode = 0,
+    this.stdoutContains,
+    this.stderrContains,
+  });
+
+  final String label;
+  final List<String> args;
+  final int expectedExitCode;
+  final String? stdoutContains;
+  final String? stderrContains;
+}
+
+Map<String, Object?> _compareArtifact(List<int> elapsedNs) {
+  return {
+    'schema': 'tracelite.compare.v1',
+    'peers': [
+      {
+        'peer': 'sqlite3',
+        'summary': {
+          'elapsed_ns': _stats(elapsedNs),
+        },
+        'samples': [
+          for (var index = 0; index < elapsedNs.length; index++)
+            {
+              'repetition': index + 1,
+              'status': 'ok',
+              'elapsed_ns': elapsedNs[index],
+            },
+        ],
+      },
+    ],
+  };
+}
+
+Map<String, Object?> _stats(List<int> values) {
+  final sorted = values.toList()..sort();
+  final total = sorted.fold<int>(0, (sum, value) => sum + value);
+  final mean = total / sorted.length;
+  final variance = sorted.fold<double>(
+        0,
+        (sum, value) => sum + (value - mean) * (value - mean),
+      ) /
+      sorted.length;
+  return {
+    'count': sorted.length,
+    'total': total,
+    'min': sorted.first,
+    'max': sorted.last,
+    'mean': mean,
+    'median': sorted[sorted.length ~/ 2],
+    'p90': sorted.last,
+    'p99': sorted.last,
+    'stddev': math.sqrt(variance),
+  };
 }
