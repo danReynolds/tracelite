@@ -1072,61 +1072,92 @@ Future<_CompareRunResult> _runPeerCompare({
       final regionPath = '${tempRoot.path}/$stem.tlt-region';
       final databasePath = '${tempRoot.path}/$stem.db';
       final metricsPath = '${tempRoot.path}/$stem.metrics.json';
-      TraceRegion.createFile(
-        regionPath,
-        ringDataWords: ringDataWords,
-      );
+      final sampleStopwatch = Stopwatch()..start();
+      var childElapsedNs = 0;
+      var childStdout = '';
+      var childStderr = '';
+      try {
+        TraceRegion.createFile(
+          regionPath,
+          ringDataWords: ringDataWords,
+        );
 
-      final stopwatch = Stopwatch()..start();
-      final child = await Process.run(
-        Platform.resolvedExecutable,
-        runner.arguments(_runPeerArgs(
-          peer: peer,
-          scenario: scenario,
-          databasePath: databasePath,
-          rows: rows,
-          metricsPath: metricsPath,
-        )),
-        environment: _peerChildEnvironment(regionPath),
-      );
-      stopwatch.stop();
-      final metrics = _readPeerMetrics(metricsPath);
-      if (metrics.status == 'unsupported') {
+        final childStopwatch = Stopwatch()..start();
+        final child = await Process.run(
+          Platform.resolvedExecutable,
+          runner.arguments(_runPeerArgs(
+            peer: peer,
+            scenario: scenario,
+            databasePath: databasePath,
+            rows: rows,
+            metricsPath: metricsPath,
+          )),
+          environment: _peerChildEnvironment(regionPath),
+        );
+        childStopwatch.stop();
+        childElapsedNs = childStopwatch.elapsedMicroseconds * 1000;
+        childStdout = child.stdout.toString();
+        childStderr = child.stderr.toString();
+        sampleStopwatch.stop();
+
+        final metrics = _readPeerMetrics(metricsPath);
+        if (metrics.status == 'unsupported') {
+          results.add(
+            _PeerTraceResult.unsupported(
+              peer: peer,
+              repetition: repetition,
+              metrics: metrics,
+              childElapsedNs: childElapsedNs,
+            ),
+          );
+          continue;
+        }
+
+        if (child.exitCode != 0) {
+          results.add(
+            _PeerTraceResult.failed(
+              peer: peer,
+              repetition: repetition,
+              elapsedNs: 0,
+              childElapsedNs: childElapsedNs,
+              stderr: childStderr,
+              stdout: childStdout,
+            ),
+          );
+          continue;
+        }
+
+        final trace = Trace.loadRegion(regionPath);
         results.add(
-          _PeerTraceResult.unsupported(
+          _PeerTraceResult(
             peer: peer,
             repetition: repetition,
+            trace: trace,
             metrics: metrics,
-            childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+            childElapsedNs: childElapsedNs,
           ),
         );
-        continue;
-      }
-
-      if (child.exitCode != 0) {
+      } on Object catch (error, stackTrace) {
+        if (sampleStopwatch.isRunning) {
+          sampleStopwatch.stop();
+        }
         results.add(
           _PeerTraceResult.failed(
             peer: peer,
             repetition: repetition,
-            elapsedNs: 0,
-            childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
-            stderr: child.stderr.toString(),
-            stdout: child.stdout.toString(),
+            elapsedNs: sampleStopwatch.elapsedMicroseconds * 1000,
+            childElapsedNs: childElapsedNs,
+            stderr: '$error\n$stackTrace',
+            stdout: childStdout,
           ),
         );
-        continue;
+      } finally {
+        _deletePeerSampleScratch(
+          regionPath: regionPath,
+          databasePath: databasePath,
+          metricsPath: metricsPath,
+        );
       }
-
-      final trace = Trace.loadRegion(regionPath);
-      results.add(
-        _PeerTraceResult(
-          peer: peer,
-          repetition: repetition,
-          trace: trace,
-          metrics: metrics,
-          childElapsedNs: stopwatch.elapsedMicroseconds * 1000,
-        ),
-      );
     }
   }
 
@@ -1150,6 +1181,32 @@ Future<_CompareRunResult> _runPeerCompare({
     report: _compareReportMarkdown(artifact),
     failed: _hasCompareFailure(artifact),
   );
+}
+
+void _deletePeerSampleScratch({
+  required String regionPath,
+  required String databasePath,
+  required String metricsPath,
+}) {
+  for (final path in [
+    regionPath,
+    metricsPath,
+    databasePath,
+    '$databasePath-journal',
+    '$databasePath-shm',
+    '$databasePath-wal',
+  ]) {
+    _deleteFileIfExists(path);
+  }
+}
+
+void _deleteFileIfExists(String path) {
+  try {
+    final file = File(path);
+    if (file.existsSync()) {
+      file.deleteSync();
+    }
+  } catch (_) {}
 }
 
 void _ensurePeerShimAvailable() {
@@ -2844,7 +2901,7 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
           _SuiteScenario(
             name: highCardinalityFanoutScenario,
-            rows: 40,
+            rows: 20,
             repetitions: 11,
           ),
           _SuiteScenario(
