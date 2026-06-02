@@ -40,6 +40,15 @@ void main() {
         text,
         isNot(contains('98f08c4a1d5e8d877c6b1ef3c11697b42d846d41')),
       );
+      expect(text, isNot(contains('resqlite-profiling-gate-2026-06-02-r8')));
+      expect(
+        text,
+        isNot(contains('4b4165693c752c8e73da3237c117fa5699c0bb79')),
+      );
+      expect(
+        text,
+        isNot(contains('a2e684c6861980e2fbbbc437dd7a4797ae984f2f')),
+      );
       expect(text, isNot(contains('should stay draft')));
     }
   });
@@ -95,12 +104,15 @@ void main() {
         File('doc/production-benchmark-readiness.md').readAsStringSync();
 
     expect(workflow, contains('Linux CI benchmark suite'));
+    expect(workflow, contains('RESQLITE_TRACE_REVISION'));
+    expect(
+        workflow, isNot(contains('a2e684c6861980e2fbbbc437dd7a4797ae984f2f')));
     expect(workflow, contains('Publish archive smoke'));
     expect(workflow, contains('tool/publish_check.dart'));
     expect(workflow, contains('--out-dir=build/tracelite-linux-ci-suite'));
     expect(workflow, contains('tool/native_runtime_smoke.dart'));
     for (final text in [readme, plan, productionReadiness]) {
-      expect(text, contains('pinned four-peer `ci` suite'));
+      expect(text, contains('four-peer `ci` suite'));
     }
     for (final text in [readme, doctor, productionReadiness]) {
       expect(text, contains('full `sqlite3` ABI'));

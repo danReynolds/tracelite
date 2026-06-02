@@ -80,11 +80,12 @@ both source states in wrapper manifests, and verify that Tracelite resolves
 `resqlite` to the checkout under test.
 
 The resqlite wrapper now separates broad suite coverage from strict policy
-scope. The r8 production gate intentionally runs only the resqlite
-release-policy surface that has current production thresholds:
-`high-cardinality-fanout`, `many-streams-writer-throughput`, and
-`sqlite-diagnostics`. `narrow-batch-insert`, `point-select`, `feed-paging`,
-`sync-burst`, `chat-sim`, `large-working-set`, and
+scope. The r10 production gate runs the resqlite release-policy surface with
+current production thresholds: `high-cardinality-fanout` and
+`many-streams-writer-throughput`. It also runs `sqlite-diagnostics` as
+trace-health and diagnostic coverage, but diagnostics are not a strict
+elapsed-time blocker yet. `narrow-batch-insert`, `point-select`,
+`feed-paging`, `sync-burst`, `chat-sim`, `large-working-set`, and
 `keyed-pk-subscriptions` remain diagnostic or experiment workloads unless an
 operator explicitly requests them with scenario overrides.
 
@@ -101,27 +102,32 @@ dart run benchmark/run_tracelite.dart \
   --preset=production \
   --tracelite-root=/path/to/tracelite \
   --resqlite-root="$PWD" \
-  --label=production-pin-r8-resqlite-policy-2026-06-02-r3 \
-  --out-dir=build/tracelite-benchmarks/production-pin-r8-resqlite-policy-2026-06-02-r3 \
-  --graph-data-dir=build/tracelite-benchmarks/production-pin-r8-resqlite-policy-2026-06-02-r3/graph-data
+  --label=production-pin-r10-resqlite-policy-2026-06-02-r1 \
+  --out-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1 \
+  --graph-data-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1/graph-data
 ```
 
 Evidence:
 
 - Tracelite source:
-  `4b4165693c752c8e73da3237c117fa5699c0bb79`
-  (`resqlite-profiling-gate-2026-06-02-r8`).
+  `d058647a123df0f4af223a110564b862de2eda05`
+  (`resqlite-profiling-gate-2026-06-02-r10`).
 - Resqlite source for the production evidence:
-  `a830f3a6ec2a229ecd09a0685664633f71da4322`.
+  `6affacd4d3b83e16d73fafa0c5232f578f25dde4`.
 - `history.json` recorded 5/5 successful production suite runs.
-- `policy-calibration.json` reported `ready` for all three release-policy
-  groups.
+- `policy-calibration.json` reported `ready` for both strict release-policy
+  groups: `high-cardinality-fanout` and
+  `many-streams-writer-throughput`.
 - Graph-data export and validation passed.
 - `tracelite explain` completed and preserved the remaining
   harness-dominated/noisy-CV findings as operator review aids.
-- The suite-history phase took about 15.2 minutes locally under the x64 Dart
-  SDK; this is acceptable for a pre-publish gate, but still the next runtime
-  optimization target.
+- The wrapper recorded clean Tracelite and resqlite source states, arm64 Dart
+  on an arm64 host, and
+  `tracelite_resqlite_dependency.matches_requested_root=true`.
+- Observed strict-lane noise was 0.5% and 1.04%, both within the 5% max-CV
+  gate.
+- The suite-history phase remains acceptable for a pre-publish gate, but still
+  the next runtime optimization target.
 
 The current CI smoke gate is:
 
@@ -135,9 +141,9 @@ dart run benchmark/run_tracelite.dart \
 
 Evidence:
 
-- PR #109's `Tracelite smoke` job checks out the r8 tag, runs the `ci` preset
+- PR #109's `Tracelite smoke` job checks out the r10 tag, runs the `ci` preset
   through the resqlite wrapper, uploads wrapper artifacts, and passed at PR
-  head `71cd1d793dadd2d67db9ed7c91f6b34a181bb0ee`.
+  head `94529ec00dfb74d4c0093ce52d6d510964761067`.
 - The same PR head also passed generated-data freshness, raw-profile-JSON
   hygiene, and the macOS test job with `trace_sqlite` native hook smoke
   coverage.

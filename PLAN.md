@@ -13,19 +13,20 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 **Next bottleneck:** production benchmark replacement hardening — keep the pinned
 resqlite PR green, decide how aggressively to retire the old resqlite direct
 profile runner, run the new visualizer release workflow with signing credentials,
-then finish diagnostic-workload noise reduction, Windows native runtime/shim
-validation, and full non-macOS production-suite evidence.
+then finish diagnostic-workload noise reduction, Windows SQLite shim ABI
+forwarding, and full non-macOS production-suite evidence.
 
 ---
 
 ## What tracelite is
 
 A SQLite performance-analysis toolkit for the Dart ecosystem: a benchmarking
-tool powered by a profiler. The core insight: **every Dart SQLite library
-FFI-links to the same `libsqlite3` C library**, so instrumenting `libsqlite3`
-once captures every library that uses it — drift, sqlite_async, the `sqlite3`
-package itself, Resqlite, anything future. No coordination with library authors
-needed.
+tool powered by a profiler. The core insight: **SQLite's C API is the common
+boundary**. Packages that FFI-link to the platform or bundled `libsqlite3` can
+be profiled through a dynamic shim, while embedded builds such as resqlite can
+compile the same wrapper layer around their private SQLite symbols. That gives
+one artifact and policy model for drift, sqlite_async, `package:sqlite3`, and
+trace-enabled resqlite without pretending they all use the same native library.
 
 Layered on top:
 
@@ -241,8 +242,8 @@ Run both: `dart test`. Both pass.
   `dart pub publish --dry-run`, avoiding false publish warnings from ignored
   local overrides used for sibling-checkout validation.
 - CI writes an explicit `pubspec_overrides.yaml` that points `resqlite` at a
-  checked-out trace-enabled sibling pinned to
-  `a2e684c6861980e2fbbbc437dd7a4797ae984f2f`, then verifies
+  checked-out trace-enabled sibling pinned to PR #109 head
+  `94529ec00dfb74d4c0093ce52d6d510964761067`, then verifies
   `.dart_tool/package_config.json`, the resolved git SHA, and the
   `trace_sqlite` hook before running peer tests, so the macOS gate cannot
   silently fall back to the pub package and lose trace hooks.

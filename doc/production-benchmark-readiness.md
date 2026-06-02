@@ -30,16 +30,17 @@ downloaded release manifests against archive size, SHA-256, clean source,
 required platform coverage, and macOS signing/notarization evidence, and the
 `Visualizer Release` workflow runs that audit before publishing release assets.
 The remaining distribution gap is a credentialed signed run and published
-release artifact. Tracelite's own macOS and Linux CI pin and
-verify the trace-enabled resqlite sibling checkout at
-`a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
-gate cannot accidentally benchmark the pub package. Linux now has a focused
-package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite in CI. Windows
-now validates the platform-independent Dart artifact surface, native runtime
-attach, and core CLI surface in CI, but repeated production-profile history and
-Windows SQLite-shim tracing remain outside the current evidence set. That
-Windows gap is an ABI/export gap, not only a loader gap: a production Windows
-shim must expose the full `sqlite3` symbol surface from `sqlite_traced.dll`
+release artifact. Tracelite's own macOS and Linux CI pin and verify the
+trace-enabled resqlite sibling checkout at PR #109 head
+`94529ec00dfb74d4c0093ce52d6d510964761067` before peer tests, so this repo's
+gate cannot accidentally benchmark the pub package or an obsolete integration
+snapshot. Linux now has a focused package:sqlite3 shim smoke lane and a pinned
+four-peer `ci` suite in CI. Windows now validates the platform-independent Dart
+artifact surface, native runtime attach, and core CLI surface in CI, but
+repeated production-profile history and Windows SQLite-shim tracing remain
+outside the current evidence set. That Windows gap is an ABI/export gap, not
+only a loader gap: a production Windows shim must expose the full `sqlite3`
+symbol surface from `sqlite_traced.dll`
 through generated forwarding or an embedded SQLite build before peer suites can
 claim Windows shim evidence.
 
@@ -178,7 +179,7 @@ The detailed policy is documented in
 
 ## Evidence from this pass
 
-### Current r8 resqlite production gate, 2026-06-02
+### Current r10 resqlite production gate, 2026-06-02
 
 Command:
 
@@ -187,28 +188,30 @@ dart run benchmark/run_tracelite.dart \
   --preset=production \
   --tracelite-root=/path/to/tracelite \
   --resqlite-root="$PWD" \
-  --label=production-pin-r8-resqlite-policy-2026-06-02-r3 \
-  --out-dir=build/tracelite-benchmarks/production-pin-r8-resqlite-policy-2026-06-02-r3 \
-  --graph-data-dir=build/tracelite-benchmarks/production-pin-r8-resqlite-policy-2026-06-02-r3/graph-data
+  --label=production-pin-r10-resqlite-policy-2026-06-02-r1 \
+  --out-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1 \
+  --graph-data-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1/graph-data
 ```
 
 Result: every production suite-history run completed with `ok` status and
 strict policy calibration passed. The wrapper recorded Tracelite source
-`4b4165693c752c8e73da3237c117fa5699c0bb79`
-(`resqlite-profiling-gate-2026-06-02-r8`) and resqlite source
-`a830f3a6ec2a229ecd09a0685664633f71da4322`. `policy-calibration.json`
-reported `ready` for all three release-policy groups:
-`high-cardinality-fanout`, `many-streams-writer-throughput`, and
-`sqlite-diagnostics`. Graph-data export and validation passed, and
-`tracelite explain` completed.
+`d058647a123df0f4af223a110564b862de2eda05`
+(`resqlite-profiling-gate-2026-06-02-r10`) and clean resqlite source
+`6affacd4d3b83e16d73fafa0c5232f578f25dde4`. `policy-calibration.json`
+reported `ready` for both strict release-policy groups:
+`high-cardinality-fanout` and `many-streams-writer-throughput`.
+`sqlite-diagnostics` ran as trace-health and diagnostic coverage, but is not a
+strict elapsed-time blocker yet. Graph-data export and validation passed, and
+`tracelite explain` completed. The wrapper also recorded arm64 Dart on an arm64
+host and `tracelite_resqlite_dependency.matches_requested_root=true`.
 
-The suite-history phase took about 15.2 minutes locally under the x64 Dart SDK;
-the full wrapper took about 15.7 minutes excluding outer `dart run` startup.
-This is acceptable for a pre-publish gate, but it remains the next runtime
+Observed strict-lane noise was 0.5% and 1.04%, both within the 5% max-CV gate.
+The full wrapper remains a pre-publish gate rather than a routine
+edit-compile-test command, so worker/suite reuse is still the next runtime
 optimization target. `tracelite explain` still reports direct script peer runs
-as harness-dominated and some measured CVs as noisy, so the gate is production
-ready for scoped release decisions without pretending every diagnostic workload
-is ready to block a release.
+as harness-dominated for small smoke artifacts, so the gate is production ready
+for scoped release decisions without pretending every diagnostic workload is
+ready to block a release.
 
 Earlier failed calibrations remain useful history. The original broad gate
 completed every suite run but produced `not_ready` calibration because some
