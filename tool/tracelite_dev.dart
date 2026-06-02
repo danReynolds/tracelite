@@ -2902,12 +2902,12 @@ _SuiteProfile _suiteProfile(String profileName) {
           _SuiteScenario(
             name: highCardinalityFanoutScenario,
             rows: 20,
-            repetitions: 11,
+            repetitions: 5,
           ),
           _SuiteScenario(
             name: manyStreamsWriterThroughputScenario,
             rows: 20,
-            repetitions: 7,
+            repetitions: 5,
           ),
           _SuiteScenario(
             name: sqliteDiagnosticsScenario,
