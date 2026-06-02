@@ -19,7 +19,8 @@ String? runtimeBuildCommand({String? operatingSystem}) {
   return switch (os) {
     'macos' => '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
         '-o $output',
-    'windows' => null,
+    'windows' => '  cc -shared -O2 -Inative native/tracelite_runtime.c '
+        '-o $output',
     _ => '  cc -shared -fPIC -O2 -Inative native/tracelite_runtime.c '
         '-o $output',
   };

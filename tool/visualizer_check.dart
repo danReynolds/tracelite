@@ -690,8 +690,8 @@ Never _usage({int exitCode = 64}) {
     'full widget stress coverage is validated separately.',
   );
   stderr.writeln(
-    'Use --skip-native-visualizer-tests only on Windows release packaging '
-    'until native trace fixture generation is portable there.',
+    'Use --skip-native-visualizer-tests only for UI-only checks on hosts '
+    'without a built native runtime.',
   );
   stderr.writeln(
     'On macOS, signing and notarization are optional credential-backed steps.',

@@ -434,9 +434,8 @@ final class _TraceliteRuntime {
     }
 
     throw StateError(
-      'Unable to load tracelite runtime library. Build one with:\n'
-      '  cc -dynamiclib -O2 -Inative native/tracelite_runtime.c '
-      '-o build/libtracelite_runtime.dylib\n'
+      'Unable to load tracelite runtime library. Build one with the command '
+      'shown by `dart run bin/tracelite.dart doctor`.\n'
       'Tried:\n${errors.join('\n')}',
     );
   }
@@ -446,7 +445,7 @@ List<String> _runtimeLibraryCandidates(String? explicitPath) {
   final env = Platform.environment['TRACELITE_RUNTIME'];
   final names = switch (Platform.operatingSystem) {
     'macos' => const ['libtracelite_runtime.dylib'],
-    'windows' => const ['tracelite_runtime.dll'],
+    'windows' => const ['libtracelite_runtime.dll', 'tracelite_runtime.dll'],
     _ => const ['libtracelite_runtime.so'],
   };
   return [

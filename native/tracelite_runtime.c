@@ -31,29 +31,48 @@
 
 #include "tracelite_runtime.h"
 
-#include <fcntl.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#endif
+
+#if defined(_MSC_VER)
+#define TLT_THREAD_LOCAL __declspec(thread)
+#else
+#define TLT_THREAD_LOCAL __thread
+#endif
 
 /* ---- Globals ---- */
 
 volatile int tlt_active = 0;
 
+#ifdef _WIN32
+static HANDLE g_region_file = INVALID_HANDLE_VALUE;
+static HANDLE g_region_mapping = NULL;
+#else
 static int g_region_fd = -1;
+#endif
 static void* g_region_base = NULL;
 static size_t g_region_size = 0;
 static tlt_region_header_t* g_region = NULL;
 static tlt_registry_slot_t* g_registry = NULL;
 static uint8_t* g_string_pool = NULL;
 static uint8_t* g_ring_section = NULL;
-static __thread int tlt_my_track_id = -1;
-static __thread tlt_ring_header_t* tlt_my_ring = NULL;
+static TLT_THREAD_LOCAL int tlt_my_track_id = -1;
+static TLT_THREAD_LOCAL tlt_ring_header_t* tlt_my_ring = NULL;
 
 static uint64_t g_start_monotonic_ns = 0;
 
@@ -61,13 +80,26 @@ static uint64_t g_start_monotonic_ns = 0;
 static uint64_t monotonic_ns(void);
 static tlt_ring_header_t* ring_for_track(int track_id);
 static int valid_track_id(int track_id);
+static void reset_mapping_state(void);
 
 /* ---- Clock ---- */
 
 static uint64_t monotonic_ns(void) {
+#ifdef _WIN32
+  LARGE_INTEGER counter;
+  LARGE_INTEGER frequency;
+  if (!QueryPerformanceCounter(&counter) ||
+      !QueryPerformanceFrequency(&frequency) ||
+      frequency.QuadPart <= 0) {
+    return 0;
+  }
+  return (uint64_t)(((long double)counter.QuadPart * 1000000000.0L) /
+                    (long double)frequency.QuadPart);
+#else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+#endif
 }
 
 uint64_t tlt_now_ns(void) {
@@ -84,6 +116,35 @@ int tlt_attach(const char* explicit_path) {
     return -1;
   }
 
+#ifdef _WIN32
+  HANDLE file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    fprintf(stderr, "tracelite: CreateFile(%s) failed\n", path);
+    return -1;
+  }
+
+  LARGE_INTEGER file_size;
+  if (!GetFileSizeEx(file, &file_size) || file_size.QuadPart <= 0) {
+    CloseHandle(file);
+    return -1;
+  }
+
+  HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+  if (!mapping) {
+    CloseHandle(file);
+    return -1;
+  }
+
+  size_t size = (size_t)file_size.QuadPart;
+  void* base = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+  if (!base) {
+    CloseHandle(mapping);
+    CloseHandle(file);
+    return -1;
+  }
+#else
   int fd = open(path, O_RDWR);
   if (fd < 0) {
     fprintf(stderr, "tracelite: open(%s) failed\n", path);
@@ -102,16 +163,28 @@ int tlt_attach(const char* explicit_path) {
     close(fd);
     return -1;
   }
+#endif
 
   tlt_region_header_t* header = (tlt_region_header_t*)base;
   if (header->magic != TRACELITE_REGION_MAGIC ||
       header->format_major != TRACELITE_FORMAT_MAJOR_RUNTIME) {
+#ifdef _WIN32
+    UnmapViewOfFile(base);
+    CloseHandle(mapping);
+    CloseHandle(file);
+#else
     munmap(base, size);
     close(fd);
+#endif
     return -1;
   }
 
+#ifdef _WIN32
+  g_region_file = file;
+  g_region_mapping = mapping;
+#else
   g_region_fd = fd;
+#endif
   g_region_base = base;
   g_region_size = size;
   g_region = header;
@@ -120,6 +193,7 @@ int tlt_attach(const char* explicit_path) {
   g_ring_section = (uint8_t*)base + header->producer_ring_offset;
   g_start_monotonic_ns = header->start_monotonic_ns;
   tlt_active = 1;
+  atexit(reset_mapping_state);
   return 0;
 }
 
@@ -129,6 +203,28 @@ void tlt_detach(void) {
     tlt_my_track_id = -1;
     tlt_my_ring = NULL;
   }
+}
+
+static void reset_mapping_state(void) {
+#ifdef _WIN32
+  if (g_region_base) UnmapViewOfFile(g_region_base);
+  if (g_region_mapping) CloseHandle(g_region_mapping);
+  if (g_region_file != INVALID_HANDLE_VALUE) CloseHandle(g_region_file);
+  g_region_file = INVALID_HANDLE_VALUE;
+  g_region_mapping = NULL;
+#else
+  if (g_region_base && g_region_size > 0) munmap(g_region_base, g_region_size);
+  if (g_region_fd >= 0) close(g_region_fd);
+  g_region_fd = -1;
+#endif
+  g_region_base = NULL;
+  g_region_size = 0;
+  g_region = NULL;
+  g_registry = NULL;
+  g_string_pool = NULL;
+  g_ring_section = NULL;
+  g_start_monotonic_ns = 0;
+  tlt_active = 0;
 }
 
 void tlt_detach_track(uint8_t track_id) {

@@ -32,9 +32,9 @@ verify the trace-enabled resqlite sibling checkout at
 `a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
 gate cannot accidentally benchmark the pub package. Linux now has a focused
 package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite in CI. Windows
-now validates the platform-independent Dart artifact and core CLI surface in CI,
-but repeated production-profile history and Windows native runtime/shim tracing
-remain outside the current evidence set.
+now validates the platform-independent Dart artifact surface, native runtime
+attach, and core CLI surface in CI, but repeated production-profile history and
+Windows SQLite-shim tracing remain outside the current evidence set.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -512,10 +512,10 @@ has a platform-aware resolver name, a Linux package:sqlite3 smoke job, and a
 Linux four-peer `ci` suite, which proves the native-hook loading strategy and
 source-pinned peer harness outside macOS at CI scale. Windows now has a
 core-artifact CI lane for dependency resolution, generated-output freshness,
-analysis, and platform-independent diff/insight/package-boundary tests. Windows
-native runtime and SQLite substitution, plus full non-macOS production-profile
-history, are still required before this can be called production-quality across
-every Dart target.
+analysis, native runtime attach, and platform-independent
+diff/insight/package-boundary tests. Windows SQLite substitution, plus full
+non-macOS production-profile history, is still required before this can be
+called production-quality across every Dart target.
 
 ## Recommended next iteration
 

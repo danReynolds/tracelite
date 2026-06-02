@@ -21,8 +21,9 @@ multi-package distribution yet. macOS and the Dart SQLite package ecosystem are
 the calibrated production path. Linux has native shim smoke coverage and a
 pinned four-peer `ci` suite for the same Dart SQLite lanes, but production
 profile history is still macOS-validated. Windows now validates the
-platform-independent Dart artifact surface in CI, but native runtime/shim
-validation and non-Dart bindings are future work.
+platform-independent Dart artifact surface, native runtime attach, and
+visualizer package in CI, but SQLite shim validation and non-Dart bindings are
+future work.
 
 ## What It Does
 
@@ -170,10 +171,9 @@ The `Visualizer Release` GitHub workflow runs this package path on macOS,
 Linux, and Windows, uploads the archive/manifest evidence, and can publish
 those artifacts to a draft GitHub release from a tag or manual dispatch. macOS
 signing/notarization is optional and requires the release secrets documented in
-the workflow. Hosted release packaging skips the tagged heavyweight dense-trace
-widget stress test on Linux/macOS, and skips native trace fixture generation on
-Windows until the native recorder runtime is portable there. Run the direct
-visualizer check or `flutter test` locally for full visualizer stress coverage.
+the workflow. Hosted release packaging skips only the tagged heavyweight
+dense-trace widget stress test; run the direct visualizer check or
+`flutter test` locally for full visualizer stress coverage.
 For visualizer-only source-checkout validation, `dart tool/visualizer_check.dart`
 runs the same checks directly without rebuilding the root peer native assets.
 

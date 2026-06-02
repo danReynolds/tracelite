@@ -158,8 +158,8 @@ Future<void> _doctor(List<String> args) async {
         'native runtime',
         'native runtime build is not implemented for '
             '${Platform.operatingSystem}.',
-        action: 'Use macOS or Linux for native tracing evidence until '
-            'Windows runtime validation lands.',
+        action: 'Use a platform with a native runtime build command for '
+            'native tracing evidence.',
       ),
     );
   }
@@ -1033,8 +1033,8 @@ Future<void> _calibrate(List<String> args) async {
         '${Platform.operatingSystem}.',
       );
       stderr.writeln(
-        'Use macOS or Linux for native tracing evidence until Windows runtime '
-        'validation lands.',
+        'Use a platform with a native runtime build command for native '
+        'tracing evidence.',
       );
     } else {
       stderr.writeln('missing ${runtime.path}; build it with:');

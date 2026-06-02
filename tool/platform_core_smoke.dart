@@ -2,7 +2,7 @@
 //
 // This intentionally runs with `dart --packages=... tool/platform_core_smoke.dart`
 // in CI so source-checkout dev-dependency native hooks are not invoked on
-// platforms where native tracing is not yet supported.
+// platforms where the SQLite shim is not yet supported.
 
 import 'dart:convert';
 import 'dart:io';
@@ -20,9 +20,8 @@ void main() {
 
 void _checkNativeSupportBoundary() {
   _expect(
-    native_artifacts.runtimeBuildCommand(operatingSystem: 'windows') == null,
-    'Windows native runtime build must stay explicitly unsupported until the '
-    'runtime is ported.',
+    native_artifacts.runtimeBuildCommand(operatingSystem: 'windows') != null,
+    'Windows native runtime build command missing',
   );
   _expect(
     native_artifacts.sqliteShimBuildCommand(operatingSystem: 'windows') == null,

@@ -36,7 +36,11 @@ void main() {
     );
     expect(
       native_artifacts.runtimeBuildCommand(operatingSystem: 'windows'),
-      isNull,
+      allOf(
+        contains('-shared'),
+        contains('native/tracelite_runtime.c'),
+        contains('build/libtracelite_runtime.dll'),
+      ),
     );
   });
 
