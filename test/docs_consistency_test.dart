@@ -82,7 +82,7 @@ void main() {
     expect(devCli, contains('--skip-native-visualizer-tests=true'));
   });
 
-  test('docs reflect Linux pinned peer suite coverage', () {
+  test('docs and CI reflect peer suite and platform smoke coverage', () {
     final workflow = File('.github/workflows/ci.yml').readAsStringSync();
     final readme = File('README.md').readAsStringSync();
     final plan = File('PLAN.md').readAsStringSync();
@@ -91,6 +91,7 @@ void main() {
 
     expect(workflow, contains('Linux CI benchmark suite'));
     expect(workflow, contains('--out-dir=build/tracelite-linux-ci-suite'));
+    expect(workflow, contains('tool/native_runtime_smoke.dart'));
     for (final text in [readme, plan, productionReadiness]) {
       expect(text, contains('pinned four-peer `ci` suite'));
     }

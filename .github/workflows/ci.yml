@@ -201,4 +201,6 @@ jobs:
         run: dart --packages=.dart_tool/package_config.json tool/platform_core_smoke.dart
 
       - name: Windows native runtime smoke
-        run: dart test test/dart_producer_test.dart test/session_test.dart
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/native_runtime_smoke.dart
