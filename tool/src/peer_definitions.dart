@@ -32,6 +32,56 @@ const List<String> defaultPeerNames = [
   'resqlite',
 ];
 
+final class PeerNameListError implements Exception {
+  const PeerNameListError(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+List<String> parsePeerNames(String value, {bool allowEmpty = false}) {
+  final names = value
+      .split(',')
+      .map((name) => name.trim())
+      .where((name) => name.isNotEmpty)
+      .toList(growable: false);
+  if (names.isEmpty) {
+    if (allowEmpty) return names;
+    throw PeerNameListError(
+      'must include at least one peer: ${defaultPeerNames.join(', ')}',
+    );
+  }
+
+  final unknown = [
+    for (final name in names)
+      if (!defaultPeerNames.contains(name)) name,
+  ];
+  if (unknown.isNotEmpty) {
+    throw PeerNameListError(
+      'contains unknown peer ${_quotedList(unknown)}; expected one of '
+      '${defaultPeerNames.join(', ')}',
+    );
+  }
+
+  final seen = <String>{};
+  final duplicate = names.where((name) => !seen.add(name)).toList();
+  if (duplicate.isNotEmpty) {
+    throw PeerNameListError(
+      'contains duplicate peer ${_quotedList(duplicate)}; expected each peer '
+      'at most once from ${defaultPeerNames.join(', ')}',
+    );
+  }
+
+  return names;
+}
+
+String _quotedList(List<String> values) {
+  if (values.length == 1) return '"${values.single}"';
+  return values.map((value) => '"$value"').join(', ');
+}
+
 const int feedPagingSeed = 0xFEED;
 const int feedPagingPageSize = 10;
 const int feedPagingPageCount = 4;

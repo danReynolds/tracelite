@@ -42,12 +42,13 @@ Future<void> _runPeer(List<String> args) async {
     stderr.writeln('peer run requires --peer and --database');
     exit(64);
   }
+  final peerName = _peerNameOption('--peer', peer);
   final stopwatch = Stopwatch()..start();
   PeerScenarioResult? result;
   UnsupportedPeerScenario? unsupported;
   try {
     result = await runPeerScenario(
-      peerName: peer,
+      peerName: peerName,
       scenarioName: scenario,
       databasePath: database,
       rows: rows,
@@ -76,11 +77,11 @@ Future<void> _runPeerWorker(List<String> args) async {
     );
     exit(64);
   }
-  final peers = (options['peers'] ?? '')
-      .split(',')
-      .map((peer) => peer.trim())
-      .where((peer) => peer.isNotEmpty)
-      .toList();
+  final peers = _peerListOption(
+    '--peers',
+    options['peers'] ?? '',
+    allowEmpty: true,
+  );
 
   final runtimes = _openWorkerRuntimeBindings(peers: peers);
   if (runtimes.isEmpty) {
@@ -95,6 +96,7 @@ Future<void> _runPeerWorker(List<String> args) async {
     jsonEncode({
       'command': 'ready',
       'runtime_libraries': runtimes.map((runtime) => runtime.path).toList(),
+      'native_assets': workerNativeAssetBindings(peers: peers),
     }),
   );
   await stdout.flush();
@@ -241,6 +243,30 @@ Map<String, String> _parseOptions(List<String> args) {
     result[key] = args[++i];
   }
   return result;
+}
+
+String _peerNameOption(String option, String value) {
+  final peers = _peerListOption(option, value);
+  if (peers.length != 1) {
+    stderr.writeln(
+      '$option must name exactly one peer: ${defaultPeerNames.join(', ')}',
+    );
+    exit(64);
+  }
+  return peers.single;
+}
+
+List<String> _peerListOption(
+  String option,
+  String value, {
+  bool allowEmpty = false,
+}) {
+  try {
+    return parsePeerNames(value, allowEmpty: allowEmpty);
+  } on PeerNameListError catch (error) {
+    stderr.writeln('$option ${error.message}');
+    exit(64);
+  }
 }
 
 String _requiredWorkerString(Map<String, Object?> request, String key) {

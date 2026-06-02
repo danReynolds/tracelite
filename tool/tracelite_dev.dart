@@ -1372,11 +1372,14 @@ void _rejectUnsupportedExplicitRunner(
   exit(64);
 }
 
-List<String> _interfaceNames(String value) => value
-    .split(',')
-    .map((name) => name.trim())
-    .where((name) => name.isNotEmpty)
-    .toList();
+List<String> _interfaceNames(String value) {
+  try {
+    return parsePeerNames(value);
+  } on PeerNameListError catch (error) {
+    stderr.writeln('--interfaces ${error.message}');
+    exit(64);
+  }
+}
 
 String _fileStem(String value) {
   final sanitized = value.replaceAll(RegExp(r'[^A-Za-z0-9_.-]+'), '_');
@@ -2905,6 +2908,7 @@ class _PeerChildRunner {
     this.fallbackReason,
     this.workerProcess,
     this.runtimeLibraryPaths = const [],
+    this.nativeAssets = const [],
   });
 
   factory _PeerChildRunner.script({
@@ -2957,7 +2961,7 @@ class _PeerChildRunner {
     );
     final workerProcess = _PeerWorkerProcess(process);
     const readyTimeout = Duration(minutes: 3);
-    final readyRuntimeLibraryPaths = await workerProcess.ready.timeout(
+    final ready = await workerProcess.ready.timeout(
       readyTimeout,
       onTimeout: () async {
         final diagnostics = workerProcess.diagnostics;
@@ -2978,7 +2982,8 @@ class _PeerChildRunner {
       requestedMode: requestedMode,
       buildElapsedNs: stopwatch.elapsedMicroseconds * 1000,
       workerProcess: workerProcess,
-      runtimeLibraryPaths: readyRuntimeLibraryPaths,
+      runtimeLibraryPaths: ready.runtimeLibraryPaths,
+      nativeAssets: ready.nativeAssets,
     );
   }
 
@@ -2989,6 +2994,7 @@ class _PeerChildRunner {
   final String? fallbackReason;
   final _PeerWorkerProcess? workerProcess;
   final List<String> runtimeLibraryPaths;
+  final List<Map<String, Object?>> nativeAssets;
 
   Future<_PeerChildRunResult> runPeer({
     required String peer,
@@ -3051,7 +3057,18 @@ class _PeerChildRunner {
         if (fallbackReason != null) 'fallback_reason': fallbackReason,
         if (runtimeLibraryPaths.isNotEmpty)
           'runtime_libraries': runtimeLibraryPaths,
+        if (nativeAssets.isNotEmpty) 'native_assets': nativeAssets,
       };
+}
+
+class _PeerWorkerReady {
+  const _PeerWorkerReady({
+    required this.runtimeLibraryPaths,
+    required this.nativeAssets,
+  });
+
+  final List<String> runtimeLibraryPaths;
+  final List<Map<String, Object?>> nativeAssets;
 }
 
 class _PeerWorkerProcess {
@@ -3084,11 +3101,11 @@ class _PeerWorkerProcess {
   final _stopwatches = <int, Stopwatch>{};
   final _workerStdoutNoise = StringBuffer();
   final _workerStderr = StringBuffer();
-  final _ready = Completer<List<String>>();
+  final _ready = Completer<_PeerWorkerReady>();
   var _nextId = 1;
   var _closed = false;
 
-  Future<List<String>> get ready => _ready.future;
+  Future<_PeerWorkerReady> get ready => _ready.future;
 
   String get diagnostics {
     return [
@@ -3162,10 +3179,15 @@ class _PeerWorkerProcess {
     if (decoded['command'] == 'ready') {
       final libraries = decoded['runtime_libraries'];
       if (!_ready.isCompleted && libraries is List) {
-        _ready.complete([
-          for (final library in libraries)
-            if (library is String) library,
-        ]);
+        _ready.complete(
+          _PeerWorkerReady(
+            runtimeLibraryPaths: [
+              for (final library in libraries)
+                if (library is String) library,
+            ],
+            nativeAssets: _workerNativeAssets(decoded['native_assets']),
+          ),
+        );
       }
       return;
     }
@@ -3244,6 +3266,18 @@ class _PeerWorkerProcess {
     }
     _pending.clear();
   }
+}
+
+List<Map<String, Object?>> _workerNativeAssets(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map)
+        {
+          for (final entry in item.entries)
+            if (entry.key is String) entry.key as String: entry.value,
+        },
+  ];
 }
 
 class _SuiteProfile {

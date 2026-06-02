@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
+import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 
 void main() {
   test('compare writes repetition JSON and diff reads it', () async {
@@ -140,6 +141,18 @@ void main() {
     expect(runner['mode'], 'worker');
     expect(runner['requested_mode'], 'worker');
     expect(runner['runtime_libraries'] as List<Object?>, isNotEmpty);
+    final nativeAssets = runner['native_assets'] as List<Object?>;
+    final sqliteNativeAsset = nativeAssets.cast<Map<String, Object?>>().single;
+    expect(
+      sqliteNativeAsset['asset'],
+      'package:sqlite3/src/ffi/libsqlite3.g.dart',
+    );
+    expect(sqliteNativeAsset['kind'], 'absolute');
+    expect(
+      sqliteNativeAsset['location'],
+      File(native_artifacts.sqliteShimLibraryPath()).absolute.path,
+    );
+    expect(sqliteNativeAsset['exists'], isTrue);
 
     final peers = artifact['peers'] as List<Object?>;
     final sqlite3 = peers.single as Map<String, Object?>;
