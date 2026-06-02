@@ -208,6 +208,30 @@ void tlt_detach(void) {
   }
 }
 
+int tlt_current_track_id(void) {
+  return tlt_my_track_id;
+}
+
+void tlt_reset_runtime(void) {
+  if (!tlt_active) return;
+
+  if (g_region && g_registry) {
+    uint32_t max = g_region->max_producers;
+    for (uint32_t i = 0; i < max; i++) {
+      uint8_t state = atomic_load_explicit(
+          (_Atomic(uint8_t)*)&g_registry[i].state,
+          memory_order_acquire);
+      if (state == 1 || state == 2) {
+        atomic_store_explicit((_Atomic(uint8_t)*)&g_registry[i].state, 3,
+                              memory_order_release);
+        ring_for_track((int)i)->producer_state = 3;
+      }
+    }
+  }
+
+  reset_mapping_state();
+}
+
 static void reset_mapping_state(void) {
 #ifdef _WIN32
   if (g_region_base) UnmapViewOfFile(g_region_base);

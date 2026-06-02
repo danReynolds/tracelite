@@ -92,11 +92,8 @@
  * Self-attach to TRACELITE_REGION on first call.
  * ------------------------------------------------------------------------- */
 
-static __thread int tracelite_thread_inited = 0;
-
 static void ensure_attached(void) {
-  if (tracelite_thread_inited) return;
-  tracelite_thread_inited = 1;
+  if (tlt_active && tlt_current_track_id() >= 0) return;
   if (!tlt_active) {
     tlt_attach(NULL);
   }

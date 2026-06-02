@@ -672,11 +672,33 @@ Finalize merges all ring events (sorted by timestamp), writes the canonical `.tl
 
 ```c
 // In a Dart isolate's exit handler or the C shim's atexit handler:
-my_ring->producer_state = 2;
+my_ring->producer_state = 3;
 // mmap stays attached (kernel will tear down on process exit anyway).
 ```
 
-The harness sees `producer_state = 2` on its next drain and treats the producer as ended.
+The harness sees `producer_state = 3` on its next drain and treats the producer
+as ended.
+
+### Quiescent reset
+
+Long-lived benchmark workers need to reuse one process across independent
+samples without writing every sample into the first `TRACELITE_REGION` they
+attached. The runtime exposes `tlt_reset_runtime()` for this narrow case.
+
+The reset contract is intentionally stricter than normal detach:
+
+1. The harness calls it only at a quiescent boundary, after the measured
+   workload has returned and before a new region is attached.
+2. No producer thread may be inside a traced call or concurrently appending.
+3. The runtime marks any registered/claiming tracks as ended, unmaps the
+   current region, clears thread-local track state, and returns to inactive.
+4. The next sample must explicitly attach a new region or provide a new
+   `TRACELITE_REGION` before producers emit again.
+
+This is not a live-tracing control plane and it is not safe as an asynchronous
+cancel operation. Its purpose is runner retargeting for native-assets-aware
+workers, where process startup is expensive but samples still need isolated
+region artifacts.
 
 ## 13. Resource limits
 

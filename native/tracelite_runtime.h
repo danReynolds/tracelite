@@ -125,6 +125,20 @@ _Static_assert(sizeof(tlt_ring_header_t) == 64, "ring header size");
  */
 int tlt_attach(const char* explicit_path);
 
+/* Return this thread's registered track ID, or -1 when this thread is not
+ * currently registered against an active region.
+ */
+int tlt_current_track_id(void);
+
+/* Force-reset the active runtime mapping at a quiescent harness boundary.
+ *
+ * This is for benchmark harnesses that need to retarget a long-lived process
+ * to a new region between samples. Callers MUST ensure no producer thread is
+ * concurrently writing. Registered tracks are marked ended before the mapping
+ * is unmapped so the just-finished region remains readable.
+ */
+void tlt_reset_runtime(void);
+
 /* Reserve a track ID and register this thread as a producer.
  * Returns track ID (0..255) or -1 on failure.
  */
