@@ -67,12 +67,22 @@ Future<void> _runPeer(List<String> args) async {
 }
 
 Future<void> _runPeerWorker(List<String> args) async {
-  if (args.isNotEmpty) {
-    stderr.writeln('peer worker does not accept arguments');
+  final options = _parseOptions(args);
+  final unexpectedOptions =
+      options.keys.where((key) => key != 'peers').toList();
+  if (unexpectedOptions.isNotEmpty) {
+    stderr.writeln(
+      'peer worker received unexpected option: --${unexpectedOptions.first}',
+    );
     exit(64);
   }
+  final peers = (options['peers'] ?? '')
+      .split(',')
+      .map((peer) => peer.trim())
+      .where((peer) => peer.isNotEmpty)
+      .toList();
 
-  final runtimes = _openWorkerRuntimeBindings();
+  final runtimes = _openWorkerRuntimeBindings(peers: peers);
   if (runtimes.isEmpty) {
     stderr.writeln(
       'peer worker could not find a Tracelite runtime library. '
@@ -296,9 +306,11 @@ class _WorkerRuntimeBinding {
   }
 }
 
-List<_WorkerRuntimeBinding> _openWorkerRuntimeBindings() {
+List<_WorkerRuntimeBinding> _openWorkerRuntimeBindings({
+  Iterable<String> peers = const [],
+}) {
   return [
-    for (final path in workerRuntimeLibraryPaths())
+    for (final path in workerRuntimeLibraryPaths(peers: peers))
       if (_WorkerRuntimeBinding.tryOpen(path) case final runtime?) runtime,
   ];
 }

@@ -1,116 +1,44 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
-
-import 'package:drift/drift.dart' as drift;
-import 'package:drift/backends.dart' as drift_backend;
-import 'package:drift/native.dart' as drift_native;
-import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
-import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 import 'package:tracelite/resqlite.dart' as tracelite_resqlite;
 
+import 'peer_contract.dart';
 import 'peer_definitions.dart';
+import 'peer_drift.dart' deferred as drift_adapter;
+import 'peer_resqlite.dart' deferred as resqlite_adapter;
+import 'peer_sqlite3.dart' deferred as sqlite3_adapter;
+import 'peer_sqlite_async.dart' deferred as sqlite_async_adapter;
 
-abstract interface class SqlitePeer {
-  String get name;
+export 'peer_contract.dart';
 
-  Future<void> open(String path);
-
-  Future<void> close();
-
-  Future<void> execute(String sql, [List<Object?> parameters = const []]);
-
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]);
-
-  Future<void> executeBatch(String sql, List<List<Object?>> parameterSets);
-}
-
-abstract interface class ReactiveSqlitePeer implements SqlitePeer {
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  });
-}
-
-abstract interface class DiagnosticSqlitePeer implements SqlitePeer {
-  Future<SqliteDiagnosticSnapshot> snapshotDiagnostics();
-}
-
-final class SqliteDiagnosticSnapshot {
-  const SqliteDiagnosticSnapshot({
-    required this.sqlitePageCacheBytes,
-    required this.sqliteSchemaBytes,
-    required this.sqliteStmtBytes,
-    required this.walBytes,
-    required this.streamCount,
-    required this.readerBusy,
-  });
-
-  final int sqlitePageCacheBytes;
-  final int sqliteSchemaBytes;
-  final int sqliteStmtBytes;
-  final int walBytes;
-  final int streamCount;
-  final bool readerBusy;
-
-  int get sqliteTotalBytes =>
-      sqlitePageCacheBytes + sqliteSchemaBytes + sqliteStmtBytes;
-
-  Map<String, Object?> toJson() => {
-        'sqlite_total_bytes': sqliteTotalBytes,
-        'sqlite_page_cache_bytes': sqlitePageCacheBytes,
-        'sqlite_schema_bytes': sqliteSchemaBytes,
-        'sqlite_stmt_bytes': sqliteStmtBytes,
-        'wal_bytes': walBytes,
-        'stream_count': streamCount,
-        'reader_busy': readerBusy,
-      };
-}
-
-final class PeerScenarioResult {
-  const PeerScenarioResult({
-    required this.setupElapsedNs,
-    required this.warmupElapsedNs,
-    required this.measuredElapsedNs,
-    this.measurements = const {},
-  });
-
-  final int setupElapsedNs;
-  final int warmupElapsedNs;
-  final int measuredElapsedNs;
-  final Map<String, Object?> measurements;
-
-  Map<String, Object?> toJson() => {
-        'setup_elapsed_ns': setupElapsedNs,
-        'warmup_elapsed_ns': warmupElapsedNs,
-        'measured_elapsed_ns': measuredElapsedNs,
-        if (measurements.isNotEmpty) 'measurements': measurements,
-      };
-}
-
-final class UnsupportedPeerScenario implements Exception {
-  const UnsupportedPeerScenario(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
-}
-
-SqlitePeer createPeer(String name) {
+Future<SqlitePeer> createPeer(String name) async {
   return switch (name) {
-    'sqlite3' => Sqlite3Peer(),
-    'drift' => DriftPeer(),
-    'sqlite_async' => SqliteAsyncPeer(),
-    'resqlite' => ResqlitePeer(),
+    'sqlite3' => await _sqlite3Peer(),
+    'drift' => await _driftPeer(),
+    'sqlite_async' => await _sqliteAsyncPeer(),
+    'resqlite' => await _resqlitePeer(),
     _ => throw ArgumentError.value(name, 'name', 'unknown peer'),
   };
+}
+
+Future<SqlitePeer> _sqlite3Peer() async {
+  await sqlite3_adapter.loadLibrary();
+  return sqlite3_adapter.Sqlite3Peer();
+}
+
+Future<SqlitePeer> _driftPeer() async {
+  await drift_adapter.loadLibrary();
+  return drift_adapter.DriftPeer();
+}
+
+Future<SqlitePeer> _sqliteAsyncPeer() async {
+  await sqlite_async_adapter.loadLibrary();
+  return sqlite_async_adapter.SqliteAsyncPeer();
+}
+
+Future<SqlitePeer> _resqlitePeer() async {
+  await resqlite_adapter.loadLibrary();
+  return resqlite_adapter.ResqlitePeer();
 }
 
 Future<PeerScenarioResult> runPeerScenario({
@@ -120,7 +48,7 @@ Future<PeerScenarioResult> runPeerScenario({
   int rows = 100,
   String? traceRegionPath,
 }) async {
-  final peer = createPeer(peerName);
+  final peer = await createPeer(peerName);
   try {
     await peer.open(databasePath);
     switch (scenarioName) {
@@ -1146,385 +1074,3 @@ final class _ZipfianSampler {
 }
 
 int _elapsedNs(Stopwatch stopwatch) => stopwatch.elapsedMicroseconds * 1000;
-
-final class Sqlite3Peer implements SqlitePeer {
-  sqlite3.Database? _db;
-
-  @override
-  String get name => 'sqlite3';
-
-  @override
-  Future<void> open(String path) async {
-    _db = sqlite3.sqlite3.open(path);
-  }
-
-  @override
-  Future<void> close() async {
-    _db?.close();
-    _db = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    _db!.execute(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    return [
-      for (final row in _db!.select(sql, parameters))
-        Map<String, Object?>.from(row),
-    ];
-  }
-
-  @override
-  Future<void> executeBatch(
-    String sql,
-    List<List<Object?>> parameterSets,
-  ) async {
-    _db!.execute('BEGIN');
-    final statement = _db!.prepare(sql);
-    try {
-      for (final parameters in parameterSets) {
-        statement.execute(parameters);
-      }
-      _db!.execute('COMMIT');
-    } catch (_) {
-      _db!.execute('ROLLBACK');
-      rethrow;
-    } finally {
-      statement.close();
-    }
-  }
-}
-
-final class DriftPeer implements SqlitePeer, ReactiveSqlitePeer {
-  _TraceliteDriftDatabase? _db;
-
-  @override
-  String get name => 'drift';
-
-  @override
-  Future<void> open(String path) async {
-    _db = _TraceliteDriftDatabase(drift_native.NativeDatabase(File(path)));
-    await _db!.executor.ensureOpen(_db!);
-  }
-
-  @override
-  Future<void> close() async {
-    await _db?.close();
-    _db = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    await _db!.customStatement(sql, parameters);
-    _db!.notifyWritesFor(sql);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    final rows = await _db!
-        .customSelect(sql, variables: _driftVariables(parameters))
-        .get();
-    return [
-      for (final row in rows) Map<String, Object?>.from(row.data),
-    ];
-  }
-
-  @override
-  Future<void> executeBatch(
-    String sql,
-    List<List<Object?>> parameterSets,
-  ) async {
-    await _db!.customStatement('BEGIN');
-    try {
-      await _db!.executor.runBatched(
-        drift_backend.BatchedStatements(
-          [sql],
-          [
-            for (final parameters in parameterSets)
-              drift_backend.ArgumentsForBatchedStatement(0, parameters),
-          ],
-        ),
-      );
-      await _db!.customStatement('COMMIT');
-      _db!.notifyWritesFor(sql);
-    } catch (_) {
-      await _db!.customStatement('ROLLBACK');
-      rethrow;
-    }
-  }
-
-  @override
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  }) {
-    final tables = _db!.tablesFor(readsFrom);
-    return _db!
-        .customSelect(
-          sql,
-          variables: _driftVariables(parameters),
-          readsFrom: tables,
-        )
-        .watch()
-        .map((rows) => [
-              for (final row in rows) Map<String, Object?>.from(row.data),
-            ]);
-  }
-}
-
-final class _TraceliteDriftDatabase extends drift.GeneratedDatabase {
-  _TraceliteDriftDatabase(super.executor);
-
-  late final _tablesByName = {
-    for (final name in const [
-      'tracelite_keyed_items',
-      'tracelite_fanout_items',
-      'tracelite_wide_items',
-    ])
-      name: _TraceliteDriftTable(name, this),
-  };
-
-  @override
-  int get schemaVersion => 1;
-
-  @override
-  drift.MigrationStrategy get migration => drift.MigrationStrategy(
-        onCreate: (_) async {},
-      );
-
-  @override
-  Iterable<drift.TableInfo> get allTables => _tablesByName.values;
-
-  Set<drift.ResultSetImplementation> tablesFor(Set<String> tableNames) {
-    if (tableNames.isEmpty) {
-      throw const UnsupportedPeerScenario(
-        'drift reactive watches require readsFrom table names',
-      );
-    }
-    final tables = <drift.ResultSetImplementation>{};
-    for (final name in tableNames) {
-      final table = _tablesByName[name];
-      if (table == null) {
-        throw UnsupportedPeerScenario(
-          'drift reactive watch has no table registry entry for $name',
-        );
-      }
-      tables.add(table);
-    }
-    return tables;
-  }
-
-  void notifyWritesFor(String sql) {
-    final table = _writeTableFrom(sql);
-    if (table == null) return;
-    final driftTable = _tablesByName[table];
-    if (driftTable != null) {
-      markTablesUpdated([driftTable]);
-    }
-  }
-}
-
-final class _TraceliteDriftTable extends drift.Table
-    with drift.TableInfo<_TraceliteDriftTable, Map<String, Object?>> {
-  _TraceliteDriftTable(
-    this.actualTableName,
-    this.attachedDatabase, [
-    this._alias,
-  ]);
-
-  @override
-  final String actualTableName;
-
-  @override
-  final drift.DatabaseConnectionUser attachedDatabase;
-
-  final String? _alias;
-
-  @override
-  List<drift.GeneratedColumn> get $columns => const [];
-
-  @override
-  String get aliasedName => _alias ?? actualTableName;
-
-  @override
-  Map<String, Object?> map(
-    Map<String, dynamic> data, {
-    String? tablePrefix,
-  }) {
-    return Map<String, Object?>.from(data);
-  }
-
-  @override
-  _TraceliteDriftTable createAlias(String alias) {
-    return _TraceliteDriftTable(actualTableName, attachedDatabase, alias);
-  }
-}
-
-List<drift.Variable> _driftVariables(List<Object?> values) {
-  return [for (final value in values) _driftVariable(value)];
-}
-
-drift.Variable _driftVariable(Object? value) {
-  return switch (value) {
-    null => const drift.Variable<Object>(null),
-    bool value => drift.Variable.withBool(value),
-    int value => drift.Variable.withInt(value),
-    BigInt value => drift.Variable.withBigInt(value),
-    String value => drift.Variable.withString(value),
-    DateTime value => drift.Variable.withDateTime(value),
-    Uint8List value => drift.Variable.withBlob(value),
-    double value => drift.Variable.withReal(value),
-    _ => drift.Variable<Object>(value),
-  };
-}
-
-String? _writeTableFrom(String sql) {
-  final match = RegExp(
-    r'^\s*(?:'
-    r'insert\s+(?:or\s+\w+\s+)?into|'
-    r'replace\s+into|'
-    r'update|'
-    r'delete\s+from'
-    r')\s+["`\[]?([A-Za-z_][A-Za-z0-9_]*)',
-    caseSensitive: false,
-  ).firstMatch(sql);
-  return match?.group(1);
-}
-
-final class SqliteAsyncPeer implements SqlitePeer, ReactiveSqlitePeer {
-  sqlite_async.SqliteDatabase? _db;
-  sqlite3.Database? _raw;
-
-  @override
-  String get name => 'sqlite_async';
-
-  @override
-  Future<void> open(String path) async {
-    _raw = sqlite3.sqlite3.open(path);
-    _db = sqlite_async.SqliteDatabase.singleConnection(
-      sqlite_async.SqliteConnection.synchronousWrapper(
-        _raw!,
-        profileQueries: false,
-      ),
-    );
-    await _db!.getAll('SELECT 1');
-  }
-
-  @override
-  Future<void> close() async {
-    await _db?.close();
-    _db = null;
-    _raw = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    await _db!.execute(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    return [
-      for (final row in await _db!.getAll(sql, parameters))
-        Map<String, Object?>.from(row),
-    ];
-  }
-
-  @override
-  Future<void> executeBatch(String sql, List<List<Object?>> parameterSets) {
-    return _db!.executeBatch(sql, parameterSets);
-  }
-
-  @override
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  }) {
-    return _db!
-        .watchUnthrottled(
-          sql,
-          parameters: parameters,
-          triggerOnTables: readsFrom.isEmpty ? null : readsFrom,
-        )
-        .map((rows) => [
-              for (final row in rows) Map<String, Object?>.from(row),
-            ]);
-  }
-}
-
-final class ResqlitePeer
-    implements SqlitePeer, ReactiveSqlitePeer, DiagnosticSqlitePeer {
-  resqlite.Database? _db;
-
-  @override
-  String get name => 'resqlite';
-
-  @override
-  Future<void> open(String path) async {
-    _db = await resqlite.Database.open(path);
-  }
-
-  @override
-  Future<void> close() async {
-    await _db?.close();
-    _db = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    await _db!.execute(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) {
-    return _db!.select(sql, parameters);
-  }
-
-  @override
-  Future<void> executeBatch(String sql, List<List<Object?>> parameterSets) {
-    return _db!.executeBatch(sql, parameterSets);
-  }
-
-  @override
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  }) {
-    return _db!.stream(sql, parameters);
-  }
-
-  @override
-  Future<SqliteDiagnosticSnapshot> snapshotDiagnostics() async {
-    final diagnostics = await _db!.diagnostics();
-    return SqliteDiagnosticSnapshot(
-      sqlitePageCacheBytes: diagnostics.sqlitePageCacheBytes,
-      sqliteSchemaBytes: diagnostics.sqliteSchemaBytes,
-      sqliteStmtBytes: diagnostics.sqliteStmtBytes,
-      walBytes: diagnostics.walBytes,
-      streamCount: diagnostics.streamLength,
-      readerBusy: diagnostics.readersBusyAtSnapshot,
-    );
-  }
-}

@@ -126,8 +126,13 @@ Future<void> _doctor(List<String> args) async {
   requiredFile('tool/tracelite_dev.dart');
   requiredFile('tool/peer_runner.dart');
   requiredFile('tool/src/peer.dart');
+  requiredFile('tool/src/peer_contract.dart');
   requiredFile('tool/src/peer_definitions.dart');
+  requiredFile('tool/src/peer_drift.dart');
+  requiredFile('tool/src/peer_resqlite.dart');
   requiredFile('tool/src/peer_runtime_libraries.dart');
+  requiredFile('tool/src/peer_sqlite3.dart');
+  requiredFile('tool/src/peer_sqlite_async.dart');
   requiredFile('native/tracelite_runtime.c');
   requiredFile('native/tracelite_runtime.h');
   requiredFile('native/shim_sqlite3.c');
@@ -731,6 +736,7 @@ Future<void> _suite(List<String> args) async {
       scenarios.fold<int>(0, (sum, scenario) => sum + scenario.repetitions);
   final runner = await _preparePeerChildRunner(
     requestedMode: runnerMode,
+    interfaces: interfaceNames,
     tempRoot: tempRoot,
     useAppJitByDefault: totalSamples > 1 && scriptRunnerReason == null,
     autoFallbackReason: scriptRunnerReason,
@@ -1084,6 +1090,7 @@ Future<void> _compare(List<String> args) async {
   try {
     runner = await _preparePeerChildRunner(
       requestedMode: runnerMode,
+      interfaces: interfaces,
       tempRoot: tempRoot,
       useAppJitByDefault:
           interfaces.length * repetitions > 1 && scriptRunnerReason == null,
@@ -1378,12 +1385,16 @@ String _fileStem(String value) {
 
 Future<_PeerChildRunner> _preparePeerChildRunner({
   required String requestedMode,
+  required List<String> interfaces,
   required Directory tempRoot,
   required bool useAppJitByDefault,
   required String? autoFallbackReason,
 }) async {
   if (requestedMode == 'worker') {
-    return await _PeerChildRunner.startWorker(requestedMode: requestedMode);
+    return await _PeerChildRunner.startWorker(
+      requestedMode: requestedMode,
+      interfaces: interfaces,
+    );
   }
 
   final shouldUseAppJit = requestedMode == 'app-jit' ||
@@ -2922,8 +2933,9 @@ class _PeerChildRunner {
 
   static Future<_PeerChildRunner> startWorker({
     required String requestedMode,
+    required List<String> interfaces,
   }) async {
-    final runtimeLibraryPaths = workerRuntimeLibraryPaths();
+    final runtimeLibraryPaths = workerRuntimeLibraryPaths(peers: interfaces);
     if (runtimeLibraryPaths.isEmpty) {
       stderr.writeln(
         'missing Tracelite runtime libraries for --runner=worker; build '
@@ -2935,7 +2947,11 @@ class _PeerChildRunner {
     final stopwatch = Stopwatch()..start();
     final process = await Process.start(
       Platform.resolvedExecutable,
-      ['tool/peer_runner.dart', 'worker'],
+      [
+        'tool/peer_runner.dart',
+        'worker',
+        '--peers=${interfaces.join(',')}',
+      ],
       environment: _peerChildBaseEnvironment(),
       workingDirectory: Directory.current.path,
     );
