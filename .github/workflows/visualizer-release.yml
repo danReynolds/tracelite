@@ -1,0 +1,216 @@
+name: Visualizer Release
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/visualizer-release.yml'
+      - 'tool/visualizer_check.dart'
+      - 'tool/visualizer_app/**'
+      - 'test/visualizer_check_command_test.dart'
+      - 'test/visualizer_release_workflow_test.dart'
+      - 'README.md'
+      - 'doc/doctor.md'
+      - 'doc/visualizer-product-design.md'
+  workflow_dispatch:
+    inputs:
+      flutter_channel:
+        description: Flutter channel used to build visualizer packages.
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      sign_macos:
+        description: Sign and notarize the macOS archive with configured secrets.
+        required: true
+        default: false
+        type: boolean
+      publish_release:
+        description: Publish generated archives to a GitHub release.
+        required: true
+        default: false
+        type: boolean
+      release_tag:
+        description: Existing or new release tag when publish_release is true.
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+      - 'visualizer-v*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package visualizer (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x64
+            os: ubuntu-24.04
+          - label: macos-arm64
+            os: macos-14
+          - label: windows-x64
+            os: windows-2025
+
+    steps:
+      - name: Check out tracelite
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            libgtk-3-dev \
+            liblzma-dev \
+            ninja-build \
+            pkg-config
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter_channel || 'stable' }}
+          cache: true
+
+      - name: Install root Dart dependencies
+        run: dart pub get
+
+      - name: Prepare macOS signing credentials
+        if: >-
+          runner.os == 'macOS' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.sign_macos
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in \
+            MACOS_CERTIFICATE_P12_BASE64 \
+            MACOS_CERTIFICATE_PASSWORD \
+            MACOS_SIGN_IDENTITY \
+            MACOS_NOTARY_APPLE_ID \
+            MACOS_NOTARY_TEAM_ID \
+            MACOS_NOTARY_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::$name is required when sign_macos is true"
+              exit 64
+            fi
+          done
+
+          keychain_password="$(openssl rand -hex 16)"
+          keychain_path="$RUNNER_TEMP/tracelite-signing.keychain-db"
+          certificate_path="$RUNNER_TEMP/tracelite-developer-id.p12"
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" login.keychain-db
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+
+          xcrun notarytool store-credentials tracelite-notary \
+            --apple-id "$MACOS_NOTARY_APPLE_ID" \
+            --team-id "$MACOS_NOTARY_TEAM_ID" \
+            --password "$MACOS_NOTARY_PASSWORD"
+
+      - name: Build audited visualizer package
+        shell: bash
+        env:
+          SIGN_MACOS: ${{ runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.sign_macos }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          args=(
+            tool/visualizer_check.dart
+            --package=host
+            --require-clean-source=true
+            --out-dir=build/visualizer-release
+          )
+          if [[ "$SIGN_MACOS" == "true" ]]; then
+            args+=(--macos-sign-identity="$MACOS_SIGN_IDENTITY")
+            args+=(--macos-notary-profile=tracelite-notary)
+          fi
+          dart "${args[@]}"
+
+      - name: Upload visualizer archive evidence
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: tracelite-visualizer-${{ matrix.label }}
+          path: build/visualizer-release/
+          if-no-files-found: error
+
+  publish:
+    name: Publish visualizer release
+    needs: package
+    runs-on: ubuntu-24.04
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged visualizer artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: tracelite-visualizer-*
+          path: build/visualizer-release
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="${{ inputs.release_tag }}"
+          fi
+          if [[ -z "$tag" ]]; then
+            echo "::error::release_tag is required when publish_release is true"
+            exit 64
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --title "$RELEASE_TAG" \
+              --notes "Visualizer release artifacts generated by workflow $GITHUB_RUN_ID."
+          fi
+          gh release upload "$RELEASE_TAG" build/visualizer-release/* --clobber

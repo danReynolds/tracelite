@@ -41,3 +41,9 @@ dart run bin/tracelite.dart visualizer-check --build=host
 That command resolves the visualizer app dependencies, runs `flutter analyze`,
 runs `flutter test`, builds the current host release bundle, and verifies that
 the bundle was produced.
+
+For distributable visualizer archives, run the `Visualizer Release` GitHub
+workflow. It packages macOS, Linux, and Windows host builds with the same
+`visualizer-check --package=host --require-clean-source=true` path, uploads the
+archive/manifest evidence, and can publish the artifacts to a draft GitHub
+release. macOS signing and notarization require the workflow's release secrets.

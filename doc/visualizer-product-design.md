@@ -26,10 +26,14 @@ into raw tables.
 Production readiness checkpoint: the app is suitable for local developer
 dogfooding and release-mode smoke testing. `tracelite visualizer-check` resolves
 the Flutter app, runs analyze/tests, and can build plus verify the current host
-release bundle with `--build=host`. External distribution still requires
-signed/notarized packaging and a published release process. The product should
-not be advertised as a hosted dashboard; downstream public pages should continue
-to consume graph-ready JSON rather than embed this local deep-inspection UI.
+release bundle with `--build=host`. `visualizer-check --package=host` creates
+archive/manifest evidence, and the `Visualizer Release` GitHub workflow runs
+that package path on macOS, Linux, and Windows with optional macOS
+signing/notarization before publishing draft release assets. External
+distribution still requires a credentialed signed/notarized workflow run and a
+published release artifact. The product should not be advertised as a hosted
+dashboard; downstream public pages should continue to consume graph-ready JSON
+rather than embed this local deep-inspection UI.
 
 ## Verdict
 

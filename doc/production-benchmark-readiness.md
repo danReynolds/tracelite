@@ -23,10 +23,12 @@ the recorder overhead is small enough for profile-mode instrumentation. The
 remaining gap before using tracelite as resqlite's regular workflow is no longer
 basic production-gate viability, source reproducibility, or PR CI. The current
 resqlite-specific gap is adoption cleanup: resqlite needs to decide which old
-profile-only signals are archived versus kept for parity. Tracelite still needs
-public distribution polish (publishing metadata, signed packaged visualizer
-builds, and Windows native release host validation). Tracelite's own macOS and
-Linux CI pin and verify the trace-enabled resqlite sibling checkout at
+profile-only signals are archived versus kept for parity. Tracelite now has a
+manual/tagged `Visualizer Release` workflow for macOS, Linux, and Windows
+archive/manifest evidence, optional macOS signing/notarization, and release
+asset publishing; the remaining distribution gap is a credentialed signed run
+and published release artifact. Tracelite's own macOS and Linux CI pin and
+verify the trace-enabled resqlite sibling checkout at
 `a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
 gate cannot accidentally benchmark the pub package. Linux now has a focused
 package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite in CI. Windows
@@ -522,10 +524,12 @@ every Dart target.
 2. Decide whether to delete, archive, or demote resqlite's old direct profile
    runner now that tracelite emits workload summaries, graph data, decisions,
    and insight artifacts.
-3. Add a focused stress pass for the new drift reactive adapter, including
+3. Run the `Visualizer Release` workflow from a release tag with macOS signing
+   secrets configured, then attach the archive/manifest evidence to the release.
+4. Add a focused stress pass for the new drift reactive adapter, including
    larger stream counts and generated-app-style table metadata.
-4. Retune or resize `point-select` and `keyed-pk-subscriptions` until they can
+5. Retune or resize `point-select` and `keyed-pk-subscriptions` until they can
    join the ceiling-capped release gate without raising the 50% threshold
    ceiling.
-5. Stabilize or redesign `feed-paging`, `large-working-set`, and `sync-burst`
+6. Stabilize or redesign `feed-paging`, `large-working-set`, and `sync-burst`
    before promoting them from diagnostic to blocking release scenarios.

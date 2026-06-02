@@ -12,9 +12,9 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Next bottleneck:** production benchmark replacement hardening — keep the pinned
 resqlite PR green, decide how aggressively to retire the old resqlite direct
-profile runner, then finish diagnostic-workload noise reduction, packaging,
-Windows native runtime/shim validation, and full non-macOS production-suite
-evidence.
+profile runner, run the new visualizer release workflow with signing credentials,
+then finish diagnostic-workload noise reduction, Windows native runtime/shim
+validation, and full non-macOS production-suite evidence.
 
 ---
 
@@ -334,7 +334,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
 | Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `.pubignore` and `tool/publish_check.dart` exclude source-checkout peer runner files from the archive; `test/package_boundary_test.dart` forces core CLI mode and verifies core artifact commands including `diff` still run |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
-| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification |
+| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; the `Visualizer Release` workflow packages macOS/Linux/Windows archives and manifests with optional macOS signing/notarization |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
@@ -698,9 +698,10 @@ prototype.
 Work:
 
 - Package the CLI and runtime build outputs cleanly.
-- Keep the desktop visualizer on a repeatable local release-check path
-  (`tracelite visualizer-check --build=host`) until signed/notarized packaging
-  exists.
+- Keep the desktop visualizer on a repeatable release-check path:
+  `tracelite visualizer-check --build=host` for local bundle evidence and the
+  `Visualizer Release` workflow for macOS/Linux/Windows archive manifests,
+  optional macOS signing/notarization, and release asset publishing.
 - Validate Linux shim loading through the sqlite3 native-hook resolver path.
 - Validate Windows core artifact commands in CI while keeping native tracing
   explicitly unsupported until the runtime and SQLite shim have real Windows
