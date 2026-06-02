@@ -101,6 +101,60 @@ void main() {
     expect(diff.stdout.toString(), contains('neutral'));
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  test('worker runner retargets repeated sqlite samples', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-worker-compare-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final artifactPath = '${tempDir.path}/compare.json';
+    final compare = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=narrow-batch-insert',
+        '--interfaces=sqlite3',
+        '--rows=3',
+        '--repetitions=2',
+        '--runner=worker',
+        '--out-json=$artifactPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      compare.exitCode,
+      0,
+      reason: 'worker compare failed.\nstdout:\n${compare.stdout}\n'
+          'stderr:\n${compare.stderr}',
+    );
+
+    final artifact = jsonDecode(File(artifactPath).readAsStringSync())
+        as Map<String, Object?>;
+    final runner = artifact['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'worker');
+    expect(runner['requested_mode'], 'worker');
+    expect(runner['runtime_libraries'] as List<Object?>, isNotEmpty);
+
+    final peers = artifact['peers'] as List<Object?>;
+    final sqlite3 = peers.single as Map<String, Object?>;
+    expect(sqlite3['peer'], 'sqlite3');
+    expect(sqlite3['status'], 'ok');
+    final samples = sqlite3['samples'] as List<Object?>;
+    expect(samples, hasLength(2));
+    for (final sample in samples.cast<Map<String, Object?>>()) {
+      expect(sample['status'], 'ok');
+      expect(sample['child_elapsed_ns'] as int, greaterThan(0));
+      expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      expect(sample['sql_fingerprint_groups'] as List<Object?>, isNotEmpty);
+    }
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
   test('require-clean-source rejects dirty source checkouts', () async {
     final marker = File(
       '.tracelite-clean-source-test-${DateTime.now().microsecondsSinceEpoch}',

@@ -202,8 +202,10 @@ Run both: `dart test`. Both pass.
   repeated peer scenarios and writes benchmark artifacts with per-repetition
   scenario elapsed time, child process time, trace diagnostics, span groups, and
   counter groups. Multi-repetition or multi-peer compares default to an app-JIT
-  child runner so each repetition does not pay `dart run` startup. Suites reuse
-  one prepared child runner across the selected scenario matrix.
+  child runner where native assets allow it; native-assets-heavy repeated runs
+  can opt into `--runner=worker`, which records worker startup separately and
+  retargets each sample to a fresh trace region. Suites reuse one prepared child
+  runner across the selected scenario matrix.
 - `bin/tracelite.dart diff --baseline=base.json --candidate=change.json`
   compares compare artifacts by summary metric with CV gates, a 95% mean-delta
   confidence interval, Mann-Whitney U repetition evidence, and outlier counts.
@@ -502,10 +504,10 @@ Delivered:
   elapsed time, trace diagnostics, span groups, and counter groups.
 - Scenario elapsed time is measured inside the child process, so benchmark
   timings exclude `dart run` startup and native-asset build-hook overhead.
-- Multi-repetition or multi-peer compares default to an app-JIT child runner,
-  and source-checkout suites reuse one prepared runner across the selected
-  scenario matrix, reducing repeated runner setup without changing the
-  per-repetition artifact shape.
+- Multi-repetition or multi-peer compares default to an app-JIT child runner
+  where native assets allow it. `--runner=worker` keeps one process alive for
+  repeated native-assets-heavy runs and records startup in runner metadata
+  without changing the per-repetition artifact shape.
 - `tracelite diff --baseline=base.json --candidate=change.json` compares
   artifacts by summary metric with a percent threshold and coefficient-of-
   variation noise gate.
@@ -616,10 +618,14 @@ Work:
 - Scale ring sizing from expected event volume and fail loudly if any producer
   drops events.
 - Done first slice: source-checkout compare uses direct script launches for
-  single-shot runs and app-JIT child launches for repeated or multi-peer runs.
+  single-shot runs and app-JIT child launches for repeated or multi-peer runs
+  where native assets allow it.
 - Done follow-up: source-checkout suites now reuse one prepared runner across
   the selected scenario matrix while still launching an isolated child process
   for each peer repetition.
+- Done native-assets slice: `--runner=worker` reuses one process across repeated
+  samples, retargets each sample to a fresh trace region with quiescent native
+  reset, and records worker startup separately from repetition timings.
 
 Acceptance gates:
 

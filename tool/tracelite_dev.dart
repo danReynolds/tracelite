@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
+import 'package:ffi/ffi.dart';
 import 'package:tracelite/src/core_cli.dart';
 import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 import 'package:tracelite/tracelite.dart';
@@ -46,6 +48,8 @@ Future<void> main(List<String> args) async {
       await _calibrate(args.skip(1).toList());
     case '_run-peer':
       await _runPeer(args.skip(1).toList());
+    case '_run-peer-worker':
+      await _runPeerWorker(args.skip(1).toList());
     default:
       stderr.writeln('unknown command: $command');
       _usage();
@@ -764,6 +768,7 @@ Future<void> _suite(List<String> args) async {
       );
     }
   } finally {
+    await runner.close();
     try {
       tempRoot.deleteSync(recursive: true);
     } catch (_) {}
@@ -1062,8 +1067,9 @@ Future<void> _compare(List<String> args) async {
   _ensurePeerShimAvailable();
 
   final tempRoot = Directory.systemTemp.createTempSync('tracelite-compare-');
+  _PeerChildRunner? runner;
   try {
-    final runner = await _preparePeerChildRunner(
+    runner = await _preparePeerChildRunner(
       requestedMode: runnerMode,
       tempRoot: tempRoot,
       useAppJitByDefault:
@@ -1085,6 +1091,7 @@ Future<void> _compare(List<String> args) async {
       exitCode = 65;
     }
   } finally {
+    await runner?.close();
     try {
       tempRoot.deleteSync(recursive: true);
     } catch (_) {}
@@ -1119,22 +1126,17 @@ Future<_CompareRunResult> _runPeerCompare({
           ringDataWords: ringDataWords,
         );
 
-        final childStopwatch = Stopwatch()..start();
-        final child = await Process.run(
-          Platform.resolvedExecutable,
-          runner.arguments(_runPeerArgs(
-            peer: peer,
-            scenario: scenario,
-            databasePath: databasePath,
-            rows: rows,
-            metricsPath: metricsPath,
-          )),
-          environment: _peerChildEnvironment(regionPath),
+        final child = await runner.runPeer(
+          peer: peer,
+          scenario: scenario,
+          databasePath: databasePath,
+          rows: rows,
+          metricsPath: metricsPath,
+          regionPath: regionPath,
         );
-        childStopwatch.stop();
-        childElapsedNs = childStopwatch.elapsedMicroseconds * 1000;
-        childStdout = child.stdout.toString();
-        childStderr = child.stderr.toString();
+        childElapsedNs = child.elapsedNs;
+        childStdout = child.stdout;
+        childStderr = child.stderr;
         sampleStopwatch.stop();
 
         final metrics = _readPeerMetrics(metricsPath);
@@ -1320,8 +1322,8 @@ void _ensureSqliteNativeAssetUsesShim(String absoluteShimPath) {
 
 String _runnerModeOption(String? value) {
   final mode = value ?? 'auto';
-  if (!const {'auto', 'script', 'app-jit'}.contains(mode)) {
-    stderr.writeln('--runner must be auto, script, or app-jit');
+  if (!const {'auto', 'script', 'app-jit', 'worker'}.contains(mode)) {
+    stderr.writeln('--runner must be auto, script, app-jit, or worker');
     exit(64);
   }
   return mode;
@@ -1345,7 +1347,7 @@ void _rejectUnsupportedExplicitRunner(
   if (runnerMode != 'app-jit' || scriptRunnerReason == null) return;
   stderr.writeln(
     '--runner=app-jit is not supported here: $scriptRunnerReason. '
-    'Use --runner=auto or --runner=script.',
+    'Use --runner=auto, --runner=script, or --runner=worker.',
   );
   exit(64);
 }
@@ -1367,6 +1369,10 @@ Future<_PeerChildRunner> _preparePeerChildRunner({
   required bool useAppJitByDefault,
   required String? autoFallbackReason,
 }) async {
+  if (requestedMode == 'worker') {
+    return await _PeerChildRunner.startWorker(requestedMode: requestedMode);
+  }
+
   final shouldUseAppJit = requestedMode == 'app-jit' ||
       requestedMode == 'auto' && useAppJitByDefault;
   if (!shouldUseAppJit) {
@@ -1398,6 +1404,7 @@ Future<_PeerChildRunner> _preparePeerChildRunner({
         databasePath: databasePath,
         rows: 1,
         metricsPath: metricsPath,
+        traceRegionPath: regionPath,
       ),
     ],
     environment: _peerChildEnvironment(regionPath),
@@ -1431,6 +1438,7 @@ List<String> _runPeerArgs({
   required String databasePath,
   required int rows,
   required String metricsPath,
+  String? traceRegionPath,
 }) {
   return [
     '_run-peer',
@@ -1439,14 +1447,21 @@ List<String> _runPeerArgs({
     '--database=$databasePath',
     '--rows=$rows',
     '--metrics=$metricsPath',
+    if (traceRegionPath != null) '--trace-region=$traceRegionPath',
   ];
+}
+
+Map<String, String> _peerChildBaseEnvironment() {
+  return {
+    'DYLD_LIBRARY_PATH': Directory.current.absolute.path,
+    'LD_LIBRARY_PATH': Directory.current.absolute.path,
+  };
 }
 
 Map<String, String> _peerChildEnvironment(String regionPath) {
   return {
+    ..._peerChildBaseEnvironment(),
     'TRACELITE_REGION': regionPath,
-    'DYLD_LIBRARY_PATH': Directory.current.absolute.path,
-    'LD_LIBRARY_PATH': Directory.current.absolute.path,
   };
 }
 
@@ -1712,6 +1727,7 @@ Future<void> _runPeer(List<String> args) async {
   final scenario = options['scenario'] ?? narrowBatchInsertScenario;
   final database = options['database'];
   final metrics = options['metrics'];
+  final traceRegionPath = options['trace-region'];
   final rows = int.tryParse(options['rows'] ?? '100') ?? 100;
   if (peer == null || database == null) {
     stderr.writeln('_run-peer requires --peer and --database');
@@ -1726,23 +1742,170 @@ Future<void> _runPeer(List<String> args) async {
       scenarioName: scenario,
       databasePath: database,
       rows: rows,
+      traceRegionPath: traceRegionPath,
     );
   } on UnsupportedPeerScenario catch (error) {
     unsupported = error;
   } finally {
     stopwatch.stop();
-    if (metrics != null && metrics.isNotEmpty) {
-      File(metrics).writeAsStringSync(
+    _writePeerMetrics(
+      metricsPath: metrics,
+      stopwatch: stopwatch,
+      result: result,
+      unsupported: unsupported,
+    );
+  }
+}
+
+Future<void> _runPeerWorker(List<String> args) async {
+  if (args.isNotEmpty) {
+    stderr.writeln('_run-peer-worker does not accept arguments');
+    exit(64);
+  }
+
+  final runtimes = _openWorkerRuntimeBindings();
+  if (runtimes.isEmpty) {
+    stderr.writeln(
+      'peer worker could not find a Tracelite runtime library. '
+      'Build native artifacts and run dart pub get before using '
+      '--runner=worker.',
+    );
+    exit(66);
+  }
+  stdout.writeln(
+    jsonEncode({
+      'command': 'ready',
+      'runtime_libraries': runtimes.map((runtime) => runtime.path).toList(),
+    }),
+  );
+
+  await for (final line
+      in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
+    if (line.trim().isEmpty) continue;
+    Object? requestId;
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is! Map<String, Object?>) {
+        throw const FormatException('worker request must be a JSON object');
+      }
+      requestId = decoded['id'];
+      if (decoded['command'] == 'shutdown') {
+        break;
+      }
+      stdout.writeln(
+        jsonEncode(await _runPeerWorkerRequest(decoded, runtimes)),
+      );
+    } on Object catch (error, stackTrace) {
+      stdout.writeln(
         jsonEncode({
-          'schema': 'tracelite.peer_metrics.v1',
-          'status': unsupported == null ? 'ok' : 'unsupported',
-          if (unsupported != null) 'unsupported_reason': unsupported.message,
-          'scenario_elapsed_ns': stopwatch.elapsedMicroseconds * 1000,
-          if (result != null) ...result.toJson(),
+          if (requestId != null) 'id': requestId,
+          'exit_code': 65,
+          'stdout': '',
+          'stderr': '$error\n$stackTrace',
         }),
       );
     }
   }
+}
+
+Future<Map<String, Object?>> _runPeerWorkerRequest(
+  Map<String, Object?> request,
+  List<_WorkerRuntimeBinding> runtimes,
+) async {
+  final id = request['id'];
+  final peer = _requiredWorkerString(request, 'peer');
+  final scenario = _requiredWorkerString(request, 'scenario');
+  final database = _requiredWorkerString(request, 'database');
+  final metrics = _requiredWorkerString(request, 'metrics');
+  final regionPath = _requiredWorkerString(request, 'region');
+  final rows = _requiredWorkerInt(request, 'rows');
+  final stopwatch = Stopwatch()..start();
+  PeerScenarioResult? result;
+  UnsupportedPeerScenario? unsupported;
+  var exitCode = 0;
+  var stderrText = '';
+
+  try {
+    for (final runtime in runtimes) {
+      runtime.attach(regionPath);
+    }
+    try {
+      result = await runPeerScenario(
+        peerName: peer,
+        scenarioName: scenario,
+        databasePath: database,
+        rows: rows,
+        traceRegionPath: regionPath,
+      );
+    } on UnsupportedPeerScenario catch (error) {
+      unsupported = error;
+    }
+  } on Object catch (error, stackTrace) {
+    exitCode = 65;
+    stderrText = '$error\n$stackTrace';
+  } finally {
+    stopwatch.stop();
+    _writePeerMetrics(
+      metricsPath: metrics,
+      stopwatch: stopwatch,
+      result: result,
+      unsupported: unsupported,
+    );
+    final resetErrors = <String>[];
+    for (final runtime in runtimes.reversed) {
+      try {
+        runtime.reset();
+      } on Object catch (error) {
+        resetErrors.add('${runtime.path}: $error');
+      }
+    }
+    if (resetErrors.isNotEmpty) {
+      exitCode = 65;
+      stderrText = [
+        if (stderrText.isNotEmpty) stderrText,
+        'peer worker runtime reset failed:',
+        ...resetErrors,
+      ].join('\n');
+    }
+  }
+
+  return {
+    'id': id,
+    'exit_code': exitCode,
+    'stdout': '',
+    'stderr': stderrText,
+    'runtime_libraries': runtimes.map((runtime) => runtime.path).toList(),
+  };
+}
+
+void _writePeerMetrics({
+  required String? metricsPath,
+  required Stopwatch stopwatch,
+  required PeerScenarioResult? result,
+  required UnsupportedPeerScenario? unsupported,
+}) {
+  if (metricsPath == null || metricsPath.isEmpty) return;
+  File(metricsPath).writeAsStringSync(
+    jsonEncode({
+      'schema': 'tracelite.peer_metrics.v1',
+      'status': unsupported == null ? 'ok' : 'unsupported',
+      if (unsupported != null) 'unsupported_reason': unsupported.message,
+      'scenario_elapsed_ns': stopwatch.elapsedMicroseconds * 1000,
+      if (result != null) ...result.toJson(),
+    }),
+  );
+}
+
+String _requiredWorkerString(Map<String, Object?> request, String key) {
+  final value = request[key];
+  if (value is String && value.isNotEmpty) return value;
+  throw FormatException('worker request missing string "$key"');
+}
+
+int _requiredWorkerInt(Map<String, Object?> request, String key) {
+  final value = request[key];
+  if (value is int) return value;
+  throw FormatException('worker request missing int "$key"');
 }
 
 Map<String, String> _parseOptions(
@@ -2882,6 +3045,20 @@ class _CompareRunResult {
   final bool failed;
 }
 
+class _PeerChildRunResult {
+  const _PeerChildRunResult({
+    required this.exitCode,
+    required this.elapsedNs,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int exitCode;
+  final int elapsedNs;
+  final String stdout;
+  final String stderr;
+}
+
 class _PeerChildRunner {
   _PeerChildRunner._({
     required this.mode,
@@ -2889,6 +3066,8 @@ class _PeerChildRunner {
     this.snapshotPath,
     this.buildElapsedNs,
     this.fallbackReason,
+    this.workerProcess,
+    this.runtimeLibraryPaths = const [],
   });
 
   factory _PeerChildRunner.script({
@@ -2915,13 +3094,99 @@ class _PeerChildRunner {
     );
   }
 
+  static Future<_PeerChildRunner> startWorker({
+    required String requestedMode,
+  }) async {
+    final runtimeLibraryPaths = _workerRuntimeLibraryPaths();
+    if (runtimeLibraryPaths.isEmpty) {
+      stderr.writeln(
+        'missing Tracelite runtime libraries for --runner=worker; build '
+        'native artifacts and run dart pub get before peer suites.',
+      );
+      exit(66);
+    }
+
+    final stopwatch = Stopwatch()..start();
+    final process = await Process.start(
+      Platform.resolvedExecutable,
+      ['tool/tracelite_dev.dart', '_run-peer-worker'],
+      environment: _peerChildBaseEnvironment(),
+      workingDirectory: Directory.current.path,
+    );
+    final workerProcess = _PeerWorkerProcess(process);
+    final readyRuntimeLibraryPaths = await workerProcess.ready.timeout(
+      const Duration(seconds: 60),
+      onTimeout: () async {
+        await workerProcess.close();
+        stderr.writeln('peer worker did not become ready within 60s.');
+        exit(66);
+      },
+    );
+    stopwatch.stop();
+    return _PeerChildRunner._(
+      mode: 'worker',
+      requestedMode: requestedMode,
+      buildElapsedNs: stopwatch.elapsedMicroseconds * 1000,
+      workerProcess: workerProcess,
+      runtimeLibraryPaths: readyRuntimeLibraryPaths,
+    );
+  }
+
   final String mode;
   final String requestedMode;
   final String? snapshotPath;
   final int? buildElapsedNs;
   final String? fallbackReason;
+  final _PeerWorkerProcess? workerProcess;
+  final List<String> runtimeLibraryPaths;
 
-  List<String> arguments(List<String> peerArgs) {
+  Future<_PeerChildRunResult> runPeer({
+    required String peer,
+    required String scenario,
+    required String databasePath,
+    required int rows,
+    required String metricsPath,
+    required String regionPath,
+  }) async {
+    final workerProcess = this.workerProcess;
+    if (workerProcess != null) {
+      return await workerProcess.runPeer(
+        peer: peer,
+        scenario: scenario,
+        databasePath: databasePath,
+        rows: rows,
+        metricsPath: metricsPath,
+        regionPath: regionPath,
+      );
+    }
+
+    final stopwatch = Stopwatch()..start();
+    final child = await Process.run(
+      Platform.resolvedExecutable,
+      _arguments(_runPeerArgs(
+        peer: peer,
+        scenario: scenario,
+        databasePath: databasePath,
+        rows: rows,
+        metricsPath: metricsPath,
+        traceRegionPath: regionPath,
+      )),
+      environment: _peerChildEnvironment(regionPath),
+    );
+    stopwatch.stop();
+    return _PeerChildRunResult(
+      exitCode: child.exitCode,
+      elapsedNs: stopwatch.elapsedMicroseconds * 1000,
+      stdout: child.stdout.toString(),
+      stderr: child.stderr.toString(),
+    );
+  }
+
+  Future<void> close() async {
+    await workerProcess?.close();
+  }
+
+  List<String> _arguments(List<String> peerArgs) {
     final snapshot = snapshotPath;
     if (mode == 'app_jit' && snapshot != null) {
       return [snapshot, ...peerArgs];
@@ -2934,7 +3199,295 @@ class _PeerChildRunner {
         'requested_mode': requestedMode,
         if (buildElapsedNs != null) 'build_elapsed_ns': buildElapsedNs,
         if (fallbackReason != null) 'fallback_reason': fallbackReason,
+        if (runtimeLibraryPaths.isNotEmpty)
+          'runtime_libraries': runtimeLibraryPaths,
       };
+}
+
+class _PeerWorkerProcess {
+  _PeerWorkerProcess(this._process) {
+    _stdoutSubscription = _process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(
+      _handleStdoutLine,
+      onDone: _completePendingOnExit,
+      onError: (Object error) {
+        _workerStderr.writeln('worker stdout error: $error');
+        _completePendingOnExit();
+      },
+    );
+    _stderrSubscription = _process.stderr.transform(utf8.decoder).listen(
+      _workerStderr.write,
+      onDone: () {},
+      onError: (Object error) {
+        _workerStderr.writeln('worker stderr error: $error');
+      },
+    );
+    _process.exitCode.then((_) => _completePendingOnExit());
+  }
+
+  final Process _process;
+  late final StreamSubscription<String> _stdoutSubscription;
+  late final StreamSubscription<String> _stderrSubscription;
+  final _pending = <int, Completer<_PeerChildRunResult>>{};
+  final _stopwatches = <int, Stopwatch>{};
+  final _workerStdoutNoise = StringBuffer();
+  final _workerStderr = StringBuffer();
+  final _ready = Completer<List<String>>();
+  var _nextId = 1;
+  var _closed = false;
+
+  Future<List<String>> get ready => _ready.future;
+
+  Future<_PeerChildRunResult> runPeer({
+    required String peer,
+    required String scenario,
+    required String databasePath,
+    required int rows,
+    required String metricsPath,
+    required String regionPath,
+  }) {
+    if (_closed) {
+      throw StateError('peer worker is already closed');
+    }
+    final id = _nextId++;
+    final completer = Completer<_PeerChildRunResult>();
+    final stopwatch = Stopwatch()..start();
+    _pending[id] = completer;
+    _stopwatches[id] = stopwatch;
+    _process.stdin.writeln(
+      jsonEncode({
+        'id': id,
+        'peer': peer,
+        'scenario': scenario,
+        'database': databasePath,
+        'rows': rows,
+        'metrics': metricsPath,
+        'region': regionPath,
+      }),
+    );
+    return completer.future;
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    try {
+      _process.stdin.writeln(jsonEncode({'command': 'shutdown'}));
+      await _process.stdin.flush();
+      await _process.stdin.close();
+    } on Object {
+      _process.kill();
+    }
+    try {
+      await _process.exitCode.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      _process.kill();
+      await _process.exitCode.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => -1,
+      );
+    }
+    await _stdoutSubscription.cancel();
+    await _stderrSubscription.cancel();
+  }
+
+  void _handleStdoutLine(String line) {
+    final decoded = _tryDecodeWorkerResponse(line);
+    if (decoded == null) {
+      _workerStdoutNoise.writeln(line);
+      return;
+    }
+    if (decoded['command'] == 'ready') {
+      final libraries = decoded['runtime_libraries'];
+      if (!_ready.isCompleted && libraries is List) {
+        _ready.complete([
+          for (final library in libraries)
+            if (library is String) library,
+        ]);
+      }
+      return;
+    }
+    final id = decoded['id'];
+    if (id is! int) {
+      _workerStdoutNoise.writeln(line);
+      return;
+    }
+    final completer = _pending.remove(id);
+    final stopwatch = _stopwatches.remove(id);
+    if (completer == null || stopwatch == null) {
+      _workerStdoutNoise.writeln(line);
+      return;
+    }
+    stopwatch.stop();
+    if (completer.isCompleted) return;
+    final stdoutText = [
+      if (_workerStdoutNoise.isNotEmpty) _workerStdoutNoise.toString(),
+      if (decoded['stdout'] is String) decoded['stdout']! as String,
+    ].where((value) => value.isNotEmpty).join();
+    _workerStdoutNoise.clear();
+    completer.complete(
+      _PeerChildRunResult(
+        exitCode:
+            decoded['exit_code'] is int ? decoded['exit_code']! as int : 65,
+        elapsedNs: stopwatch.elapsedMicroseconds * 1000,
+        stdout: stdoutText,
+        stderr: decoded['stderr'] is String ? decoded['stderr']! as String : '',
+      ),
+    );
+  }
+
+  Map<String, Object?>? _tryDecodeWorkerResponse(String line) {
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is Map<String, Object?>) return decoded;
+    } on Object {
+      return null;
+    }
+    return null;
+  }
+
+  Future<void> _completePendingOnExit() async {
+    final exitCode = await _process.exitCode;
+    if (!_ready.isCompleted) {
+      _ready.completeError(
+        StateError(
+          'peer worker exited before ready (exit $exitCode).\n'
+          '${_workerStderr.toString()}',
+        ),
+      );
+    }
+    if (_pending.isEmpty) return;
+    final stderrText = [
+      'peer worker exited before completing request (exit $exitCode).',
+      if (_workerStdoutNoise.isNotEmpty)
+        'worker stdout:\n${_workerStdoutNoise.toString()}',
+      if (_workerStderr.isNotEmpty)
+        'worker stderr:\n${_workerStderr.toString()}',
+    ].join('\n');
+    for (final entry in _pending.entries.toList()) {
+      final id = entry.key;
+      final completer = entry.value;
+      final stopwatch = _stopwatches.remove(id);
+      stopwatch?.stop();
+      if (!completer.isCompleted) {
+        completer.complete(
+          _PeerChildRunResult(
+            exitCode: exitCode,
+            elapsedNs: (stopwatch?.elapsedMicroseconds ?? 0) * 1000,
+            stdout: _workerStdoutNoise.toString(),
+            stderr: stderrText,
+          ),
+        );
+      }
+    }
+    _pending.clear();
+  }
+}
+
+typedef _WorkerAttachNative = Int32 Function(Pointer<Utf8>);
+typedef _WorkerAttachDart = int Function(Pointer<Utf8>);
+typedef _WorkerResetNative = Void Function();
+typedef _WorkerResetDart = void Function();
+
+class _WorkerRuntimeBinding {
+  _WorkerRuntimeBinding._({
+    required this.path,
+    required _WorkerAttachDart attach,
+    required _WorkerResetDart reset,
+  })  : _attach = attach,
+        _reset = reset;
+
+  final String path;
+  final _WorkerAttachDart _attach;
+  final _WorkerResetDart _reset;
+
+  static _WorkerRuntimeBinding? tryOpen(String path) {
+    try {
+      final library = DynamicLibrary.open(path);
+      return _WorkerRuntimeBinding._(
+        path: path,
+        attach: library.lookupFunction<_WorkerAttachNative, _WorkerAttachDart>(
+          'tlt_attach',
+        ),
+        reset: library.lookupFunction<_WorkerResetNative, _WorkerResetDart>(
+          'tlt_reset_runtime',
+        ),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  void attach(String regionPath) {
+    final pointer = regionPath.toNativeUtf8();
+    try {
+      final result = _attach(pointer);
+      if (result != 0) {
+        throw StateError('tlt_attach returned $result');
+      }
+    } finally {
+      calloc.free(pointer);
+    }
+  }
+
+  void reset() {
+    _reset();
+  }
+}
+
+List<_WorkerRuntimeBinding> _openWorkerRuntimeBindings() {
+  return [
+    for (final path in _workerRuntimeLibraryPaths())
+      if (_WorkerRuntimeBinding.tryOpen(path) case final runtime?) runtime,
+  ];
+}
+
+List<String> _workerRuntimeLibraryPaths() {
+  final paths = <String>{};
+
+  void addPath(String path) {
+    if (path.isEmpty) return;
+    final file = File(path);
+    if (file.existsSync()) {
+      paths.add(file.absolute.path);
+    }
+  }
+
+  addPath(native_artifacts.defaultRuntimeLibraryPath());
+  addPath(native_artifacts.sqliteShimLibraryPath());
+  addPath(native_artifacts.sqliteShimLibraryName());
+
+  final nativeAssets = File('.dart_tool/native_assets.yaml');
+  if (nativeAssets.existsSync()) {
+    final raw = nativeAssets.readAsStringSync();
+    final jsonStart = raw.indexOf('{');
+    if (jsonStart >= 0) {
+      final decoded = jsonDecode(raw.substring(jsonStart));
+      if (decoded is Map<String, Object?>) {
+        final assets = decoded['native-assets'];
+        if (assets is Map) {
+          for (final platformAssets in assets.values) {
+            if (platformAssets is! Map) continue;
+            for (final asset in platformAssets.values) {
+              if (asset is! List || asset.length < 2) continue;
+              final kind = asset[0];
+              final location = asset[1];
+              if (location is! String) continue;
+              if (kind == 'absolute') {
+                addPath(location);
+              } else if (kind == 'system') {
+                addPath(location);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return paths.toList(growable: false);
 }
 
 class _SuiteProfile {
@@ -3303,20 +3856,20 @@ Never _usage({int exitCode = 64}) {
   output.writeln('  dart run bin/tracelite.dart compare '
       '--scenario=<${defaultScenarioNames.join('|')}> '
       '--interfaces=sqlite3,drift,sqlite_async,resqlite '
-      '[--repetitions=5] [--runner=auto|script|app-jit] '
+      '[--repetitions=5] [--runner=auto|script|app-jit|worker] '
       '[--require-clean-source=true] [--out-json=compare.json]');
   output.writeln('  dart run bin/tracelite.dart suite '
       '[--profile=ci|experiment|production] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
       '[--min-repetitions=5] '
-      '[--runner=auto|script|app-jit] '
+      '[--runner=auto|script|app-jit|worker] '
       '[--require-clean-source=true] [--out-dir=build/tracelite-suite]');
   output.writeln('  dart run bin/tracelite.dart suite-history '
       '[--profile=ci|experiment|production] [--runs=5] '
       '[--interfaces=sqlite3,drift,...] '
       '[--scenarios=narrow-batch-insert,...] '
-      '[--runner=auto|script|app-jit] '
+      '[--runner=auto|script|app-jit|worker] '
       '[--metrics=elapsed_ns,...] [--target-rse-percent=2.5] '
       '[--min-repetitions=5] [--max-repetitions=30] '
       '[--within-run-noise-percentile=0.75] '

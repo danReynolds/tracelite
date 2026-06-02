@@ -487,10 +487,13 @@ startup for every peer repetition: source-checkout `compare` launches direct
 scripts for single-shot runs and prepares an app-JIT child runner for repeated
 or multi-peer runs when the selected peers can safely share a prepared
 snapshot. Native-asset peers such as `resqlite` stay on the direct script
-runner in `auto` mode. Source-checkout `suite` reuses one prepared runner
-across the selected scenario matrix when available, avoiding repeated runner
-setup for each scenario while preserving one isolated child process per peer
-repetition.
+runner in `auto` mode. Repeated native-assets-heavy runs can opt into
+`--runner=worker`, which keeps one process alive, explicitly attaches each
+sample to a fresh trace region, resets native Tracelite runtimes at quiescent
+sample boundaries, and records worker startup in `runner.build_elapsed_ns`.
+Source-checkout `suite` reuses one prepared runner across the selected scenario
+matrix when available, avoiding repeated runner setup for each scenario while
+preserving one isolated child process per peer repetition.
 `tracelite explain` flags compare artifacts where child-process wall time still
 dwarfs measured workload time, so smoke-sized artifacts are visibly classified
 as harness-dominated rather than quietly treated as production evidence.

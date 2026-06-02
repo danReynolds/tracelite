@@ -303,6 +303,7 @@ Future<PeerScenarioResult> runPeerScenario({
   required String scenarioName,
   required String databasePath,
   int rows = 100,
+  String? traceRegionPath,
 }) async {
   final peer = createPeer(peerName);
   try {
@@ -327,7 +328,11 @@ Future<PeerScenarioResult> runPeerScenario({
       case manyStreamsWriterThroughputScenario:
         return await _runManyStreamsWriterThroughput(peer, rows: rows);
       case sqliteDiagnosticsScenario:
-        return await _runSqliteDiagnostics(peer, rows: rows);
+        return await _runSqliteDiagnostics(
+          peer,
+          rows: rows,
+          traceRegionPath: traceRegionPath,
+        );
       default:
         throw ArgumentError.value(
           scenarioName,
@@ -984,6 +989,7 @@ Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
 Future<PeerScenarioResult> _runSqliteDiagnostics(
   SqlitePeer peer, {
   required int rows,
+  String? traceRegionPath,
 }) async {
   final diagnosticPeer = _requireDiagnosticPeer(peer);
   final setup = Stopwatch()..start();
@@ -1010,6 +1016,7 @@ Future<PeerScenarioResult> _runSqliteDiagnostics(
   }
   final snapshot = await diagnosticPeer.snapshotDiagnostics();
   final session = tracelite_resqlite.TraceSession.attach(
+    regionPath: traceRegionPath,
     processName: 'tracelite_peer',
     threadName: 'resqlite_diagnostics',
     vocabularies: const [tracelite_resqlite.resqliteTraceVocabulary],

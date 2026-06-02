@@ -55,6 +55,12 @@ void main() {
       reason: 'The published launcher should stay a thin boundary wrapper. '
           'Core artifact commands live in lib/src/core_cli.dart.',
     );
+    expect(
+      binSource.indexOf('if (isTraceliteCoreCommand(command))'),
+      lessThan(binSource.indexOf('_sourceCheckoutCommands.contains(command)')),
+      reason: 'Core artifact commands must not be routed through the heavy '
+          'source-checkout peer benchmark CLI.',
+    );
 
     final tempDir = await Directory.systemTemp.createTemp(
       'tracelite-core-cli-boundary-test-',

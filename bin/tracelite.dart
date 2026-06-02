@@ -3,44 +3,60 @@ import 'dart:io';
 
 import 'package:tracelite/src/core_cli.dart';
 
-const _peerCommands = {
+const _sourceCheckoutCommands = {
+  'doctor',
   'compare',
+  'visualize',
+  'visualizer-check',
   'suite',
   'suite-history',
-  'visualizer-check',
+  'calibrate',
   '_run-peer',
+  '_run-peer-worker',
 };
 
 Future<void> main(List<String> args) async {
   final root = _checkoutRoot();
   final forceCore = Platform.environment['TRACELITE_FORCE_CORE_CLI'] == 'true';
-  if (!forceCore && await _canRunDevelopmentCli(root)) {
-    final process = await Process.start(
-      Platform.resolvedExecutable,
-      [_join(root, 'tool/tracelite_dev.dart'), ...args],
-      mode: ProcessStartMode.inheritStdio,
-    );
-    exitCode = await process.exitCode;
-    return;
-  }
 
   if (args.isEmpty || _isTopLevelHelp(args.first)) {
+    if (!forceCore && await _canRunDevelopmentCli(root)) {
+      await _runDevelopmentCli(root, args);
+      return;
+    }
     printTraceliteCoreUsage(exitCode: args.isEmpty ? 64 : 0);
   }
 
   final command = args.first;
-  if (_peerCommands.contains(command)) {
-    _printPeerUnavailable(command);
-    exitCode = 64;
-    return;
-  }
   if (isTraceliteCoreCommand(command)) {
     runTraceliteCoreCli(args);
     return;
   }
 
+  if (!forceCore &&
+      _sourceCheckoutCommands.contains(command) &&
+      await _canRunDevelopmentCli(root)) {
+    await _runDevelopmentCli(root, args);
+    return;
+  }
+
+  if (_sourceCheckoutCommands.contains(command)) {
+    _printPeerUnavailable(command);
+    exitCode = 64;
+    return;
+  }
+
   stderr.writeln('unknown or source-checkout-only command: $command');
   printTraceliteCoreUsage();
+}
+
+Future<void> _runDevelopmentCli(String root, List<String> args) async {
+  final process = await Process.start(
+    Platform.resolvedExecutable,
+    [_join(root, 'tool/tracelite_dev.dart'), ...args],
+    mode: ProcessStartMode.inheritStdio,
+  );
+  exitCode = await process.exitCode;
 }
 
 bool _isTopLevelHelp(String arg) =>

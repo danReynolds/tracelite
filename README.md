@@ -108,6 +108,13 @@ dart run bin/tracelite.dart compare \
   --interfaces=sqlite3,resqlite \
   --repetitions=5
 
+# Native-assets-heavy repeated runs can opt into a long-lived worker.
+dart run bin/tracelite.dart compare \
+  --scenario=narrow-batch-insert \
+  --interfaces=resqlite \
+  --repetitions=5 \
+  --runner=worker
+
 # Source-checkout desktop visualizer launcher.
 dart run bin/tracelite.dart visualize build/graph-data
 
@@ -129,10 +136,13 @@ app-JIT child runner when the selected peers can safely share a prepared
 snapshot, so artifacts still have isolated repetitions without paying
 `dart run` startup for every sample. Native-asset peers such as `resqlite`
 stay on the direct script runner in `auto` mode because prepared snapshots do
-not preserve the native-assets metadata they need. Source-checkout suites reuse
-one prepared child runner across the selected scenario matrix when available,
-so production suites still write one compare artifact per scenario while
-avoiding repeated runner setup for every scenario.
+not preserve the native-assets metadata they need. For repeated native-assets
+runs, pass `--runner=worker`: it keeps one child process alive, retargets each
+sample to a fresh trace region, and records startup in `runner.build_elapsed_ns`
+instead of hiding it in repetition timings. Source-checkout suites reuse one
+prepared child runner across the selected scenario matrix when available, so
+production suites still write one compare artifact per scenario while avoiding
+repeated runner setup for every scenario.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the

@@ -56,7 +56,7 @@ void main() {
       devCli,
       contains('[--profile=ci|experiment|production] [--runs=5]'),
     );
-    expect(devCli, contains('[--runner=auto|script|app-jit]'));
+    expect(devCli, contains('[--runner=auto|script|app-jit|worker]'));
   });
 
   test('visualizer release docs include package and source gate options', () {
