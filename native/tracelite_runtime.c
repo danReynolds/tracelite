@@ -80,6 +80,7 @@ static uint64_t g_start_monotonic_ns = 0;
 static uint64_t monotonic_ns(void);
 static tlt_ring_header_t* ring_for_track(int track_id);
 static int valid_track_id(int track_id);
+static int has_active_tracks(void);
 static void reset_mapping_state(void);
 
 /* ---- Clock ---- */
@@ -109,6 +110,8 @@ uint64_t tlt_now_ns(void) {
 /* ---- Attach ---- */
 
 int tlt_attach(const char* explicit_path) {
+  if (tlt_active) return 0;
+
   const char* path = explicit_path;
   if (!path) path = getenv("TRACELITE_REGION");
   if (!path) {
@@ -224,6 +227,8 @@ static void reset_mapping_state(void) {
   g_string_pool = NULL;
   g_ring_section = NULL;
   g_start_monotonic_ns = 0;
+  tlt_my_track_id = -1;
+  tlt_my_ring = NULL;
   tlt_active = 0;
 }
 
@@ -231,6 +236,9 @@ void tlt_detach_track(uint8_t track_id) {
   if (!tlt_active || !valid_track_id(track_id)) return;
   g_registry[track_id].state = 3;  /* ended */
   ring_for_track(track_id)->producer_state = 3;
+  if (!has_active_tracks()) {
+    reset_mapping_state();
+  }
 }
 
 /* ---- Producer registry ---- */
@@ -277,6 +285,18 @@ static tlt_ring_header_t* ring_for_track(int track_id) {
 
 static int valid_track_id(int track_id) {
   return g_region && track_id >= 0 && (uint32_t)track_id < g_region->max_producers;
+}
+
+static int has_active_tracks(void) {
+  if (!g_region || !g_registry) return 0;
+  uint32_t max = g_region->max_producers;
+  for (uint32_t i = 0; i < max; i++) {
+    uint8_t state = atomic_load_explicit(
+        (_Atomic(uint8_t)*)&g_registry[i].state,
+        memory_order_acquire);
+    if (state == 1 || state == 2) return 1;
+  }
+  return 0;
 }
 
 /* ---- String pool (CAS allocator) ---- */
