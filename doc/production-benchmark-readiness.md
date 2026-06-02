@@ -178,50 +178,51 @@ The detailed policy is documented in
 
 ## Evidence from this pass
 
-### Scoped resqlite production gate, 2026-05-31
+### Current r8 resqlite production gate, 2026-06-02
 
 Command:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/run_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
-  --dart=/Users/dan/Coding/flutter_arm64/bin/dart \
-  --label=sole-gate-2026-05-31-resqlite-p75-ready-probe \
-  --out-dir=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe \
-  --graph-data-dir=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/graph-data \
-  --runs=5 \
-  --interfaces=resqlite
+dart run benchmark/run_tracelite.dart \
+  --preset=production \
+  --tracelite-root=/path/to/tracelite \
+  --resqlite-root="$PWD" \
+  --label=production-pin-r8-resqlite-policy-2026-06-02-r3 \
+  --out-dir=build/tracelite-benchmarks/production-pin-r8-resqlite-policy-2026-06-02-r3 \
+  --graph-data-dir=build/tracelite-benchmarks/production-pin-r8-resqlite-policy-2026-06-02-r3/graph-data
 ```
 
-Result: every production suite run completed with `ok` status and strict policy
-calibration passed. `policy-calibration.json` reported `ready`, 5/5 release
-groups ready for `resqlite` on `measured_elapsed_ns`, with a 48% primary
-threshold, 36% max regression guardrail, 36% max-CV gate, and 6 recommended
-repetitions. The history exported graph data with 7,000 scenario-series rows
-and 50 peer-summary rows, and `tracelite validate-graph-data` passed.
+Result: every production suite-history run completed with `ok` status and
+strict policy calibration passed. The wrapper recorded Tracelite source
+`4b4165693c752c8e73da3237c117fa5699c0bb79`
+(`resqlite-profiling-gate-2026-06-02-r8`) and resqlite source
+`a830f3a6ec2a229ecd09a0685664633f71da4322`. `policy-calibration.json`
+reported `ready` for all three release-policy groups:
+`high-cardinality-fanout`, `many-streams-writer-throughput`, and
+`sqlite-diagnostics`. Graph-data export and validation passed, and
+`tracelite explain` completed.
 
-The current readiness split keeps unstable workloads visible without letting
-them define the release threshold. `feed-paging`, `large-working-set`,
-`sync-burst`, `point-select`, and `keyed-pk-subscriptions` remain diagnostic
-suite workloads until their workload definitions or separate thresholds are
-stable enough for release blocking.
+The suite-history phase took about 15.2 minutes locally under the x64 Dart SDK;
+the full wrapper took about 15.7 minutes excluding outer `dart run` startup.
+This is acceptable for a pre-publish gate, but it remains the next runtime
+optimization target. `tracelite explain` still reports direct script peer runs
+as harness-dominated and some measured CVs as noisy, so the gate is production
+ready for scoped release decisions without pretending every diagnostic workload
+is ready to block a release.
 
-Earlier failed calibrations are intentionally preserved as evidence for this
-split. The original broad gate completed every suite run but produced
-`not_ready` calibration because `feed-paging`, `large-working-set`, and
-`narrow-batch-insert` were too noisy under the 50% ceilings. Later retuned
-histories still exposed isolated repetition spikes. The p75/outlier policy and
-five-scenario release lane are the current production answer to that evidence,
-not a claim that every diagnostic workload is release-ready.
+Earlier failed calibrations remain useful history. The original broad gate
+completed every suite run but produced `not_ready` calibration because some
+diagnostic workloads were too noisy under the 50% ceilings. The current answer
+is a narrower release-policy lane plus explicit diagnostic overrides, not a
+claim that every diagnostic workload is release-ready.
 
-### resqlite baseline/candidate decision, 2026-05-31
+### Historical resqlite baseline/candidate decision, 2026-05-31
 
 Command:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/decide_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
-  --dart=/Users/dan/Coding/flutter_arm64/bin/dart \
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
   --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
   --candidate=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-005-20260531T144920Z/manifest.json \
   --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
@@ -237,14 +238,13 @@ decision-summary row, and 10 decision-comparison rows; validation passed.
 This proves the routine no-regression decision path on real suite artifacts. It
 is complemented by a known-regression validation below.
 
-### resqlite known-regression decision, 2026-05-31
+### Historical resqlite known-regression decision, 2026-05-31
 
 Command:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/decide_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
-  --dart=/Users/dan/Coding/flutter_arm64/bin/dart \
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
   --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
   --candidate=build/tracelite-decisions/known-read-delay-regression/candidate/manifest.json \
   --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
@@ -264,8 +264,8 @@ validation passed.
 Command:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/run_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
+dart run benchmark/run_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
   --label=ci-smoke \
   --profile=ci \
   --runs=1 \
@@ -288,7 +288,7 @@ production policy decision.
 Command:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart tool/trace_sqlite_smoke.dart
+dart run tool/trace_sqlite_smoke.dart
 ```
 
 Result: a generated downstream consumer resolved dependencies, enabled
