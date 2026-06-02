@@ -368,4 +368,36 @@ void main() {
       containsPair('repetitions', 2),
     );
   }, timeout: const Timeout(Duration(minutes: 3)));
+
+  test('suite rejects app-jit for resqlite native-asset peer', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-suite-resqlite-appjit-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/tracelite_dev.dart',
+        'suite',
+        '--profile=ci',
+        '--interfaces=resqlite',
+        '--scenarios=narrow-batch-insert',
+        '--runner=app-jit',
+        '--out-dir=${tempDir.path}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr.toString(),
+      contains('--runner=app-jit is not supported here'),
+    );
+    expect(result.stderr.toString(), contains('resqlite'));
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

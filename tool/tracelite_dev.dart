@@ -703,6 +703,8 @@ Future<void> _suite(List<String> args) async {
   final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
   final interfaceNames = _interfaceNames(interfaces);
   final runnerMode = _runnerModeOption(options['runner']);
+  final scriptRunnerReason = _scriptRunnerReason(interfaceNames);
+  _rejectUnsupportedExplicitRunner(runnerMode, scriptRunnerReason);
   final outDir = Directory(options['out-dir'] ?? 'build/tracelite-suite');
   outDir.createSync(recursive: true);
 
@@ -713,7 +715,8 @@ Future<void> _suite(List<String> args) async {
   final runner = await _preparePeerChildRunner(
     requestedMode: runnerMode,
     tempRoot: tempRoot,
-    useAppJitByDefault: totalSamples > 1,
+    useAppJitByDefault: totalSamples > 1 && scriptRunnerReason == null,
+    autoFallbackReason: scriptRunnerReason,
   );
 
   final runs = <Map<String, Object?>>[];
@@ -814,6 +817,8 @@ Future<void> _suiteHistory(List<String> args) async {
   final interfaces = options['interfaces'] ?? defaultPeerNames.join(',');
   final interfaceNames = _interfaceNames(interfaces);
   final runnerMode = _runnerModeOption(options['runner']);
+  final scriptRunnerReason = _scriptRunnerReason(interfaceNames);
+  _rejectUnsupportedExplicitRunner(runnerMode, scriptRunnerReason);
   final outDir = Directory(
     options['out-dir'] ?? 'build/tracelite-$profileName-history',
   );
@@ -999,6 +1004,8 @@ Future<void> _suiteHistory(List<String> args) async {
     'interfaces': interfaceNames,
     'runner': {
       'requested_mode': runnerMode,
+      if (runnerMode == 'auto' && scriptRunnerReason != null)
+        'fallback_reason': scriptRunnerReason,
     },
     'suite_run_timeout_seconds':
         suiteRunTimeout.inMicroseconds / Duration.microsecondsPerSecond,
@@ -1050,6 +1057,8 @@ Future<void> _compare(List<String> args) async {
   final repetitions = _positiveIntOption(options, 'repetitions', 1);
   final outJson = options['out-json'];
   final runnerMode = _runnerModeOption(options['runner']);
+  final scriptRunnerReason = _scriptRunnerReason(interfaces);
+  _rejectUnsupportedExplicitRunner(runnerMode, scriptRunnerReason);
   _ensurePeerShimAvailable();
 
   final tempRoot = Directory.systemTemp.createTempSync('tracelite-compare-');
@@ -1057,7 +1066,9 @@ Future<void> _compare(List<String> args) async {
     final runner = await _preparePeerChildRunner(
       requestedMode: runnerMode,
       tempRoot: tempRoot,
-      useAppJitByDefault: interfaces.length * repetitions > 1,
+      useAppJitByDefault:
+          interfaces.length * repetitions > 1 && scriptRunnerReason == null,
+      autoFallbackReason: scriptRunnerReason,
     );
     final result = await _runPeerCompare(
       scenario: scenario,
@@ -1316,6 +1327,29 @@ String _runnerModeOption(String? value) {
   return mode;
 }
 
+String? _scriptRunnerReason(List<String> interfaces) {
+  final nativeAssetPeers = interfaces
+      .where((interface) => _requiresScriptRunner(interface))
+      .toList();
+  if (nativeAssetPeers.isEmpty) return null;
+  return 'app-jit disabled because ${nativeAssetPeers.join(',')} uses Dart '
+      'native-assets metadata that prepared snapshots do not preserve';
+}
+
+bool _requiresScriptRunner(String interface) => interface == 'resqlite';
+
+void _rejectUnsupportedExplicitRunner(
+  String runnerMode,
+  String? scriptRunnerReason,
+) {
+  if (runnerMode != 'app-jit' || scriptRunnerReason == null) return;
+  stderr.writeln(
+    '--runner=app-jit is not supported here: $scriptRunnerReason. '
+    'Use --runner=auto or --runner=script.',
+  );
+  exit(64);
+}
+
 List<String> _interfaceNames(String value) => value
     .split(',')
     .map((name) => name.trim())
@@ -1331,11 +1365,15 @@ Future<_PeerChildRunner> _preparePeerChildRunner({
   required String requestedMode,
   required Directory tempRoot,
   required bool useAppJitByDefault,
+  required String? autoFallbackReason,
 }) async {
   final shouldUseAppJit = requestedMode == 'app-jit' ||
       requestedMode == 'auto' && useAppJitByDefault;
   if (!shouldUseAppJit) {
-    return _PeerChildRunner.script(requestedMode: requestedMode);
+    return _PeerChildRunner.script(
+      requestedMode: requestedMode,
+      fallbackReason: requestedMode == 'auto' ? autoFallbackReason : null,
+    );
   }
 
   final snapshotPath = '${tempRoot.path}/tracelite-peer-runner.jit';

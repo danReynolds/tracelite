@@ -102,7 +102,7 @@ dart run bin/tracelite.dart suite \
   --profile=experiment \
   --interfaces=sqlite3,drift,sqlite_async
 
-# Source-checkout compare; repeated runs default to an app-JIT child runner.
+# Source-checkout compare; auto uses app-JIT where native assets allow it.
 dart run bin/tracelite.dart compare \
   --scenario=narrow-batch-insert \
   --interfaces=sqlite3,resqlite \
@@ -124,12 +124,15 @@ compare artifacts, so a run can move from quick signal to audited decision
 without changing artifact shape. `suite-history` repeats whole suite runs for
 noise calibration; each run is bounded by a profile-aware timeout (`ci`: 3
 minutes, `experiment`: 10 minutes, `production`: 20 minutes, override with
-`--suite-run-timeout-seconds`). Repeated source-checkout compares default to an
-app-JIT child runner so the artifact still has isolated repetitions without
-paying `dart run` startup for every sample. Source-checkout suites reuse one
-prepared child runner across the selected scenario matrix, so production suites
-still write one compare artifact per scenario while avoiding repeated runner
-setup for every scenario.
+`--suite-run-timeout-seconds`). Repeated source-checkout compares use an
+app-JIT child runner when the selected peers can safely share a prepared
+snapshot, so artifacts still have isolated repetitions without paying
+`dart run` startup for every sample. Native-asset peers such as `resqlite`
+stay on the direct script runner in `auto` mode because prepared snapshots do
+not preserve the native-assets metadata they need. Source-checkout suites reuse
+one prepared child runner across the selected scenario matrix when available,
+so production suites still write one compare artifact per scenario while
+avoiding repeated runner setup for every scenario.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the

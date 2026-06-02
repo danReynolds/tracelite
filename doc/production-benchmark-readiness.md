@@ -69,9 +69,12 @@ The explicit resqlite merge gate is documented in
   benchmark matrix and writes a suite manifest plus per-scenario compare
   artifacts and logs. `experiment` is the medium repeated preset for
   baseline/candidate work that should not pay the full release-gate cost yet.
-- Source-checkout `compare` now records its child runner mode and defaults to
-  an app-JIT child runner for repeated or multi-peer runs. `suite` now reuses
-  one prepared child runner across the selected scenario matrix, and
+- Source-checkout `compare` now records its child runner mode and uses an
+  app-JIT child runner for repeated or multi-peer runs when the selected peers
+  can safely share a prepared snapshot. Native-asset peers such as `resqlite`
+  stay on the direct script runner in `auto` mode because prepared snapshots do
+  not preserve their native-assets metadata. `suite` reuses one prepared child
+  runner across the selected scenario matrix when available, and
   `suite-history` forwards the same runner mode into each independent suite
   run.
 - `.github/workflows/ci.yml` now defines the intended macOS and Linux CI
@@ -482,9 +485,12 @@ Scenario elapsed time is now measured inside the child process, so startup does
 not pollute the benchmark metric. The runner no longer pays `dart run` process
 startup for every peer repetition: source-checkout `compare` launches direct
 scripts for single-shot runs and prepares an app-JIT child runner for repeated
-or multi-peer runs by default. Source-checkout `suite` reuses one prepared
-runner across the selected scenario matrix, avoiding repeated runner setup for
-each scenario while preserving one isolated child process per peer repetition.
+or multi-peer runs when the selected peers can safely share a prepared
+snapshot. Native-asset peers such as `resqlite` stay on the direct script
+runner in `auto` mode. Source-checkout `suite` reuses one prepared runner
+across the selected scenario matrix when available, avoiding repeated runner
+setup for each scenario while preserving one isolated child process per peer
+repetition.
 `tracelite explain` flags compare artifacts where child-process wall time still
 dwarfs measured workload time, so smoke-sized artifacts are visibly classified
 as harness-dominated rather than quietly treated as production evidence.
