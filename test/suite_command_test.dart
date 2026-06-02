@@ -218,11 +218,14 @@ void main() {
     expect(calibrationOptions['peers'], ['sqlite3']);
     final runner = history['runner'] as Map<String, Object?>;
     expect(runner['requested_mode'], 'auto');
+    expect(history['suite_run_timeout_seconds'], 180.0);
 
     final runs = history['runs']! as List<Object?>;
     expect(runs, hasLength(2));
     for (final run in runs.cast<Map<String, Object?>>()) {
       expect(run['status'], 'ok');
+      expect(run['timed_out'], isFalse);
+      expect(run['timeout_seconds'], 180.0);
       expect(File(run['manifest']! as String).existsSync(), isTrue);
       expect(File(run['log']! as String).existsSync(), isTrue);
     }
@@ -255,6 +258,57 @@ void main() {
           'stderr:\n${recalibrate.stderr}',
     );
   }, timeout: const Timeout(Duration(minutes: 6)));
+
+  test('suite-history records timed out suite runs', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-suite-history-timeout-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'suite-history',
+        '--profile=ci',
+        '--interfaces=sqlite3',
+        '--scenarios=narrow-batch-insert',
+        '--runs=1',
+        '--metrics=elapsed_ns',
+        '--policy-peers=sqlite3',
+        '--min-repetitions=1',
+        '--target-rse-percent=1000',
+        '--suite-run-timeout-seconds=0.001',
+        '--out-dir=${tempDir.path}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(result.stdout.toString(), contains('`timed_out`'));
+
+    final history = jsonDecode(
+      File('${tempDir.path}/history.json').readAsStringSync(),
+    ) as Map<String, Object?>;
+    expect(history['successful_runs'], 0);
+    expect(history['calibration_status'], 'missing');
+    expect(history['suite_run_timeout_seconds'], 0.001);
+
+    final runs = history['runs']! as List<Object?>;
+    expect(runs, hasLength(1));
+    final run = runs.single as Map<String, Object?>;
+    expect(run['status'], 'timed_out');
+    expect(run['timed_out'], isTrue);
+    expect(run['timeout_seconds'], 0.001);
+    expect(run['elapsed_ns'], isA<int>());
+    final log = File(run['log']! as String).readAsStringSync();
+    expect(log, contains('suite-history timeout'));
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('suite-history forwards --scenarios into each suite run', () async {
     final tempDir = await Directory.systemTemp.createTemp(

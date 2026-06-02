@@ -124,12 +124,11 @@ Summary:
 ## Current deletion position
 
 The parity gate is satisfied for the current resqlite profile surfaces, and
-PR #109 has the current integration evidence: it is non-draft, source-pinned to
-`resqlite-profiling-gate-2026-06-01-r2`, and green at
-`98f08c4a1d5e8d877c6b1ef3c11697b42d846d41` with the Tracelite smoke lane
-passing. That is enough for tracelite to own resqlite's regular profiling and
-benchmarking workflow. It is not, by itself, a command to delete every legacy
-profile file. Treat direct `benchmark/run_profile.dart` usage as a legacy
-compatibility/parity path until resqlite explicitly archives it. Keep the
-workload definitions, public diagnostics API, native diagnostics helpers, and
-tiny semantic emitters.
+PR #109 has the current integration evidence: it is non-draft, source-pins the
+Tracelite checkout, records both Tracelite and resqlite source states in the
+wrapper manifest, and keeps the Tracelite smoke lane green. That is enough for
+tracelite to own resqlite's regular profiling and benchmarking workflow. It is
+not, by itself, a command to delete every legacy profile file. Treat direct
+`benchmark/run_profile.dart` usage as a legacy compatibility/parity path until
+resqlite explicitly archives it. Keep the workload definitions, public
+diagnostics API, native diagnostics helpers, and tiny semantic emitters.

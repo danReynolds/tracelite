@@ -74,11 +74,10 @@ scope drift: `suite-history` could calibrate a scenario subset while the nested
 `suite-history` both honor `--scenarios`.
 
 The highest-priority integration blocker found later was source reproducibility.
-That is now closed in PR #109: the resqlite wrappers pin Tracelite to
-`resqlite-profiling-gate-2026-06-01-r2`
-(`06c00ac126b54027c14c96deb5634e5a38104973`), reject dirty or mismatched
-checkouts by default, record both source states in wrapper manifests, and verify
-that Tracelite resolves `resqlite` to the checkout under test.
+That is now closed in PR #109: the resqlite wrappers pin Tracelite in the
+benchmark source audit, reject dirty or mismatched checkouts by default, record
+both source states in wrapper manifests, and verify that Tracelite resolves
+`resqlite` to the checkout under test.
 
 The resqlite wrapper now separates broad suite coverage from strict policy
 scope. It runs the full ten-scenario production matrix for artifacts and graph
@@ -172,8 +171,8 @@ machine policy gates above.
 Current acceptance position:
 
 - Criteria 1 and 2 are satisfied for the current PR: PR #109 is non-draft,
-  source-pinned to `resqlite-profiling-gate-2026-06-01-r2`, and green at
-  `98f08c4a1d5e8d877c6b1ef3c11697b42d846d41`.
+  source-pins Tracelite in resqlite's benchmark audit, records both source
+  states in wrapper manifests, and keeps the Tracelite smoke lane green.
 - Criteria 3 and 4 are satisfied by the five-run release gate, routine
   no-regression decision, and injected-regression rejection artifacts above.
 - Criteria 5 through 7 are satisfied for the covered resqlite profile surfaces,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -813,6 +814,11 @@ Future<void> _suiteHistory(List<String> args) async {
     options['out-dir'] ?? 'build/tracelite-$profileName-history',
   );
   outDir.createSync(recursive: true);
+  final suiteRunTimeout = _positiveDurationSecondsOption(
+    options,
+    'suite-run-timeout-seconds',
+    profile.suiteRunTimeout,
+  );
   final strict = _boolOption(options, 'strict', true);
   final generatedAt = DateTime.now().toUtc();
   final metrics = _csvOption(
@@ -896,6 +902,7 @@ Future<void> _suiteHistory(List<String> args) async {
     ..writeln('Runs: $runCount')
     ..writeln('Interfaces: `$interfaces`')
     ..writeln('Out dir: `${outDir.path}`')
+    ..writeln('Suite run timeout: `${_formatDuration(suiteRunTimeout)}`')
     ..writeln('Strict: `$strict`')
     ..writeln()
     ..writeln('| run | status | manifest |')
@@ -906,7 +913,7 @@ Future<void> _suiteHistory(List<String> args) async {
     final runStartedAt = DateTime.now().toUtc();
     final runName = _historyRunName(runIndex, runStartedAt);
     final runDir = Directory('${outDir.path}/$runName')..createSync();
-    final result = await Process.run(
+    final result = await _runProcessWithTimeout(
       Platform.resolvedExecutable,
       [
         'tool/tracelite_dev.dart',
@@ -919,14 +926,21 @@ Future<void> _suiteHistory(List<String> args) async {
         '--out-dir=${runDir.path}',
       ],
       workingDirectory: Directory.current.path,
+      timeout: suiteRunTimeout,
     );
     final logPath = '${runDir.path}/suite.log';
     File(logPath).writeAsStringSync(
-      'stdout:\n${result.stdout}\n\nstderr:\n${result.stderr}\n',
+      'stdout:\n${result.stdout}\n\nstderr:\n${result.stderr}'
+      '${result.timedOut ? '\n\nsuite-history timeout: '
+          '${_formatDuration(suiteRunTimeout)}\n' : '\n'}',
     );
     final manifestPath = '${runDir.path}/manifest.json';
-    final status = result.exitCode == 0 ? 'ok' : 'failed';
-    if (result.exitCode != 0) suiteFailed = true;
+    final status = result.timedOut
+        ? 'timed_out'
+        : result.exitCode == 0
+            ? 'ok'
+            : 'failed';
+    if (status != 'ok') suiteFailed = true;
     runs.add({
       'run': runIndex,
       'name': runName,
@@ -937,6 +951,10 @@ Future<void> _suiteHistory(List<String> args) async {
       'log': logPath,
       'exit_code': result.exitCode,
       'status': status,
+      'timed_out': result.timedOut,
+      'timeout_seconds':
+          suiteRunTimeout.inMicroseconds / Duration.microsecondsPerSecond,
+      'elapsed_ns': result.elapsed.inMicroseconds * 1000,
     });
     stdout.writeln('| $runIndex | `$status` | `$manifestPath` |');
   }
@@ -976,6 +994,8 @@ Future<void> _suiteHistory(List<String> args) async {
     'runner': {
       'requested_mode': runnerMode,
     },
+    'suite_run_timeout_seconds':
+        suiteRunTimeout.inMicroseconds / Duration.microsecondsPerSecond,
     'requested_runs': runCount,
     'successful_runs':
         runs.where((run) => run['status'] == 'ok').toList().length,
@@ -2389,6 +2409,23 @@ double? _positiveDoubleOptionOrNull(
   return value;
 }
 
+Duration _positiveDurationSecondsOption(
+  Map<String, String> options,
+  String name,
+  Duration defaultValue,
+) {
+  final raw = options[name];
+  if (raw == null) return defaultValue;
+  final value = double.tryParse(raw);
+  if (value == null || value <= 0) {
+    stderr.writeln('--$name must be a positive number of seconds');
+    exit(64);
+  }
+  return Duration(
+    microseconds: (value * Duration.microsecondsPerSecond).round(),
+  );
+}
+
 double _doubleOption(
   Map<String, String> options,
   String name,
@@ -2596,6 +2633,22 @@ final class _DoctorCheck {
       };
 }
 
+final class _TimedProcessResult {
+  const _TimedProcessResult({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+    required this.timedOut,
+    required this.elapsed,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
+  final bool timedOut;
+  final Duration elapsed;
+}
+
 String _historyRunName(int runIndex, DateTime timestamp) {
   final compact = timestamp
       .toIso8601String()
@@ -2603,6 +2656,90 @@ String _historyRunName(int runIndex, DateTime timestamp) {
       .replaceAll(':', '')
       .replaceFirst(RegExp(r'\.\d+Z$'), 'Z');
   return 'run-${runIndex.toString().padLeft(3, '0')}-$compact';
+}
+
+Future<_TimedProcessResult> _runProcessWithTimeout(
+  String executable,
+  List<String> args, {
+  required String workingDirectory,
+  required Duration timeout,
+  Map<String, String>? environment,
+}) async {
+  final process = await Process.start(
+    executable,
+    args,
+    workingDirectory: workingDirectory,
+    environment: environment,
+  );
+  final stdoutBuffer = StringBuffer();
+  final stderrBuffer = StringBuffer();
+  final stdoutDone = Completer<void>();
+  final stderrDone = Completer<void>();
+  final stdoutSubscription = process.stdout.transform(utf8.decoder).listen(
+        stdoutBuffer.write,
+        onDone: () => _completeIfPending(stdoutDone),
+        onError: (_) => _completeIfPending(stdoutDone),
+      );
+  final stderrSubscription = process.stderr.transform(utf8.decoder).listen(
+        stderrBuffer.write,
+        onDone: () => _completeIfPending(stderrDone),
+        onError: (_) => _completeIfPending(stderrDone),
+      );
+
+  final stopwatch = Stopwatch()..start();
+  var timedOut = false;
+  late int exitCode;
+  try {
+    exitCode = await process.exitCode.timeout(timeout);
+  } on TimeoutException {
+    timedOut = true;
+    process.kill(ProcessSignal.sigterm);
+    try {
+      exitCode = await process.exitCode.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+      exitCode = await process.exitCode.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => -1,
+      );
+    }
+  } finally {
+    stopwatch.stop();
+  }
+
+  try {
+    await Future.wait([
+      stdoutDone.future,
+      stderrDone.future,
+    ]).timeout(const Duration(seconds: 2));
+  } on Object {
+    await stdoutSubscription.cancel();
+    await stderrSubscription.cancel();
+    stderrBuffer.writeln(
+      'tracelite: child stdio did not close after process exit.',
+    );
+  }
+
+  return _TimedProcessResult(
+    exitCode: exitCode,
+    stdout: stdoutBuffer.toString(),
+    stderr: stderrBuffer.toString(),
+    timedOut: timedOut,
+    elapsed: stopwatch.elapsed,
+  );
+}
+
+void _completeIfPending(Completer<void> completer) {
+  if (!completer.isCompleted) completer.complete();
+}
+
+String _formatDuration(Duration duration) {
+  if (duration.inMicroseconds % Duration.microsecondsPerSecond != 0) {
+    return '${duration.inMicroseconds / Duration.microsecondsPerSecond}s';
+  }
+  if (duration.inSeconds % 60 != 0) return '${duration.inSeconds}s';
+  if (duration.inMinutes % 60 != 0) return '${duration.inMinutes}m';
+  return '${duration.inHours}h';
 }
 
 _IntStats _perIterationStats(List<int> values, int iterations) {
@@ -2760,10 +2897,12 @@ class _SuiteProfile {
   const _SuiteProfile({
     required this.description,
     required this.scenarios,
+    required this.suiteRunTimeout,
   });
 
   final String description;
   final List<_SuiteScenario> scenarios;
+  final Duration suiteRunTimeout;
 }
 
 class _SuiteScenario {
@@ -2782,6 +2921,7 @@ _SuiteProfile _suiteProfile(String profileName) {
   return switch (profileName) {
     'ci' => const _SuiteProfile(
         description: 'Small deterministic smoke matrix for pull requests.',
+        suiteRunTimeout: Duration(minutes: 3),
         scenarios: [
           _SuiteScenario(
             name: narrowBatchInsertScenario,
@@ -2808,6 +2948,7 @@ _SuiteProfile _suiteProfile(String profileName) {
     'experiment' => const _SuiteProfile(
         description:
             'Medium repeated matrix for day-to-day performance experiments.',
+        suiteRunTimeout: Duration(minutes: 10),
         scenarios: [
           _SuiteScenario(
             name: narrowBatchInsertScenario,
@@ -2863,6 +3004,7 @@ _SuiteProfile _suiteProfile(String profileName) {
       ),
     'production' => const _SuiteProfile(
         description: 'Production-oriented matrix for benchmark replacement.',
+        suiteRunTimeout: Duration(minutes: 20),
         scenarios: [
           _SuiteScenario(
             name: narrowBatchInsertScenario,
@@ -3119,6 +3261,7 @@ Never _usage({int exitCode = 64}) {
       '[--policy-peers=resqlite] [--policy-scenarios=feed-paging,...] '
       '[--threshold-ceiling-percent=50] '
       '[--max-outlier-percent=10] [--max-run-outlier-percent=20] '
+      '[--suite-run-timeout-seconds=1200] '
       '[--require-clean-source=true] '
       '[--out-dir=build/tracelite-production-history]');
   output.writeln('  dart run bin/tracelite.dart diff '

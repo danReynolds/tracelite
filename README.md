@@ -118,14 +118,18 @@ dart run bin/tracelite.dart visualizer-check --package=host
 ## Benchmark Profiles
 
 Use `ci` for routine pull-request smoke checks, `experiment` for a new
-performance idea's baseline/candidate run, and `production` for release-gate
-calibration. All profiles write the same manifest and compare artifacts, so a
-run can move from quick signal to audited decision without changing artifact
-shape. Repeated source-checkout compares default to an app-JIT child runner so
-the artifact still has isolated repetitions without paying `dart run` startup
-for every sample. Source-checkout suites reuse one prepared child runner across
-the selected scenario matrix, so production suites still write one compare
-artifact per scenario while avoiding repeated runner setup for every scenario.
+performance idea's baseline/candidate run, and `production` only for release
+calibration or threshold changes. All profiles write the same manifest and
+compare artifacts, so a run can move from quick signal to audited decision
+without changing artifact shape. `suite-history` repeats whole suite runs for
+noise calibration; each run is bounded by a profile-aware timeout (`ci`: 3
+minutes, `experiment`: 10 minutes, `production`: 20 minutes, override with
+`--suite-run-timeout-seconds`). Repeated source-checkout compares default to an
+app-JIT child runner so the artifact still has isolated repetitions without
+paying `dart run` startup for every sample. Source-checkout suites reuse one
+prepared child runner across the selected scenario matrix, so production suites
+still write one compare artifact per scenario while avoiding repeated runner
+setup for every scenario.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the
@@ -152,12 +156,11 @@ libraries can run one benchmark workflow during the pre-1.0 phase.
 
 resqlite has the deepest integration today: it can emit semantic spans/counters
 for its reader pool, writer isolate, stream invalidation, diagnostics, and old
-profile-parity metrics. Its current gate is pinned to
-`06c00ac126b54027c14c96deb5634e5a38104973`
-(`resqlite-profiling-gate-2026-06-01-r2`) and has validated repeated
-production runs, policy calibration, no-regression acceptance,
-injected-regression rejection, graph-data export, insight artifacts, and
-clean-clone publish dry-run behavior.
+profile-parity metrics. Its gate pins the exact Tracelite revision in
+resqlite's benchmark source audit, records both Tracelite and resqlite source
+states in every wrapper manifest, and validates repeated production runs,
+policy calibration, no-regression acceptance, injected-regression rejection,
+graph-data export, insight artifacts, and clean-clone publish dry-run behavior.
 
 For release hygiene, run `dart run tool/publish_check.dart` from a clean
 repository checkout. It validates a clean git archive, so ignored local

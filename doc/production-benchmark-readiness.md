@@ -10,12 +10,11 @@ top-level `benchmark/run_tracelite.dart` gate, a baseline/candidate
 `benchmark/decide_tracelite.dart` decision wrapper, trace-enabled profile
 capture, graph-data export for the dashboard, and build-hook smoke coverage for
 the native SQLite shim path, and Tracelite insight artifacts for operator
-review. PR #109 now pins the Tracelite source state to
-`resqlite-profiling-gate-2026-06-01-r2`
-(`06c00ac126b54027c14c96deb5634e5a38104973`) and is green at
-`98f08c4a1d5e8d877c6b1ef3c11697b42d846d41` with the Tracelite smoke lane
-passing. The remaining adoption decision is whether to delete, archive, or keep
-the old direct resqlite profile runner as a legacy compatibility/parity harness.
+review. PR #109 pins the exact Tracelite source state in resqlite's benchmark
+source audit, records both Tracelite and resqlite source states in wrapper
+manifests, and keeps the Tracelite smoke lane green. The remaining adoption
+decision is whether to delete, archive, or keep the old direct resqlite profile
+runner as a legacy compatibility/parity harness.
 
 The core direction held up: one trace format can capture sqlite3, drift,
 sqlite_async, and trace-enabled resqlite under the same SQLite call model, and
@@ -452,7 +451,7 @@ Keep for now:
 ### 1. Stable source and CI state
 
 The dirty-checkout blocker is closed in the integration branch: PR #109 pins
-Tracelite to `resqlite-profiling-gate-2026-06-01-r2` and the wrapper records
+Tracelite in resqlite's benchmark source audit and the wrapper records
 `tracelite_source`, `resqlite_source`, and the resolved resqlite dependency
 binding in every run manifest. This should stay an acceptance criterion, not a
 removed concern: future pin bumps must continue to pass resqlite CI with the
