@@ -13,15 +13,15 @@ Implementation checkpoint: the generic desktop app now lives in
 decision artifacts, workload summaries, and graph-data directories; renders a
 workspace browser, trace timeline, minimap viewport brush, searchable linked
 span index, span inspector, span aggregation table, peer comparison table,
-graph-data validation rows, and workload tables; and is reachable through
-`dart run bin/tracelite.dart visualize [--release|--profile] <path>`. The
+Decision Review page, graph-data validation rows, and workload tables; and is
+reachable through `dart run bin/tracelite.dart visualize [--release|--profile] <path>`. The
 timeline has explicit zoom controls, scroll/double-click zoom, keyboard
 navigation, enlarged dense-span hit targets, nearest-span picking, range-aware
 visible-span queries, density rendering for large trace windows, and a
 virtualized linked span index so small SQLite calls remain inspectable. The
-workspace and compare screens also use the core insight layer to surface trust,
-trace-health, noise, peer-spread, and bottleneck findings before users drill
-into raw tables.
+workspace, compare, and decision screens also use the core insight layer to
+surface trust, trace-health, noise, peer-spread, bottleneck, verdict, policy,
+and guardrail findings before users drill into raw tables.
 
 Production readiness checkpoint: the app is suitable for local developer
 dogfooding and release-mode smoke testing. `tracelite visualizer-check` resolves
@@ -190,20 +190,24 @@ user opens a raw trace:
 Clicking a peer/scenario cell should open the matching repetition list; clicking
 a repetition should open its raw trace if the artifact links are present.
 
-### Experiment diff
+### Decision Review
 
-Experiment diff is the visual counterpart to `tracelite decision`:
+Decision Review is the visual counterpart to `tracelite decision`:
 
 - verdict summary: accepted, rejected, inconclusive, or too noisy;
-- primary metric delta with confidence/noise context;
-- guardrail deltas and trace-health gates;
-- side-by-side peer or scenario rows;
+- policy thresholds and baseline/candidate artifact references;
+- gate status for trace health, primary metrics, and guardrails;
+- primary metric rows with confidence/noise context;
+- guardrail findings and side-by-side peer or scenario rows;
 - span-group diff table with count delta, total delta, p50/p90/p99 deltas, and
   category/track attribution;
 - optional linked trace panes with synchronized ranges.
 
-The diff UI must not imply statistical certainty from within-run spans. The
-default significance unit remains independent repetitions.
+The first implemented slice covers verdicts, policy, gates, primary comparison
+rows, guardrail rows, and interpreted insights from decision artifacts. Future
+diff work should add span-group attribution and optional linked trace panes
+without implying statistical certainty from within-run spans. The default
+significance unit remains independent repetitions.
 
 ### Workload profile
 
@@ -294,18 +298,19 @@ That keeps the visualizer's data model testable without launching Flutter.
 The first useful slice should be small but real:
 
 1. Add a Flutter desktop app package or `tool/visualizer_app`.
-2. Open `.tlt-region`, compare JSON, workload-summary JSON, and graph-data
-   directories.
+2. Open `.tlt-region`, compare JSON, suite manifest, decision JSON,
+   workload-summary JSON, and graph-data directories.
 3. Show a workspace browser with schema validation and trace-health status.
 4. Implement a single-trace timeline with range selection, filters, selection
    details, and visible-range aggregation table.
 5. Implement a peer-comparison table from compare artifacts with measured elapsed,
    scenario elapsed, SQLite call counts/time, repetition distribution, and trace
    health.
-6. Load existing tracelite compare, workload, graph-data, and raw trace artifacts
-   and make the UI reveal SQLite call volume, timing distribution, peer
-   differences, and trace-health issues without hard-coded knowledge of the
-   producing library.
+6. Load existing tracelite compare, suite, decision, workload, graph-data, and
+   raw trace artifacts and make the UI reveal SQLite call volume, timing
+   distribution, peer differences, verdicts, policy gates, guardrail findings,
+   and trace-health issues without hard-coded knowledge of the producing
+   library.
 
 This milestone proves the app's value without waiting for finalized `.tlt`
 archives, live capture, stack sampling, or packaged installers.
@@ -314,8 +319,8 @@ archives, live capture, stack sampling, or packaged installers.
 
 Milestone 2:
 
-- experiment diff screen backed by decision artifacts;
-- synchronized two-trace panes;
+- span-group diff attribution inside Decision Review;
+- synchronized two-trace panes from decision/compare artifact links;
 - counter/gauge charts;
 - correlation-chain inspector;
 - saved view/bookmark state.
@@ -325,7 +330,8 @@ Milestone 3:
 - finalized `.tlt` writer/loader;
 - Perfetto and Chrome trace export/import where useful;
 - SQL fingerprinting and redacted raw SQL display;
-- packaged macOS release, then Linux and Windows builds;
+- signed/notarized macOS release evidence, then signed Linux and Windows
+  release-system evidence;
 - optional graph-data-only web build.
 
 Milestone 4:

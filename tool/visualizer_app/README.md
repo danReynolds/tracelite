@@ -5,8 +5,8 @@ artifacts.
 
 The app is intentionally generic. It does not know about any particular SQLite
 library; it opens tracelite trace/artifact schemas and renders trace health,
-span timing, SQLite call volume, peer comparison, workload summaries, and
-graph-data validation.
+span timing, SQLite call volume, peer comparison, decision gates, workload
+summaries, and graph-data validation.
 
 ## Run
 
@@ -40,6 +40,9 @@ flutter run -d macos -a ../../build/visualizer-demo
   clicks.
 - Compare ranks peers by measured elapsed time, scenario elapsed time, SQLite
   call volume, and trace health.
+- Decision Review audits accepted, rejected, inconclusive, and too-noisy
+  decision artifacts by verdict, policy, trace-health gate, primary comparison,
+  and guardrail finding.
 - Artifacts lists the raw trace, suite, decision, workload, and graph-data
   documents discovered in the workspace.
 

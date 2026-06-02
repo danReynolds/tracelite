@@ -72,6 +72,8 @@ void main() {
     final readme = File('README.md').readAsStringSync();
     final visualizerReadme =
         File('tool/visualizer_app/README.md').readAsStringSync();
+    final visualizerDesign =
+        File('doc/visualizer-product-design.md').readAsStringSync();
     final doctor = File('doc/doctor.md').readAsStringSync();
     final devCli = File('tool/tracelite_dev.dart').readAsStringSync();
 
@@ -81,6 +83,10 @@ void main() {
       expect(text, contains('Visualizer Release'));
       expect(text, contains('heavyweight'));
       expect(text, contains('dense-trace'));
+    }
+    for (final text in [readme, visualizerReadme, visualizerDesign]) {
+      expect(text, contains('Decision Review'));
+      expect(text, contains('decision'));
     }
     expect(doctor, contains('Visualizer Release'));
     expect(doctor, contains('--package=host --require-clean-source=true'));

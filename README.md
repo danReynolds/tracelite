@@ -35,6 +35,8 @@ embedded-shim build.
 - Calibrated thresholds, CV gates, outlier policy, and decisions.
 - Artifact interpretation through `explain` and visualizer insight panels:
   trace health, noise, bottlenecks, peer spread, and harness overhead.
+- Decision Review in the desktop visualizer for verdicts, policy thresholds,
+  gate status, primary comparisons, and guardrail findings.
 - Schema-validated graph data for dashboards and the visualizer.
 - Source-checkout benchmark artifacts record the tracelite git revision and
   dirty state; release gates can require a clean checkout.
@@ -115,8 +117,9 @@ dart run bin/tracelite.dart compare \
   --repetitions=5 \
   --runner=worker
 
-# Source-checkout desktop visualizer launcher.
+# Source-checkout desktop visualizer launcher for traces, artifacts, or dirs.
 dart run bin/tracelite.dart visualize build/graph-data
+dart run bin/tracelite.dart visualize build/decision.json
 
 # Source-checkout visualizer readiness and packaged host release evidence.
 dart run bin/tracelite.dart visualizer-check --package=host

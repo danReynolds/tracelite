@@ -6,7 +6,7 @@ import 'package:tracelite/tracelite.dart';
 import 'package:tracelite_visualizer/src/workspace.dart';
 
 void main() {
-  test('loads generic traces and compare artifacts from a directory', () async {
+  test('loads traces, compare artifacts, and decisions', () async {
     final temp = Directory.systemTemp.createTempSync('tracelite-viz-test-');
     try {
       final tracePath = '${temp.path}/empty.tlt-region';
@@ -77,12 +77,61 @@ void main() {
           ],
         }),
       );
+      File('${temp.path}/decision.json').writeAsStringSync(
+        jsonEncode({
+          'schema': 'tracelite.decision.v1',
+          'generated_at': '2026-05-12T00:05:00Z',
+          'decision': 'accepted',
+          'baseline_path': 'baseline/manifest.json',
+          'candidate_path': 'candidate/manifest.json',
+          'policy': {
+            'expectation': 'improvement',
+            'primary_peer': 'sqlite3',
+            'primary_metric': 'elapsed_ns',
+            'primary_threshold_percent': 5.0,
+            'max_regression_percent': 3.0,
+            'max_cv_percent': 15.0,
+          },
+          'gates': {
+            'trace_health': {'status': 'passed', 'issues': []},
+            'primary': {
+              'status': 'passed',
+              'comparisons': [
+                {
+                  'role': 'primary',
+                  'scenario': 'point-select',
+                  'peer': 'sqlite3',
+                  'metric': 'elapsed_ns',
+                  'status': 'improved',
+                  'gate_effect': 'pass',
+                  'baseline_status': 'ok',
+                  'candidate_status': 'ok',
+                  'baseline_samples': 5,
+                  'candidate_samples': 5,
+                  'baseline_mean': 1000000.0,
+                  'candidate_mean': 940000.0,
+                  'delta': -60000.0,
+                  'change_percent': -6.0,
+                  'max_cv_percent': 2.0,
+                  'nonparametric_p_value': 0.031,
+                },
+              ],
+            },
+            'guardrails': {'status': 'passed', 'comparisons': []},
+          },
+        }),
+      );
 
       final workspace = await VisualizerWorkspace.load(temp.path);
 
       expect(workspace.issues, isEmpty);
       expect(workspace.traces, hasLength(1));
       expect(workspace.compares, hasLength(1));
+      expect(workspace.decisions, hasLength(1));
+      expect(workspace.decisions.single.verdict, 'accepted');
+      expect(workspace.decisions.single.expectation, 'improvement');
+      expect(workspace.decisions.single.scenarioCount, 1);
+      expect(workspace.decisions.single.policy['primary_metric'], 'elapsed_ns');
       expect(workspace.compares.single.peers.single.name, 'sqlite3');
       final sample = workspace.compares.single.peers.single.samples.single;
       expect(sample.sqlFingerprintGroups, hasLength(1));

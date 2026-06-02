@@ -338,7 +338,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
 | Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `.pubignore` and `tool/publish_check.dart` exclude source-checkout peer runner files from the archive; `test/package_boundary_test.dart` forces core CLI mode and verifies core artifact commands including `diff` still run |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
-| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; the `Visualizer Release` workflow packages macOS/Linux/Windows archives and manifests with optional macOS signing/notarization |
+| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; it now includes workspace, trace, compare, Decision Review, workload, graph-data, and artifact views; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; the `Visualizer Release` workflow packages macOS/Linux/Windows archives and manifests with optional macOS signing/notarization |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
@@ -681,11 +681,12 @@ Work:
   opens raw `.tlt-region` traces, compare artifacts, suite manifests, decision
   artifacts, workload summaries, and graph-data directories. It renders a
   workspace browser, trace timeline, span aggregation table, peer-comparison
-  table, graph-data validation rows, and workload tables. The timeline now has
-  explicit zoom controls, scroll/double-click zoom, keyboard navigation, larger
-  dense-span bars, wider hit targets, nearest-span picking, selected-span
-  outlines, and a linked span index. Workspace and compare screens now surface
-  shared artifact insights from the core interpretation layer.
+  table, Decision Review page, graph-data validation rows, and workload tables.
+  The timeline now has explicit zoom controls, scroll/double-click zoom,
+  keyboard navigation, larger dense-span bars, wider hit targets,
+  nearest-span picking, selected-span outlines, and a linked span index.
+  Workspace, compare, and decision screens now surface shared artifact insights
+  from the core interpretation layer.
 - Add true visible-range query reaggregation after the initial custom timeline
   and table views have settled.
 - Consider stack sampling for CPU attribution only after wall/span attribution
