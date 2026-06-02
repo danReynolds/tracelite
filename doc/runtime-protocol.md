@@ -692,7 +692,13 @@ The reset contract is intentionally stricter than normal detach:
 2. No producer thread may be inside a traced call or concurrently appending.
 3. The runtime marks any registered/claiming tracks as ended, unmaps the
    current region, clears thread-local track state, and returns to inactive.
-4. The next sample must explicitly attach a new region or provide a new
+4. Harnesses for peers with asynchronous isolate or native-asset cleanup may
+   hold this inactive state briefly after reset, so late producer calls are
+   suppressed instead of landing in the next sample's region.
+5. Each successful attach advances a runtime generation. Thread-local producer
+   IDs from older generations are treated as detached, so threads reused by a
+   long-lived worker must register a fresh producer before writing again.
+6. The next sample must explicitly attach a new region or provide a new
    `TRACELITE_REGION` before producers emit again.
 
 This is not a live-tracing control plane and it is not safe as an asynchronous

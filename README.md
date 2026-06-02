@@ -139,9 +139,12 @@ stay on the direct script runner in `auto` mode because prepared snapshots do
 not preserve the native-assets metadata they need. For repeated native-assets
 runs, pass `--runner=worker`: it keeps one child process alive, retargets each
 sample to a fresh trace region, and records startup in `runner.build_elapsed_ns`
-instead of hiding it in repetition timings. Worker startup also runs a tiny
-preflight trace in that same long-lived process; if the selected peer cannot
-emit shim events, the command fails before any benchmark sample is trusted.
+instead of hiding it in repetition timings. For reactive native-asset peers that
+can finish Dart work before every native producer has fully gone quiet, the
+worker leaves the runtime inactive briefly after reset before attaching the next
+sample. Worker startup also runs a tiny preflight trace in that same long-lived
+process; if the selected peer cannot emit shim events, the command fails before
+any benchmark sample is trusted.
 Worker artifacts record both `runner.preflight` and the filtered
 `runner.native_assets` binding used for the selected peers, so shim path problems
 are auditable from the artifact instead of local `.dart_tool` state.

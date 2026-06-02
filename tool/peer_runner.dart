@@ -183,6 +183,10 @@ Future<Map<String, Object?>> _runPeerWorkerRequest(
         resetErrors.add('${runtime.path}: $error');
       }
     }
+    final quiescence = _postResetQuiescence(peer);
+    if (quiescence != Duration.zero) {
+      await Future<void>.delayed(quiescence);
+    }
     if (resetErrors.isNotEmpty) {
       exitCode = 65;
       stderrText = [
@@ -199,6 +203,16 @@ Future<Map<String, Object?>> _runPeerWorkerRequest(
     'stdout': '',
     'stderr': stderrText,
     'runtime_libraries': runtimes.map((runtime) => runtime.path).toList(),
+  };
+}
+
+Duration _postResetQuiescence(String peer) {
+  return switch (peer) {
+    // resqlite closes reader isolates asynchronously. Keep the runtime inactive
+    // briefly after reset so late native trace calls cannot land in the next
+    // sample's freshly attached region.
+    'resqlite' => const Duration(milliseconds: 100),
+    _ => Duration.zero,
   };
 }
 

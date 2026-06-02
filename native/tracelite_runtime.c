@@ -71,8 +71,10 @@ static tlt_region_header_t* g_region = NULL;
 static tlt_registry_slot_t* g_registry = NULL;
 static uint8_t* g_string_pool = NULL;
 static uint8_t* g_ring_section = NULL;
+static _Atomic(uint64_t) g_runtime_generation = 1;
 static TLT_THREAD_LOCAL int tlt_my_track_id = -1;
 static TLT_THREAD_LOCAL tlt_ring_header_t* tlt_my_ring = NULL;
+static TLT_THREAD_LOCAL uint64_t tlt_my_generation = 0;
 
 static uint64_t g_start_monotonic_ns = 0;
 
@@ -82,6 +84,7 @@ static tlt_ring_header_t* ring_for_track(int track_id);
 static int valid_track_id(int track_id);
 static int has_active_tracks(void);
 static void reset_mapping_state(void);
+static uint64_t current_runtime_generation(void);
 
 /* ---- Clock ---- */
 
@@ -195,20 +198,24 @@ int tlt_attach(const char* explicit_path) {
   g_string_pool = (uint8_t*)base + header->string_pool_offset;
   g_ring_section = (uint8_t*)base + header->producer_ring_offset;
   g_start_monotonic_ns = header->start_monotonic_ns;
+  atomic_fetch_add_explicit(&g_runtime_generation, 1, memory_order_acq_rel);
   tlt_active = 1;
   atexit(reset_mapping_state);
   return 0;
 }
 
 void tlt_detach(void) {
-  if (tlt_my_track_id >= 0) {
-    tlt_detach_track((uint8_t)tlt_my_track_id);
-    tlt_my_track_id = -1;
-    tlt_my_ring = NULL;
+  int track_id = tlt_current_track_id();
+  if (track_id >= 0) {
+    tlt_detach_track((uint8_t)track_id);
   }
+  tlt_my_track_id = -1;
+  tlt_my_ring = NULL;
+  tlt_my_generation = 0;
 }
 
 int tlt_current_track_id(void) {
+  if (tlt_my_generation != current_runtime_generation()) return -1;
   return tlt_my_track_id;
 }
 
@@ -253,6 +260,7 @@ static void reset_mapping_state(void) {
   g_start_monotonic_ns = 0;
   tlt_my_track_id = -1;
   tlt_my_ring = NULL;
+  tlt_my_generation = 0;
   tlt_active = 0;
 }
 
@@ -299,7 +307,12 @@ int tlt_register_producer(uint8_t kind, const char* process_name, const char* th
 
   tlt_my_track_id = slot;
   tlt_my_ring = ring_for_track(slot);
+  tlt_my_generation = current_runtime_generation();
   return slot;
+}
+
+static uint64_t current_runtime_generation(void) {
+  return atomic_load_explicit(&g_runtime_generation, memory_order_acquire);
 }
 
 static tlt_ring_header_t* ring_for_track(int track_id) {
@@ -427,8 +440,9 @@ static void write_event_with_correlation_on_track_id(uint8_t track_id,
 static void write_event_with_correlation(uint8_t tag, uint16_t span_id,
                          uint64_t correlation_id, int has_correlation,
                          const uint64_t* args, uint8_t arg_count) {
-  if (tlt_my_track_id < 0) return;
-  write_event_with_correlation_on_track_id((uint8_t)tlt_my_track_id, tag,
+  int track_id = tlt_current_track_id();
+  if (track_id < 0) return;
+  write_event_with_correlation_on_track_id((uint8_t)track_id, tag,
                                            span_id, correlation_id,
                                            has_correlation, args, arg_count);
 }

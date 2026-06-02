@@ -174,6 +174,65 @@ void main() {
     }
   }, timeout: const Timeout(Duration(minutes: 5)));
 
+  test('worker runner keeps resqlite reactive samples isolated', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-worker-resqlite-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final artifactPath = '${tempDir.path}/compare.json';
+    final compare = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=keyed-pk-subscriptions',
+        '--interfaces=resqlite',
+        '--rows=4',
+        '--repetitions=2',
+        '--runner=worker',
+        '--out-json=$artifactPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      compare.exitCode,
+      0,
+      reason: 'resqlite worker compare failed.\nstdout:\n${compare.stdout}\n'
+          'stderr:\n${compare.stderr}',
+    );
+
+    final artifact = jsonDecode(File(artifactPath).readAsStringSync())
+        as Map<String, Object?>;
+    final runner = artifact['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'worker');
+    final preflight = runner['preflight'] as Map<String, Object?>;
+    expect(preflight['peer'], 'resqlite');
+    expect(preflight['status'], 'ok');
+
+    final peers = artifact['peers'] as List<Object?>;
+    final resqlite = peers.single as Map<String, Object?>;
+    expect(resqlite['peer'], 'resqlite');
+    expect(resqlite['status'], 'ok');
+    final samples = resqlite['samples'] as List<Object?>;
+    expect(samples, hasLength(2));
+    for (final sample in samples.cast<Map<String, Object?>>()) {
+      expect(sample['status'], 'ok');
+      final diagnostics = sample['diagnostics'] as Map<String, Object?>;
+      expect(diagnostics['dropped_events'], 0);
+      expect(diagnostics['unmatched_begin_events'], 0);
+      expect(diagnostics['unmatched_end_events'], 0);
+      expect(sample['trace_duration_ns'] as int, lessThan(1000000000));
+      expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      expect(sample['sql_fingerprint_groups'] as List<Object?>, isNotEmpty);
+    }
+  }, timeout: const Timeout(Duration(minutes: 5)));
+
   test('require-clean-source rejects dirty source checkouts', () async {
     final marker = File(
       '.tracelite-clean-source-test-${DateTime.now().microsecondsSinceEpoch}',
