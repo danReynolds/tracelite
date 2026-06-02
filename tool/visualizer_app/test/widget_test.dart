@@ -8,6 +8,8 @@ import 'package:tracelite_visualizer/main.dart';
 import 'package:tracelite_visualizer/src/workspace.dart';
 
 const _denseWidgetSpanCount = 3000;
+const _heavyNativeTraceTags = ['heavy', 'native-trace'];
+const _nativeTraceTags = ['native-trace'];
 
 void main() {
   testWidgets('renders the visualizer shell', (tester) async {
@@ -73,181 +75,189 @@ void main() {
     expect(find.text('sqlite3'), findsWidgets);
   });
 
-  testWidgets('renders dense trace with searchable linked span index', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 1200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'renders dense trace with searchable linked span index',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final temp = Directory.systemTemp.createTempSync('tracelite-viz-dense-');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    await _writeDenseTraceWorkspace(temp, spanCount: _denseWidgetSpanCount);
+      final temp = Directory.systemTemp.createTempSync('tracelite-viz-dense-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      await _writeDenseTraceWorkspace(temp, spanCount: _denseWidgetSpanCount);
 
-    await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Trace'));
-    await _pumpInteraction(tester);
-    expect(find.text('Trace Inspector'), findsOneWidget);
-    expect(find.text('$_denseWidgetSpanCount'), findsWidgets);
+      await tester.tap(find.text('Trace'));
+      await _pumpInteraction(tester);
+      expect(find.text('Trace Inspector'), findsOneWidget);
+      expect(find.text('$_denseWidgetSpanCount'), findsWidgets);
 
-    await tester.drag(
-      find.byKey(const ValueKey('trace-page-scroll')),
-      const Offset(0, -900),
-    );
-    await _pumpInteraction(tester);
-    expect(find.text('Span Index'), findsOneWidget);
-    expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, -900),
+      );
+      await _pumpInteraction(tester);
+      expect(find.text('Span Index'), findsOneWidget);
+      expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
 
-    await tester.drag(
-      find.byKey(const ValueKey('trace-page-scroll')),
-      const Offset(0, -700),
-    );
-    await _pumpInteraction(tester);
-    expect(
-      find.textContaining('Visible Span Aggregation', skipOffstage: false),
-      findsOneWidget,
-    );
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, -700),
+      );
+      await _pumpInteraction(tester);
+      expect(
+        find.textContaining('Visible Span Aggregation', skipOffstage: false),
+        findsOneWidget,
+      );
 
-    await tester.drag(
-      find.byKey(const ValueKey('trace-page-scroll')),
-      const Offset(0, 700),
-    );
-    await _pumpInteraction(tester);
-    await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
-    await _pumpInteraction(tester);
-    expect(find.text('sqlite3_step'), findsWidgets);
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, 700),
+      );
+      await _pumpInteraction(tester);
+      await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
+      await _pumpInteraction(tester);
+      expect(find.text('sqlite3_step'), findsWidgets);
 
-    await tester.enterText(find.byType(TextField).last, 'target_dense_span');
-    await _pumpInteraction(tester);
-    expect(find.text('1 matches'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).last, 'target_dense_span');
+      await _pumpInteraction(tester);
+      expect(find.text('1 matches'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
-    await _pumpInteraction(tester);
-    await tester.enterText(find.byType(TextField).last, '');
-    await _pumpInteraction(tester);
-    expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
+      await _pumpInteraction(tester);
+      await tester.enterText(find.byType(TextField).last, '');
+      await _pumpInteraction(tester);
+      expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('span-index-visible-toggle')));
-    await _pumpInteraction(tester);
-    expect(find.text('Visible window only'), findsOneWidget);
-    expect(find.text('$_denseWidgetSpanCount matches'), findsNothing);
-    expect(
-      find.byWidgetPredicate((widget) {
-        return widget is Text &&
-            widget.data != null &&
-            RegExp(
-              '^\\d+/$_denseWidgetSpanCount matches\$',
-            ).hasMatch(widget.data!) &&
-            widget.data !=
-                '$_denseWidgetSpanCount/$_denseWidgetSpanCount matches';
-      }),
-      findsOneWidget,
-    );
+      await tester.tap(find.byKey(const ValueKey('span-index-visible-toggle')));
+      await _pumpInteraction(tester);
+      expect(find.text('Visible window only'), findsOneWidget);
+      expect(find.text('$_denseWidgetSpanCount matches'), findsNothing);
+      expect(
+        find.byWidgetPredicate((widget) {
+          return widget is Text &&
+              widget.data != null &&
+              RegExp(
+                '^\\d+/$_denseWidgetSpanCount matches\$',
+              ).hasMatch(widget.data!) &&
+              widget.data !=
+                  '$_denseWidgetSpanCount/$_denseWidgetSpanCount matches';
+        }),
+        findsOneWidget,
+      );
 
-    await tester.drag(
-      find.byKey(const ValueKey('trace-page-scroll')),
-      const Offset(0, 900),
-    );
-    await _pumpInteraction(tester);
-    expect(find.text('Selected Span'), findsOneWidget);
-    expect(
-      find.textContaining('target_dense_span', findRichText: true),
-      findsWidgets,
-    );
-  }, tags: ['heavy']);
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, 900),
+      );
+      await _pumpInteraction(tester);
+      expect(find.text('Selected Span'), findsOneWidget);
+      expect(
+        find.textContaining('target_dense_span', findRichText: true),
+        findsWidgets,
+      );
+    },
+    tags: _heavyNativeTraceTags,
+  );
 
-  test('TraceDocument visible range queries find late dense spans', () async {
-    final temp = Directory.systemTemp.createTempSync(
-      'tracelite-viz-dense-query-',
-    );
-    addTearDown(() => temp.deleteSync(recursive: true));
-    await _writeDenseTraceWorkspace(temp, spanCount: 12000);
+  test(
+    'TraceDocument visible range queries find late dense spans',
+    () async {
+      final temp = Directory.systemTemp.createTempSync(
+        'tracelite-viz-dense-query-',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      await _writeDenseTraceWorkspace(temp, spanCount: 12000);
 
-    final workspace = await VisualizerWorkspace.load(temp.path);
-    final trace = workspace.traces.single;
-    final target = trace.completeSpans.lastWhere(
-      (span) => trace.trace.spanName(span.spanId) == 'target_dense_span',
-    );
-    final visible = trace.visibleSpansIn(target.startNs, target.startNs + 1);
+      final workspace = await VisualizerWorkspace.load(temp.path);
+      final trace = workspace.traces.single;
+      final target = trace.completeSpans.lastWhere(
+        (span) => trace.trace.spanName(span.spanId) == 'target_dense_span',
+      );
+      final visible = trace.visibleSpansIn(target.startNs, target.startNs + 1);
 
-    expect(visible, contains(target));
-    expect(
-      trace.visibleSpanCountIn(target.startNs, target.startNs + 1),
-      greaterThanOrEqualTo(1),
-    );
-  });
+      expect(visible, contains(target));
+      expect(
+        trace.visibleSpanCountIn(target.startNs, target.startNs + 1),
+        greaterThanOrEqualTo(1),
+      );
+    },
+    tags: _nativeTraceTags,
+  );
 
-  testWidgets('decodes SQLite statement SQL fingerprints in trace views', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 1100);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'decodes SQLite statement SQL fingerprints in trace views',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final temp = Directory.systemTemp.createTempSync('tracelite-viz-sql-');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    await _writeSqlTraceWorkspace(temp);
+      final temp = Directory.systemTemp.createTempSync('tracelite-viz-sql-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      await _writeSqlTraceWorkspace(temp);
 
-    await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Trace'));
-    await tester.pumpAndSettle();
-    await tester.drag(
-      find.byKey(const ValueKey('trace-page-scroll')),
-      const Offset(0, -700),
-    );
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Trace'));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, -700),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Span Index'), findsOneWidget);
-    expect(find.textContaining('sqlfp:v1:2a1aa0dd'), findsWidgets);
-    expect(
-      find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
-      findsWidgets,
-    );
+      expect(find.text('Span Index'), findsOneWidget);
+      expect(find.textContaining('sqlfp:v1:2a1aa0dd'), findsWidgets);
+      expect(
+        find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
+        findsWidgets,
+      );
 
-    await tester.enterText(find.byType(TextField).last, 'TRACELITE_ITEMS');
-    await tester.pumpAndSettle();
-    expect(find.text('2 matches'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).last, 'TRACELITE_ITEMS');
+      await tester.pumpAndSettle();
+      expect(find.text('2 matches'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
-    await tester.pumpAndSettle();
-    expect(find.text('1 matches'), findsOneWidget);
-    expect(
-      find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
-      findsWidgets,
-    );
+      await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
+      await tester.pumpAndSettle();
+      expect(find.text('1 matches'), findsOneWidget);
+      expect(
+        find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
+        findsWidgets,
+      );
 
-    await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
-    await tester.pumpAndSettle();
-    await tester.drag(
-      find.byKey(const ValueKey('trace-page-scroll')),
-      const Offset(0, 700),
-    );
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, 700),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Selected Span'), findsOneWidget);
-    expect(find.text('sqlite3_step'), findsWidgets);
-    expect(
-      find.textContaining('sql fingerprint', findRichText: true),
-      findsWidgets,
-    );
-    expect(
-      find.textContaining('fingerprinted', findRichText: true),
-      findsWidgets,
-    );
-    expect(
-      find.textContaining(
-        'SELECT * FROM TRACELITE_ITEMS WHERE ID = ?',
-        findRichText: true,
-      ),
-      findsWidgets,
-    );
-  });
+      expect(find.text('Selected Span'), findsOneWidget);
+      expect(find.text('sqlite3_step'), findsWidgets);
+      expect(
+        find.textContaining('sql fingerprint', findRichText: true),
+        findsWidgets,
+      );
+      expect(
+        find.textContaining('fingerprinted', findRichText: true),
+        findsWidgets,
+      );
+      expect(
+        find.textContaining(
+          'SELECT * FROM TRACELITE_ITEMS WHERE ID = ?',
+          findRichText: true,
+        ),
+        findsWidgets,
+      );
+    },
+    tags: _nativeTraceTags,
+  );
 }
 
 Future<void> _pumpInteraction(WidgetTester tester) async {

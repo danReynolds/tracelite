@@ -71,13 +71,16 @@ void main() {
       expect(text, contains('--require-clean-source=true'));
       expect(text, contains('Visualizer Release'));
       expect(text, contains('heavyweight dense-trace'));
+      expect(text, contains('native trace fixture'));
     }
     expect(doctor, contains('Visualizer Release'));
     expect(doctor, contains('--package=host --require-clean-source=true'));
     expect(doctor, contains('heavyweight dense-trace'));
+    expect(doctor, contains('native trace fixture'));
     expect(devCli, contains('--package=none|host'));
     expect(devCli, contains('--require-clean-source=true'));
     expect(devCli, contains('--skip-heavy-visualizer-tests=true'));
+    expect(devCli, contains('--skip-native-visualizer-tests=true'));
   });
 
   test('docs reflect Linux pinned peer suite coverage', () {

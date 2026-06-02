@@ -151,9 +151,13 @@ jobs:
             tool/visualizer_check.dart
             --package=host
             --require-clean-source=true
-            --skip-heavy-visualizer-tests=true
             --out-dir=build/visualizer-release
           )
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            args+=(--skip-native-visualizer-tests=true)
+          else
+            args+=(--skip-heavy-visualizer-tests=true)
+          fi
           if [[ "$SIGN_MACOS" == "true" ]]; then
             args+=(--macos-sign-identity="$MACOS_SIGN_IDENTITY")
             args+=(--macos-notary-profile=tracelite-notary)

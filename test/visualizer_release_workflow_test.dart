@@ -18,6 +18,8 @@ void main() {
     expect(workflow, contains('--package=host'));
     expect(workflow, contains('--require-clean-source=true'));
     expect(workflow, contains('--skip-heavy-visualizer-tests=true'));
+    expect(workflow, contains('--skip-native-visualizer-tests=true'));
+    expect(workflow, contains('RUNNER_OS'));
     expect(workflow, contains('actions/upload-artifact@v7.0.1'));
   });
 

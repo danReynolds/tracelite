@@ -47,5 +47,7 @@ workflow. It packages macOS, Linux, and Windows host builds with the same
 `visualizer-check --package=host --require-clean-source=true` path, uploads the
 archive/manifest evidence, and can publish the artifacts to a draft GitHub
 release. The workflow skips only the tagged heavyweight dense-trace widget
-stress test; run `flutter test` locally for full visualizer stress coverage.
-macOS signing and notarization require the workflow's release secrets.
+stress test on Linux/macOS, and skips native trace fixture generation on Windows
+until the native recorder runtime is portable there. Run `flutter test` locally
+for full visualizer stress coverage. macOS signing and notarization require the
+workflow's release secrets.

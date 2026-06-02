@@ -21,6 +21,8 @@ void main() {
     expect(result.stderr.toString(), contains('--require-clean-source=true'));
     expect(result.stderr.toString(),
         contains('--skip-heavy-visualizer-tests=true'));
+    expect(result.stderr.toString(),
+        contains('--skip-native-visualizer-tests=true'));
     expect(result.stderr.toString(), contains('root peer native assets'));
   });
 
@@ -117,6 +119,23 @@ void main() {
     expect(
       result.stderr.toString(),
       contains('--skip-heavy-visualizer-tests must be true or false'),
+    );
+  });
+
+  test('visualizer check rejects invalid native-test skip value', () async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--skip-native-visualizer-tests=maybe',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr.toString(),
+      contains('--skip-native-visualizer-tests must be true or false'),
     );
   });
 }

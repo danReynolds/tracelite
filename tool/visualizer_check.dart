@@ -15,6 +15,11 @@ Future<void> main(List<String> args) async {
   final flutter = _flutterExecutable(
     options.flutterExecutable ?? Platform.environment['TRACELITE_FLUTTER'],
   );
+  final testExcludeTag = options.skipNativeVisualizerTests
+      ? 'native-trace'
+      : options.skipHeavyVisualizerTests
+          ? 'heavy'
+          : null;
 
   if (!appDir.existsSync()) {
     stderr.writeln('missing visualizer app directory: ${appDir.path}');
@@ -83,7 +88,7 @@ Future<void> main(List<String> args) async {
     executable: flutter,
     arguments: [
       'test',
-      if (options.skipHeavyVisualizerTests) '--exclude-tags=heavy',
+      if (testExcludeTag != null) '--exclude-tags=$testExcludeTag',
     ],
     workingDirectory: appDir.path,
   );
@@ -131,6 +136,7 @@ _Options _parseOptions(List<String> args) {
   String? macosNotaryProfile;
   var requireCleanSource = false;
   var skipHeavyVisualizerTests = false;
+  var skipNativeVisualizerTests = false;
   var help = false;
 
   for (final arg in args) {
@@ -196,6 +202,18 @@ _Options _parseOptions(List<String> args) {
         stderr.writeln('--skip-heavy-visualizer-tests must be true or false');
         _usage();
       }
+    } else if (arg == '--skip-native-visualizer-tests') {
+      skipNativeVisualizerTests = true;
+    } else if (arg.startsWith('--skip-native-visualizer-tests=')) {
+      final value = arg.substring('--skip-native-visualizer-tests='.length);
+      if (value == 'true') {
+        skipNativeVisualizerTests = true;
+      } else if (value == 'false') {
+        skipNativeVisualizerTests = false;
+      } else {
+        stderr.writeln('--skip-native-visualizer-tests must be true or false');
+        _usage();
+      }
     } else {
       stderr.writeln('unknown visualizer-check option: $arg');
       _usage();
@@ -223,6 +241,7 @@ _Options _parseOptions(List<String> args) {
     macosNotaryProfile: macosNotaryProfile,
     requireCleanSource: requireCleanSource,
     skipHeavyVisualizerTests: skipHeavyVisualizerTests,
+    skipNativeVisualizerTests: skipNativeVisualizerTests,
     help: help,
   );
 }
@@ -648,6 +667,7 @@ Never _usage({int exitCode = 64}) {
     '[--package=none|host] [--out-dir=build/visualizer-release] '
     '[--require-clean-source=true] '
     '[--skip-heavy-visualizer-tests=true] '
+    '[--skip-native-visualizer-tests=true] '
     '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
   );
   stderr.writeln(
@@ -656,6 +676,7 @@ Never _usage({int exitCode = 64}) {
     '[--package=none|host] [--out-dir=build/visualizer-release] '
     '[--require-clean-source=true] '
     '[--skip-heavy-visualizer-tests=true] '
+    '[--skip-native-visualizer-tests=true] '
     '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
   );
   stderr.writeln();
@@ -667,6 +688,10 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln(
     'Use --skip-heavy-visualizer-tests in hosted release packaging when '
     'full widget stress coverage is validated separately.',
+  );
+  stderr.writeln(
+    'Use --skip-native-visualizer-tests only on Windows release packaging '
+    'until native trace fixture generation is portable there.',
   );
   stderr.writeln(
     'On macOS, signing and notarization are optional credential-backed steps.',
@@ -688,6 +713,7 @@ final class _Options {
     required this.macosNotaryProfile,
     required this.requireCleanSource,
     required this.skipHeavyVisualizerTests,
+    required this.skipNativeVisualizerTests,
     required this.help,
   });
 
@@ -699,6 +725,7 @@ final class _Options {
   final String? macosNotaryProfile;
   final bool requireCleanSource;
   final bool skipHeavyVisualizerTests;
+  final bool skipNativeVisualizerTests;
   final bool help;
 }
 
