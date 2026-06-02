@@ -18,7 +18,7 @@ void main() {
     );
     expect(result.stdout.toString(), contains('dart run bin/tracelite.dart'));
     expect(result.stdout.toString(), contains('visualizer-check'));
-    expect(result.stderr.toString(), isEmpty);
+    expect(_withoutBuildHookNoise(result.stderr.toString()), isEmpty);
   });
 
   test('source-checkout subcommand help exits before command validation',
@@ -37,7 +37,7 @@ void main() {
     );
     expect(result.stdout.toString(), contains('doctor'));
     expect(result.stdout.toString(), isNot(contains('# tracelite doctor')));
-    expect(result.stderr.toString(), isEmpty);
+    expect(_withoutBuildHookNoise(result.stderr.toString()), isEmpty);
   });
 
   test('forced core subcommand help exits before artifact loading', () async {
@@ -60,4 +60,8 @@ void main() {
     expect(result.stdout.toString(), contains('report <region>'));
     expect(result.stderr.toString(), isNot(contains('No such file')));
   });
+}
+
+String _withoutBuildHookNoise(String value) {
+  return value.replaceAll('Running build hooks...', '').trim();
 }
