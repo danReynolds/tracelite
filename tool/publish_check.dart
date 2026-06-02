@@ -294,7 +294,12 @@ List<String> _forbiddenArchiveEntries(String stdoutText) {
     if (stdoutText.contains('test_producer.c')) 'native/test_producer.c',
     if (stdoutText.contains('package_boundary_test.dart')) 'test/',
     if (stdoutText.contains('tracelite_dev.dart')) 'tool/tracelite_dev.dart',
+    if (stdoutText.contains('peer_runner.dart')) 'tool/peer_runner.dart',
     if (stdoutText.contains('peer.dart')) 'tool/src/peer.dart',
+    if (stdoutText.contains('peer_definitions.dart'))
+      'tool/src/peer_definitions.dart',
+    if (stdoutText.contains('peer_runtime_libraries.dart'))
+      'tool/src/peer_runtime_libraries.dart',
     if (stdoutText.contains('native_runtime_smoke.dart'))
       'tool/native_runtime_smoke.dart',
     if (stdoutText.contains('platform_core_smoke.dart'))

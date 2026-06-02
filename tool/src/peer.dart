@@ -11,51 +11,7 @@ import 'package:sqlite3/sqlite3.dart' as sqlite3;
 import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 import 'package:tracelite/resqlite.dart' as tracelite_resqlite;
 
-const String narrowBatchInsertScenario = 'narrow-batch-insert';
-const String pointSelectScenario = 'point-select';
-const String feedPagingScenario = 'feed-paging';
-const String syncBurstScenario = 'sync-burst';
-const String chatSimScenario = 'chat-sim';
-const String largeWorkingSetScenario = 'large-working-set';
-const String keyedPkSubscriptionsScenario = 'keyed-pk-subscriptions';
-const String highCardinalityFanoutScenario = 'high-cardinality-fanout';
-const String manyStreamsWriterThroughputScenario =
-    'many-streams-writer-throughput';
-const String sqliteDiagnosticsScenario = 'sqlite-diagnostics';
-
-const List<String> defaultScenarioNames = [
-  narrowBatchInsertScenario,
-  pointSelectScenario,
-  feedPagingScenario,
-  syncBurstScenario,
-  chatSimScenario,
-  largeWorkingSetScenario,
-  keyedPkSubscriptionsScenario,
-  highCardinalityFanoutScenario,
-  manyStreamsWriterThroughputScenario,
-  sqliteDiagnosticsScenario,
-];
-
-const int _feedPagingSeed = 0xFEED;
-const int _feedPagingPageSize = 10;
-const int _feedPagingPageCount = 4;
-const int _feedPagingLikeWrites = 8;
-const int _syncBurstChunkSize = 25;
-const int _syncBurstMergeRounds = 3;
-const int _syncBurstMergeRowsPerRound = 10;
-const int _chatSimSeed = 0x5EED;
-const double _chatSimZipfExponent = 1.0;
-const int _largeWorkingSetSeed = 0xB16B00B5;
-const int _largeWorkingSetPayloadLength = 128;
-const int _reactiveSeed = 0xBEEF;
-const int _fanoutSeed = 0xCAFEF0;
-
-const List<String> defaultPeerNames = [
-  'sqlite3',
-  'drift',
-  'sqlite_async',
-  'resqlite',
-];
+import 'peer_definitions.dart';
 
 abstract interface class SqlitePeer {
   String get name;
@@ -154,147 +110,6 @@ SqlitePeer createPeer(String name) {
     'sqlite_async' => SqliteAsyncPeer(),
     'resqlite' => ResqlitePeer(),
     _ => throw ArgumentError.value(name, 'name', 'unknown peer'),
-  };
-}
-
-List<String> peerCapabilities(String peerName) {
-  final capabilities = <String>['sql', 'batch'];
-  if (peerName == 'resqlite' ||
-      peerName == 'sqlite_async' ||
-      peerName == 'drift') {
-    capabilities.add('reactive');
-  }
-  if (peerName == 'resqlite') {
-    capabilities.add('diagnostics');
-  }
-  return capabilities;
-}
-
-Map<String, Object?> peerScenarioParameters(
-  String scenarioName, {
-  required int rows,
-}) {
-  return switch (scenarioName) {
-    narrowBatchInsertScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'columns': 2,
-        'measured_operations': ['execute_batch', 'count_select'],
-      },
-    pointSelectScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql'],
-        'lookups': rows,
-        'seed': 0,
-        'measured_operations': ['point_select'],
-      },
-    feedPagingScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'seed': _feedPagingSeed,
-        'page_size': math.min(_feedPagingPageSize, math.max(1, rows)),
-        'page_count': _feedPagingPageCount,
-        'like_writes': math.min(_feedPagingLikeWrites, math.max(1, rows)),
-        'measured_operations': [
-          'keyset_page_select',
-          'point_update',
-          'latest_page_select',
-        ],
-      },
-    syncBurstScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'bulk_chunk_size': math.min(_syncBurstChunkSize, math.max(1, rows)),
-        'merge_rounds': _syncBurstMergeRounds,
-        'merge_rows_per_round': math.min(
-          _syncBurstMergeRowsPerRound,
-          math.max(1, rows),
-        ),
-        'measured_operations': [
-          'chunked_execute_batch',
-          'insert_or_replace_merge',
-          'count_select',
-        ],
-      },
-    chatSimScenario => {
-        'operations': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'warmup_operations': _chatWarmupOps(rows),
-        'users': _chatUserCount(rows),
-        'conversations': _chatConversationCount(rows),
-        'seed_messages': _chatSeedMessageCount(rows),
-        'seed': _chatSimSeed,
-        'zipf_exponent': _chatSimZipfExponent,
-        'operation_mix': {
-          'insert_message_percent': 5,
-          'update_conversation_percent': 5,
-          'read_messages_percent': 45,
-          'read_user_percent': 45,
-        },
-      },
-    largeWorkingSetScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'seed': _largeWorkingSetSeed,
-        'payload_bytes': _largeWorkingSetPayloadLength,
-        'point_queries': _largeWorkingSetPointQueries(rows),
-        'range_scans': _largeWorkingSetRangeScans(rows),
-        'range_scan_limit': _largeWorkingSetRangeLimit(rows),
-        'measured_operations': [
-          'random_point_select',
-          'range_scan_select',
-          'pragma_shrink_memory',
-        ],
-      },
-    keyedPkSubscriptionsScenario => {
-        'rows': _reactiveRowCount(rows),
-        'stream_count': _reactiveStreamCount(rows),
-        'write_count': _reactiveWriteCount(rows),
-        'seed': _reactiveSeed,
-        'required_capabilities': ['sql', 'reactive'],
-        'measured_operations': [
-          'stream_initial_drain',
-          'random_pk_update',
-          'stream_settle',
-        ],
-      },
-    highCardinalityFanoutScenario => {
-        'rows': _fanoutRowCount(rows),
-        'stream_count': _fanoutStreamCount(rows),
-        'write_count': _fanoutWriteCount(rows),
-        'seed': _fanoutSeed,
-        'required_capabilities': ['sql', 'reactive'],
-        'measured_operations': [
-          'partition_stream_initial_drain',
-          'random_partition_update',
-          'stream_settle',
-        ],
-      },
-    manyStreamsWriterThroughputScenario => {
-        'rows': _writerRowCount(rows),
-        'stream_count': _writerStreamCount(rows),
-        'write_count': _writerWriteCount(rows),
-        'required_capabilities': ['sql', 'reactive'],
-        'measured_operations': [
-          'baseline_updates',
-          'disjoint_updates_with_streams',
-          'overlap_updates_with_streams',
-        ],
-      },
-    sqliteDiagnosticsScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'diagnostics'],
-        'measured_operations': [
-          'seed',
-          'warm_read',
-          'diagnostic_snapshot',
-        ],
-      },
-    _ => throw ArgumentError.value(
-        scenarioName,
-        'scenarioName',
-        'unknown scenario',
-      ),
   };
 }
 
@@ -425,7 +240,7 @@ Future<PeerScenarioResult> _runFeedPaging(
     'ON tracelite_feed_items(created_at DESC, id DESC)',
   );
 
-  final prng = math.Random(_feedPagingSeed);
+  final prng = math.Random(feedPagingSeed);
   await peer.executeBatch(
     'INSERT INTO tracelite_feed_items('
     'id, author_id, created_at, body, like_count'
@@ -444,7 +259,7 @@ Future<PeerScenarioResult> _runFeedPaging(
   setup.stop();
 
   final warmup = Stopwatch()..start();
-  await _selectLatestFeedPage(peer, math.min(_feedPagingPageSize, rows));
+  await _selectLatestFeedPage(peer, math.min(feedPagingPageSize, rows));
   warmup.stop();
 
   final measured = Stopwatch()..start();
@@ -452,7 +267,7 @@ Future<PeerScenarioResult> _runFeedPaging(
   await _applyFeedLikeWrites(peer, rows: rows);
   final latest = await _selectLatestFeedPage(
     peer,
-    math.min(_feedPagingPageSize, rows),
+    math.min(feedPagingPageSize, rows),
   );
   if (latest.isEmpty) {
     throw StateError('${peer.name} returned no feed rows');
@@ -482,7 +297,7 @@ Future<PeerScenarioResult> _runSyncBurst(
   setup.stop();
 
   final measured = Stopwatch()..start();
-  final chunkSize = math.min(_syncBurstChunkSize, math.max(1, rows));
+  final chunkSize = math.min(syncBurstChunkSize, math.max(1, rows));
   for (var offset = 0; offset < rows; offset += chunkSize) {
     final n = math.min(chunkSize, rows - offset);
     await peer.executeBatch(
@@ -494,8 +309,8 @@ Future<PeerScenarioResult> _runSyncBurst(
     );
   }
 
-  final mergeRows = math.min(_syncBurstMergeRowsPerRound, math.max(1, rows));
-  for (var round = 0; round < _syncBurstMergeRounds; round++) {
+  final mergeRows = math.min(syncBurstMergeRowsPerRound, math.max(1, rows));
+  for (var round = 0; round < syncBurstMergeRounds; round++) {
     await peer.executeBatch(
       'INSERT OR REPLACE INTO tracelite_sync_items('
       'external_id, payload, dirty'
@@ -529,7 +344,7 @@ Future<PeerScenarioResult> _runSyncBurst(
     'SELECT COUNT(*) AS count FROM tracelite_sync_items WHERE external_id >= ?',
     [0],
   );
-  final expected = rows + _syncBurstMergeRounds * mergeRows;
+  final expected = rows + syncBurstMergeRounds * mergeRows;
   final count = result.single['count'];
   if (count != expected) {
     throw StateError('${peer.name} synced $count row(s), expected $expected');
@@ -547,9 +362,9 @@ Future<PeerScenarioResult> _runChatSim(
   SqlitePeer peer, {
   required int rows,
 }) async {
-  final userCount = _chatUserCount(rows);
-  final conversationCount = _chatConversationCount(rows);
-  final seedMessages = _chatSeedMessageCount(rows);
+  final userCount = chatUserCount(rows);
+  final conversationCount = chatConversationCount(rows);
+  final seedMessages = chatSeedMessageCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_chat_messages');
@@ -593,10 +408,10 @@ Future<PeerScenarioResult> _runChatSim(
   );
   final seedZipf = _ZipfianSampler(
     conversationCount,
-    _chatSimZipfExponent,
-    _chatSimSeed ^ 0xABC,
+    chatSimZipfExponent,
+    chatSimSeed ^ 0xABC,
   );
-  final seedPrng = math.Random(_chatSimSeed ^ 0xDEF);
+  final seedPrng = math.Random(chatSimSeed ^ 0xDEF);
   await peer.executeBatch(
     'INSERT INTO tracelite_chat_messages('
     'id, conv_id, sender_id, body, sent_at'
@@ -620,7 +435,7 @@ Future<PeerScenarioResult> _runChatSim(
     conversationCount: conversationCount,
     seedMessageCount: seedMessages,
   );
-  final warmupOps = _chatWarmupOps(rows);
+  final warmupOps = chatWarmupOps(rows);
   final warmup = Stopwatch()..start();
   for (final op in ops.take(warmupOps)) {
     await _executeChatOp(peer, op);
@@ -651,7 +466,7 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
     'id INTEGER PRIMARY KEY, '
     'payload TEXT NOT NULL)',
   );
-  final payload = List.filled(_largeWorkingSetPayloadLength, 'x').join();
+  final payload = List.filled(largeWorkingSetPayloadLength, 'x').join();
   await peer.executeBatch(
     'INSERT INTO tracelite_large_items(id, payload) VALUES (?, ?)',
     [
@@ -668,8 +483,8 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
   warmup.stop();
 
   final measured = Stopwatch()..start();
-  final prng = math.Random(_largeWorkingSetSeed);
-  for (var i = 0; i < _largeWorkingSetPointQueries(rows); i++) {
+  final prng = math.Random(largeWorkingSetSeed);
+  for (var i = 0; i < largeWorkingSetPointQueries(rows); i++) {
     final id = prng.nextInt(rows) + 1;
     final result = await peer.select(
       'SELECT payload FROM tracelite_large_items WHERE id = ?',
@@ -680,8 +495,8 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
     }
     _consumeRows(result);
   }
-  final rangeLimit = _largeWorkingSetRangeLimit(rows);
-  for (var i = 0; i < _largeWorkingSetRangeScans(rows); i++) {
+  final rangeLimit = largeWorkingSetRangeLimit(rows);
+  for (var i = 0; i < largeWorkingSetRangeScans(rows); i++) {
     final start = prng.nextInt(math.max(1, rows - rangeLimit + 1)) + 1;
     final result = await peer.select(
       'SELECT payload FROM tracelite_large_items '
@@ -707,9 +522,9 @@ Future<PeerScenarioResult> _runKeyedPkSubscriptions(
   required int rows,
 }) async {
   final reactive = _requireReactivePeer(peer);
-  final rowCount = _reactiveRowCount(rows);
-  final streamCount = _reactiveStreamCount(rows);
-  final writeCount = _reactiveWriteCount(rows);
+  final rowCount = reactiveRowCount(rows);
+  final streamCount = reactiveStreamCount(rows);
+  final writeCount = reactiveWriteCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_keyed_items');
@@ -754,7 +569,7 @@ Future<PeerScenarioResult> _runKeyedPkSubscriptions(
       emitCounts[i] = 0;
     }
 
-    final prng = math.Random(_reactiveSeed);
+    final prng = math.Random(reactiveSeed);
     var observedHits = 0;
     final measured = Stopwatch()..start();
     for (var i = 0; i < writeCount; i++) {
@@ -790,9 +605,9 @@ Future<PeerScenarioResult> _runHighCardinalityFanout(
   required int rows,
 }) async {
   final reactive = _requireReactivePeer(peer);
-  final rowCount = _fanoutRowCount(rows);
-  final streamCount = _fanoutStreamCount(rows);
-  final writeCount = _fanoutWriteCount(rows);
+  final rowCount = fanoutRowCount(rows);
+  final streamCount = fanoutStreamCount(rows);
+  final writeCount = fanoutWriteCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_fanout_items');
@@ -840,7 +655,7 @@ Future<PeerScenarioResult> _runHighCardinalityFanout(
       emitCounts[i] = 0;
     }
 
-    final prng = math.Random(_fanoutSeed);
+    final prng = math.Random(fanoutSeed);
     final touchedOwners = <int>{};
     final measured = Stopwatch()..start();
     for (var i = 0; i < writeCount; i++) {
@@ -875,9 +690,9 @@ Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
   required int rows,
 }) async {
   final reactive = _requireReactivePeer(peer);
-  final rowCount = _writerRowCount(rows);
-  final streamCount = _writerStreamCount(rows);
-  final writeCount = _writerWriteCount(rows);
+  final rowCount = writerRowCount(rows);
+  final streamCount = writerStreamCount(rows);
+  final writeCount = writerWriteCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_wide_items');
@@ -1058,10 +873,10 @@ Future<void> _seedNarrowItems(SqlitePeer peer, {required int rows}) async {
 }
 
 Future<void> _walkFeedPages(SqlitePeer peer, {required int rows}) async {
-  final pageSize = math.min(_feedPagingPageSize, math.max(1, rows));
+  final pageSize = math.min(feedPagingPageSize, math.max(1, rows));
   int? lastCreatedAt;
   int? lastId;
-  for (var page = 0; page < _feedPagingPageCount; page++) {
+  for (var page = 0; page < feedPagingPageCount; page++) {
     final result = page == 0
         ? await _selectLatestFeedPage(peer, pageSize)
         : await peer.select(
@@ -1091,8 +906,8 @@ Future<List<Map<String, Object?>>> _selectLatestFeedPage(
 }
 
 Future<void> _applyFeedLikeWrites(SqlitePeer peer, {required int rows}) async {
-  final prng = math.Random(_feedPagingSeed);
-  final writes = math.min(_feedPagingLikeWrites, math.max(1, rows));
+  final prng = math.Random(feedPagingSeed);
+  final writes = math.min(feedPagingLikeWrites, math.max(1, rows));
   for (var i = 0; i < writes; i++) {
     final id = prng.nextInt(rows) + 1;
     await peer.execute(
@@ -1109,11 +924,11 @@ List<_ChatOp> _generateChatOps({
   required int conversationCount,
   required int seedMessageCount,
 }) {
-  final prng = math.Random(_chatSimSeed);
+  final prng = math.Random(chatSimSeed);
   final zipf = _ZipfianSampler(
     conversationCount,
-    _chatSimZipfExponent,
-    _chatSimSeed,
+    chatSimZipfExponent,
+    chatSimSeed,
   );
   final ops = <_ChatOp>[];
   var clock = seedMessageCount + 1;
@@ -1194,20 +1009,6 @@ void _consumeRows(List<Map<String, Object?>> rows) {
   }
 }
 
-int _chatUserCount(int rows) => math.max(10, rows * 2);
-
-int _chatConversationCount(int rows) => math.max(4, rows);
-
-int _chatSeedMessageCount(int rows) => math.max(20, rows * 20);
-
-int _chatWarmupOps(int rows) => math.min(rows ~/ 10, math.max(0, rows - 1));
-
-int _largeWorkingSetPointQueries(int rows) => math.max(1, rows ~/ 2);
-
-int _largeWorkingSetRangeScans(int rows) => math.max(1, rows ~/ 20);
-
-int _largeWorkingSetRangeLimit(int rows) => math.min(25, math.max(1, rows));
-
 ReactiveSqlitePeer _requireReactivePeer(SqlitePeer peer) {
   if (peer is ReactiveSqlitePeer) return peer;
   throw UnsupportedPeerScenario('${peer.name} does not support reactive watch');
@@ -1267,27 +1068,6 @@ Future<void> _runWideUpdates(
 }
 
 int _sum(int a, int b) => a + b;
-
-int _reactiveStreamCount(int rows) => math.min(50, math.max(1, rows));
-
-int _reactiveWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
-
-int _reactiveRowCount(int rows) =>
-    math.max(_reactiveStreamCount(rows) * 4, rows * 100);
-
-int _fanoutStreamCount(int rows) => math.min(100, math.max(2, rows));
-
-int _fanoutWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
-
-int _fanoutRowCount(int rows) =>
-    math.max(_fanoutStreamCount(rows) * 10, rows * 100);
-
-int _writerStreamCount(int rows) => math.min(50, math.max(2, rows));
-
-int _writerWriteCount(int rows) => math.min(100, math.max(10, rows * 4));
-
-int _writerRowCount(int rows) =>
-    math.max(_writerStreamCount(rows) * 10, rows * 100);
 
 enum _ChatOpKind {
   insertMessage,

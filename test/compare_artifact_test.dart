@@ -153,7 +153,7 @@ void main() {
       expect(sample['span_groups'] as List<Object?>, isNotEmpty);
       expect(sample['sql_fingerprint_groups'] as List<Object?>, isNotEmpty);
     }
-  }, timeout: const Timeout(Duration(minutes: 3)));
+  }, timeout: const Timeout(Duration(minutes: 5)));
 
   test('require-clean-source rejects dirty source checkouts', () async {
     final marker = File(

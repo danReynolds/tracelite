@@ -306,9 +306,10 @@ to `lib/src/core_cli.dart`: `report`, `diff`, `decision`, `calibrate-policy`,
 dependencies. The published library dependency graph stays core-only until the
 peer benchmark CLI becomes a companion package.
 
-The pub archive intentionally excludes `tool/tracelite_dev.dart` and
-`tool/src/peer.dart`. `tool/publish_check.dart` fails if those
-source-checkout-only peer files appear in the dry-run archive listing.
+The pub archive intentionally excludes the checkout-only peer runner surface:
+`tool/tracelite_dev.dart`, `tool/peer_runner.dart`, and `tool/src/peer*.dart`.
+`tool/publish_check.dart` fails if those source-checkout-only peer files appear
+in the dry-run archive listing.
 
 ---
 
