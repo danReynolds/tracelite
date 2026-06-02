@@ -105,9 +105,7 @@ Future<void> main(List<String> args) async {
         appDir: appDir,
         device: device,
         bundle: bundle,
-        outDir: Directory(
-          options.outDir ?? _joinPath(root.path, 'build/visualizer-release'),
-        ),
+        outDir: _resolveOutDir(root.path, options.outDir),
         sourceOverride: sourceOverride,
         macosSignIdentity: options.macosSignIdentity,
         macosNotaryProfile: options.macosNotaryProfile,
@@ -489,7 +487,7 @@ Future<void> _archiveHostRelease({
           '--sequesterRsrc',
           '--keepParent',
           app.path,
-          archive.path,
+          archive.absolute.path,
         ],
         workingDirectory: appDir.path,
       );
@@ -497,7 +495,7 @@ Future<void> _archiveHostRelease({
       await _runStep(
         label: 'Package Linux visualizer archive',
         executable: 'tar',
-        arguments: ['-czf', archive.path, '-C', releaseRoot.path, '.'],
+        arguments: ['-czf', archive.absolute.path, '-C', releaseRoot.path, '.'],
         workingDirectory: appDir.path,
       );
     case 'windows':
@@ -509,7 +507,7 @@ Future<void> _archiveHostRelease({
           '-NonInteractive',
           '-Command',
           'Compress-Archive -Path "${releaseRoot.path}\\*" '
-              '-DestinationPath "${archive.path}" -Force',
+              '-DestinationPath "${archive.absolute.path}" -Force',
         ],
         workingDirectory: appDir.path,
       );
@@ -519,6 +517,16 @@ Future<void> _archiveHostRelease({
 }
 
 String _archiveExtension() => Platform.isLinux ? 'tar.gz' : 'zip';
+
+Directory _resolveOutDir(String root, String? configured) {
+  if (configured == null || configured.isEmpty) {
+    return Directory(_joinPath(root, 'build/visualizer-release'));
+  }
+  final directory = Directory(configured);
+  return directory.isAbsolute
+      ? directory
+      : Directory(_joinPath(root, configured));
+}
 
 String _targetAbi() {
   final raw = Abi.current().toString().split('.').last;

@@ -46,6 +46,14 @@ void main() {
     expect(tool, contains("normalized.endsWith('.cmd')"));
   });
 
+  test('visualizer check resolves package archives from checkout root', () {
+    final tool = File('tool/visualizer_check.dart').readAsStringSync();
+
+    expect(tool, contains('_resolveOutDir(root.path, options.outDir)'));
+    expect(tool, contains("_joinPath(root, 'build/visualizer-release')"));
+    expect(tool, contains('archive.absolute.path'));
+  });
+
   test('visualizer check rejects invalid package mode before Flutter',
       () async {
     final result = await Process.run(
