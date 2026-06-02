@@ -86,4 +86,16 @@ void main() {
       expect(text, contains('pinned four-peer `ci` suite'));
     }
   });
+
+  test('docs do not contain conversational drafting leftovers', () {
+    final docs = Directory('doc')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.md'));
+
+    for (final doc in docs) {
+      final text = doc.readAsStringSync();
+      expect(text, isNot(contains('Want me to')));
+    }
+  });
 }

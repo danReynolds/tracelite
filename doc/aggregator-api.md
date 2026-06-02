@@ -862,5 +862,3 @@ For the audit-style traces that motivate this package (~2K events, ~100KB), all 
 ## What's next
 
 The format spec defines the trace; this doc defines the queries; the next contract is **the visualizer's data binding** — how a UI panel declares "I want this aggregation against the visible window" and how the aggregator delivers updates. That's the layer that ties the live query system to widget rendering. Worth designing before any UI code is written.
-
-Want me to draft that next?
