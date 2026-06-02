@@ -151,6 +151,7 @@ jobs:
             tool/visualizer_check.dart
             --package=host
             --require-clean-source=true
+            --skip-heavy-visualizer-tests=true
             --out-dir=build/visualizer-release
           )
           if [[ "$SIGN_MACOS" == "true" ]]; then

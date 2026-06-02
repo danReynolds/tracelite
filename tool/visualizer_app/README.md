@@ -96,7 +96,9 @@ recorded as external in the manifest.
 The `Visualizer Release` GitHub workflow builds the same audited archives on
 macOS, Linux, and Windows, uploads each archive plus manifest as workflow
 artifacts, and can publish them to a draft GitHub release from a tag or manual
-dispatch. Set `sign_macos=true` only after configuring
+dispatch. Hosted release packaging skips only the tagged heavyweight dense-trace
+widget stress test; run `flutter test` locally for full stress coverage. Set
+`sign_macos=true` only after configuring
 `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`,
 `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_TEAM_ID`, and
 `MACOS_NOTARY_PASSWORD` repository secrets.

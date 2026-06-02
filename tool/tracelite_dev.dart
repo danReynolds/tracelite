@@ -2629,7 +2629,8 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('  dart run bin/tracelite.dart visualizer-check '
       '[--flutter=/path/to/flutter] [--build=none|host] '
       '[--package=none|host] [--out-dir=build/visualizer-release] '
-      '[--require-clean-source=true]');
+      '[--require-clean-source=true] '
+      '[--skip-heavy-visualizer-tests=true]');
   stderr.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] '
       '[--require-clean-source=true] [--out-json=calibration.json]');

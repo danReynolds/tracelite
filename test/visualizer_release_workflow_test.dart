@@ -17,6 +17,7 @@ void main() {
     expect(workflow, contains('dart pub get'));
     expect(workflow, contains('--package=host'));
     expect(workflow, contains('--require-clean-source=true'));
+    expect(workflow, contains('--skip-heavy-visualizer-tests=true'));
     expect(workflow, contains('actions/upload-artifact@v7.0.1'));
   });
 

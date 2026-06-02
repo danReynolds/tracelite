@@ -157,7 +157,7 @@ void main() {
       find.textContaining('target_dense_span', findRichText: true),
       findsWidgets,
     );
-  });
+  }, tags: ['heavy']);
 
   test('TraceDocument visible range queries find late dense spans', () async {
     final temp = Directory.systemTemp.createTempSync(

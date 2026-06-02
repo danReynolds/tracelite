@@ -46,4 +46,6 @@ For distributable visualizer archives, run the `Visualizer Release` GitHub
 workflow. It packages macOS, Linux, and Windows host builds with the same
 `visualizer-check --package=host --require-clean-source=true` path, uploads the
 archive/manifest evidence, and can publish the artifacts to a draft GitHub
-release. macOS signing and notarization require the workflow's release secrets.
+release. The workflow skips only the tagged heavyweight dense-trace widget
+stress test; run `flutter test` locally for full visualizer stress coverage.
+macOS signing and notarization require the workflow's release secrets.

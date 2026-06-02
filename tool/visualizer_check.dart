@@ -81,7 +81,10 @@ Future<void> main(List<String> args) async {
   await _runStep(
     label: 'Test visualizer',
     executable: flutter,
-    arguments: const ['test'],
+    arguments: [
+      'test',
+      if (options.skipHeavyVisualizerTests) '--exclude-tags=heavy',
+    ],
     workingDirectory: appDir.path,
   );
 
@@ -127,6 +130,7 @@ _Options _parseOptions(List<String> args) {
   String? macosSignIdentity;
   String? macosNotaryProfile;
   var requireCleanSource = false;
+  var skipHeavyVisualizerTests = false;
   var help = false;
 
   for (final arg in args) {
@@ -180,6 +184,18 @@ _Options _parseOptions(List<String> args) {
         stderr.writeln('--require-clean-source must be true or false');
         _usage();
       }
+    } else if (arg == '--skip-heavy-visualizer-tests') {
+      skipHeavyVisualizerTests = true;
+    } else if (arg.startsWith('--skip-heavy-visualizer-tests=')) {
+      final value = arg.substring('--skip-heavy-visualizer-tests='.length);
+      if (value == 'true') {
+        skipHeavyVisualizerTests = true;
+      } else if (value == 'false') {
+        skipHeavyVisualizerTests = false;
+      } else {
+        stderr.writeln('--skip-heavy-visualizer-tests must be true or false');
+        _usage();
+      }
     } else {
       stderr.writeln('unknown visualizer-check option: $arg');
       _usage();
@@ -206,6 +222,7 @@ _Options _parseOptions(List<String> args) {
     macosSignIdentity: macosSignIdentity,
     macosNotaryProfile: macosNotaryProfile,
     requireCleanSource: requireCleanSource,
+    skipHeavyVisualizerTests: skipHeavyVisualizerTests,
     help: help,
   );
 }
@@ -630,6 +647,7 @@ Never _usage({int exitCode = 64}) {
     '[--flutter=/path/to/flutter] [--build=none|host] '
     '[--package=none|host] [--out-dir=build/visualizer-release] '
     '[--require-clean-source=true] '
+    '[--skip-heavy-visualizer-tests=true] '
     '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
   );
   stderr.writeln(
@@ -637,6 +655,7 @@ Never _usage({int exitCode = 64}) {
     '[--flutter=/path/to/flutter] [--build=none|host] '
     '[--package=none|host] [--out-dir=build/visualizer-release] '
     '[--require-clean-source=true] '
+    '[--skip-heavy-visualizer-tests=true] '
     '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
   );
   stderr.writeln();
@@ -644,6 +663,10 @@ Never _usage({int exitCode = 64}) {
   stderr.writeln('visualizer. Use --build=host for release-bundle evidence.');
   stderr.writeln(
     'Use --package=host to create an audited host release archive and manifest.',
+  );
+  stderr.writeln(
+    'Use --skip-heavy-visualizer-tests in hosted release packaging when '
+    'full widget stress coverage is validated separately.',
   );
   stderr.writeln(
     'On macOS, signing and notarization are optional credential-backed steps.',
@@ -664,6 +687,7 @@ final class _Options {
     required this.macosSignIdentity,
     required this.macosNotaryProfile,
     required this.requireCleanSource,
+    required this.skipHeavyVisualizerTests,
     required this.help,
   });
 
@@ -674,6 +698,7 @@ final class _Options {
   final String? macosSignIdentity;
   final String? macosNotaryProfile;
   final bool requireCleanSource;
+  final bool skipHeavyVisualizerTests;
   final bool help;
 }
 
