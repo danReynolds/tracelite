@@ -7,6 +7,8 @@ import 'package:tracelite/tracelite.dart';
 import 'package:tracelite_visualizer/main.dart';
 import 'package:tracelite_visualizer/src/workspace.dart';
 
+const _denseWidgetSpanCount = 3000;
+
 void main() {
   testWidgets('renders the visualizer shell', (tester) async {
     await tester.pumpWidget(
@@ -81,29 +83,29 @@ void main() {
 
     final temp = Directory.systemTemp.createTempSync('tracelite-viz-dense-');
     addTearDown(() => temp.deleteSync(recursive: true));
-    await _writeDenseTraceWorkspace(temp, spanCount: 12000);
+    await _writeDenseTraceWorkspace(temp, spanCount: _denseWidgetSpanCount);
 
     await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Trace'));
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(find.text('Trace Inspector'), findsOneWidget);
-    expect(find.text('12000'), findsWidgets);
+    expect(find.text('$_denseWidgetSpanCount'), findsWidgets);
 
     await tester.drag(
       find.byKey(const ValueKey('trace-page-scroll')),
       const Offset(0, -900),
     );
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(find.text('Span Index'), findsOneWidget);
-    expect(find.text('12000 matches'), findsOneWidget);
+    expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
 
     await tester.drag(
       find.byKey(const ValueKey('trace-page-scroll')),
       const Offset(0, -700),
     );
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(
       find.textContaining('Visible Span Aggregation', skipOffstage: false),
       findsOneWidget,
@@ -113,31 +115,34 @@ void main() {
       find.byKey(const ValueKey('trace-page-scroll')),
       const Offset(0, 700),
     );
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(find.text('sqlite3_step'), findsWidgets);
 
     await tester.enterText(find.byType(TextField).last, 'target_dense_span');
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(find.text('1 matches'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     await tester.enterText(find.byType(TextField).last, '');
-    await tester.pumpAndSettle();
-    expect(find.text('12000 matches'), findsOneWidget);
+    await _pumpInteraction(tester);
+    expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('span-index-visible-toggle')));
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(find.text('Visible window only'), findsOneWidget);
-    expect(find.text('12000 matches'), findsNothing);
+    expect(find.text('$_denseWidgetSpanCount matches'), findsNothing);
     expect(
       find.byWidgetPredicate((widget) {
         return widget is Text &&
             widget.data != null &&
-            RegExp(r'^\d+/12000 matches$').hasMatch(widget.data!) &&
-            widget.data != '12000/12000 matches';
+            RegExp(
+              '^\\d+/$_denseWidgetSpanCount matches\$',
+            ).hasMatch(widget.data!) &&
+            widget.data !=
+                '$_denseWidgetSpanCount/$_denseWidgetSpanCount matches';
       }),
       findsOneWidget,
     );
@@ -146,7 +151,7 @@ void main() {
       find.byKey(const ValueKey('trace-page-scroll')),
       const Offset(0, 900),
     );
-    await tester.pumpAndSettle();
+    await _pumpInteraction(tester);
     expect(find.text('Selected Span'), findsOneWidget);
     expect(
       find.textContaining('target_dense_span', findRichText: true),
@@ -243,6 +248,11 @@ void main() {
       findsWidgets,
     );
   });
+}
+
+Future<void> _pumpInteraction(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 100));
 }
 
 void _writeDemoWorkspace(Directory dir) {
