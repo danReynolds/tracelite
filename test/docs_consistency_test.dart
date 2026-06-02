@@ -75,9 +75,13 @@ void main() {
     }
     expect(doctor, contains('Visualizer Release'));
     expect(doctor, contains('--package=host --require-clean-source=true'));
+    expect(doctor, contains('--visualizer-release=build/visualizer-release'));
+    expect(doctor, contains('--require-signed-macos-release=true'));
     expect(doctor, contains('heavyweight dense-trace'));
     expect(devCli, contains('--package=none|host'));
     expect(devCli, contains('--require-clean-source=true'));
+    expect(devCli, contains('--visualizer-release=manifest-or-dir'));
+    expect(devCli, contains('--require-signed-macos-release=true'));
     expect(devCli, contains('--skip-heavy-visualizer-tests=true'));
     expect(devCli, contains('--skip-native-visualizer-tests=true'));
   });

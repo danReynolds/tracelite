@@ -58,6 +58,14 @@ void main() {
     expect(tool, contains('archive.absolute.path'));
   });
 
+  test('visualizer check records non-macOS signing as external', () {
+    final tool = File('tool/visualizer_check.dart').readAsStringSync();
+
+    expect(tool, contains("device == 'macos' ? 'unsigned' : 'external'"));
+    expect(tool, contains("device == 'macos' ? 'not_requested' :"));
+    expect(tool, contains("'not_applicable'"));
+  });
+
   test('visualizer check rejects invalid package mode before Flutter',
       () async {
     final result = await Process.run(

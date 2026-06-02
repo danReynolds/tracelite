@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -77,6 +78,140 @@ void main() {
     expect(result.stdout.toString(), contains('missing pubspec.yaml'));
   });
 
+  test('doctor validates visualizer release manifest evidence', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-doctor-release-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+    _writeFixtureCheckout(tempDir);
+    final releaseDir = Directory('${tempDir.path}/release')..createSync();
+    final artifactDir = Directory('${releaseDir.path}/linux-x64')..createSync();
+    _writeVisualizerReleaseFixture(
+      artifactDir,
+      platform: 'linux',
+      abi: 'linux-x64',
+      signingStatus: 'external',
+      notarizationStatus: 'not_applicable',
+    );
+    final jsonPath = '${tempDir.path}/doctor.json';
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'doctor',
+        '--root=${tempDir.path}',
+        '--visualizer-release=${releaseDir.path}',
+        '--require-visualizer-release-platforms=linux',
+        '--json=$jsonPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'doctor failed.\nstdout:\n${result.stdout}\n'
+          'stderr:\n${result.stderr}',
+    );
+    expect(result.stdout.toString(), contains('visualizer release checksum'));
+    final artifact =
+        jsonDecode(File(jsonPath).readAsStringSync()) as Map<String, Object?>;
+    final checks = artifact['checks']! as List<Object?>;
+    expect(
+      checks,
+      contains(
+        allOf(
+          containsPair('name', 'visualizer release platforms'),
+          containsPair('status', 'ok'),
+        ),
+      ),
+    );
+  });
+
+  test('doctor fails when visualizer release checksum does not match',
+      () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-doctor-release-checksum-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+    _writeFixtureCheckout(tempDir);
+    final releaseDir = Directory('${tempDir.path}/release')..createSync();
+    _writeVisualizerReleaseFixture(
+      releaseDir,
+      platform: 'linux',
+      abi: 'linux-x64',
+      signingStatus: 'external',
+      notarizationStatus: 'not_applicable',
+      archiveSha256: 'not-the-real-digest',
+    );
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'doctor',
+        '--root=${tempDir.path}',
+        '--visualizer-release=${releaseDir.path}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(result.stdout.toString(), contains('Status: `failed`'));
+    expect(result.stdout.toString(), contains('visualizer release checksum'));
+    expect(result.stdout.toString(), contains('not-the-real-digest'));
+  });
+
+  test('doctor requires signed macOS release evidence when requested',
+      () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-doctor-release-signing-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+    _writeFixtureCheckout(tempDir);
+    final releaseDir = Directory('${tempDir.path}/release')..createSync();
+    _writeVisualizerReleaseFixture(
+      releaseDir,
+      platform: 'macos',
+      abi: 'macos-arm64',
+      signingStatus: 'unsigned',
+      notarizationStatus: 'not_requested',
+    );
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'doctor',
+        '--root=${tempDir.path}',
+        '--visualizer-release=${releaseDir.path}',
+        '--require-signed-macos-release=true',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(result.stdout.toString(), contains('Status: `failed`'));
+    expect(result.stdout.toString(), contains('macOS signing status'));
+    expect(result.stdout.toString(), contains('macOS notarization status'));
+  });
+
   test('doctor strict mode fails on warnings', () async {
     final tempDir = await Directory.systemTemp.createTemp(
       'tracelite-doctor-strict-warning-test-',
@@ -142,4 +277,44 @@ void _writeFixtureCheckout(Directory root) {
   ]) {
     File('${root.path}/$file').writeAsStringSync('\n');
   }
+}
+
+File _writeVisualizerReleaseFixture(
+  Directory releaseDir, {
+  required String platform,
+  required String abi,
+  required String signingStatus,
+  required String notarizationStatus,
+  String? archiveSha256,
+  int? archiveBytes,
+}) {
+  final archive = File('${releaseDir.path}/tracelite_visualizer-$abi.zip');
+  final contents = utf8.encode('visualizer archive for $abi');
+  archive.writeAsBytesSync(contents);
+  final manifest = File(
+    '${releaseDir.path}/tracelite_visualizer-$abi.manifest.json',
+  );
+  manifest.writeAsStringSync(
+    '${jsonEncode({
+          'schema': 'tracelite.visualizer_release.v1',
+          'generated_at': '2026-06-02T00:00:00Z',
+          'platform': platform,
+          'abi': abi,
+          'source': {
+            'revision': 'abcdef1234567890',
+            'dirty': false,
+          },
+          'archive_path': archive.path,
+          'archive_bytes': archiveBytes ?? contents.length,
+          'archive_sha256':
+              archiveSha256 ?? sha256.convert(contents).toString(),
+          'signing': {
+            'status': signingStatus,
+          },
+          'notarization': {
+            'status': notarizationStatus,
+          },
+        })}\n',
+  );
+  return manifest;
 }

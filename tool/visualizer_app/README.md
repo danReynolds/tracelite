@@ -77,8 +77,9 @@ packages the platform bundle, and writes
 state, archive byte size, SHA-256 checksum, and signing/notarization status.
 Add `--require-clean-source=true` when producing attachable release evidence.
 
-Default archives are unsigned local developer artifacts. For a credentialed
-macOS release, add:
+Default macOS archives are unsigned local developer artifacts. Linux and Windows
+signing are recorded as external because their signing systems live outside
+tracelite. For a credentialed macOS release, add:
 
 ```bash
 dart tool/visualizer_check.dart \

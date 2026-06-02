@@ -29,11 +29,14 @@ the Flutter app, runs analyze/tests, and can build plus verify the current host
 release bundle with `--build=host`. `visualizer-check --package=host` creates
 archive/manifest evidence, and the `Visualizer Release` GitHub workflow runs
 that package path on macOS, Linux, and Windows with optional macOS
-signing/notarization before publishing draft release assets. External
-distribution still requires a credentialed signed/notarized workflow run and a
-published release artifact. The product should not be advertised as a hosted
-dashboard; downstream public pages should continue to consume graph-ready JSON
-rather than embed this local deep-inspection UI.
+signing/notarization before publishing draft release assets. The doctor command
+can audit downloaded manifests against archive size, SHA-256, clean source,
+platform coverage, and macOS signing/notarization requirements with
+`--visualizer-release=...`. External distribution still requires a credentialed
+signed/notarized workflow run and a published release artifact. The product
+should not be advertised as a hosted dashboard; downstream public pages should
+continue to consume graph-ready JSON rather than embed this local
+deep-inspection UI.
 
 ## Verdict
 

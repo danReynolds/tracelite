@@ -384,8 +384,9 @@ Future<_PackagedRelease> _packageHostRelease({
   final abi = _targetAbi();
   final source = sourceOverride ?? await _sourceState(root.path);
 
-  var signingStatus = 'unsigned';
-  var notarizationStatus = 'not_requested';
+  var signingStatus = device == 'macos' ? 'unsigned' : 'external';
+  var notarizationStatus =
+      device == 'macos' ? 'not_requested' : 'not_applicable';
   var bundleForArchive = bundle;
   if (device == 'macos' && macosSignIdentity != null) {
     await _runStep(

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart';
 import 'package:tracelite/src/core_cli.dart';
 import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 import 'package:tracelite/tracelite.dart';
@@ -57,10 +58,18 @@ bool _isSubcommandHelp(Iterable<String> args) =>
     args.any((arg) => arg == '--help' || arg == '-h');
 
 Future<void> _doctor(List<String> args) async {
-  final options = _parseOptions(args);
+  final options = _parseOptions(args, multiValueKeys: {'visualizer-release'});
   final root = Directory(_canonicalDirectoryPath(options['root'] ?? '.'));
   final strict = _boolOption(options, 'strict', false);
   final jsonOut = options['json'];
+  final visualizerReleasePaths = _csvOption(options['visualizer-release']);
+  final requiredReleasePlatforms =
+      _csvOption(options['require-visualizer-release-platforms']).toSet();
+  final requireSignedMacosRelease = _boolOption(
+    options,
+    'require-signed-macos-release',
+    false,
+  );
   final checks = <_DoctorCheck>[];
 
   void requiredFile(String relativePath) {
@@ -215,6 +224,14 @@ Future<void> _doctor(List<String> args) async {
         : _DoctorCheck.ok('visualizer runtime', _firstLine(flutter)),
   );
 
+  checks.addAll(
+    await _visualizerReleaseChecks(
+      releasePaths: visualizerReleasePaths,
+      requiredPlatforms: requiredReleasePlatforms,
+      requireSignedMacosRelease: requireSignedMacosRelease,
+    ),
+  );
+
   final failures = checks.where((check) => check.status == 'fail').toList();
   final warnings = checks.where((check) => check.status == 'warn').toList();
   final status = failures.isNotEmpty
@@ -254,6 +271,405 @@ Future<void> _doctor(List<String> args) async {
     }
     exit(65);
   }
+}
+
+Future<List<_DoctorCheck>> _visualizerReleaseChecks({
+  required List<String> releasePaths,
+  required Set<String> requiredPlatforms,
+  required bool requireSignedMacosRelease,
+}) async {
+  final checks = <_DoctorCheck>[];
+  if (releasePaths.isEmpty) {
+    if (requiredPlatforms.isNotEmpty || requireSignedMacosRelease) {
+      checks.add(
+        _DoctorCheck.fail(
+          'visualizer release evidence',
+          'no visualizer release manifest path was provided',
+          action: 'Pass --visualizer-release=build/visualizer-release or a '
+              'specific tracelite_visualizer-<abi>.manifest.json.',
+        ),
+      );
+    }
+    return checks;
+  }
+
+  final manifestFiles = <File>[];
+  for (final path in releasePaths) {
+    final file = File(path);
+    if (file.existsSync()) {
+      manifestFiles.add(file);
+      continue;
+    }
+
+    final directory = Directory(path);
+    if (directory.existsSync()) {
+      final found = directory
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((entry) => entry.path.endsWith('.manifest.json'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
+      if (found.isEmpty) {
+        checks.add(
+          _DoctorCheck.fail(
+            'visualizer release evidence',
+            'no visualizer release manifests found in ${directory.path}',
+            action: 'Run `dart run bin/tracelite.dart visualizer-check '
+                '--package=host --require-clean-source=true`.',
+          ),
+        );
+      }
+      manifestFiles.addAll(found);
+      continue;
+    }
+
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release evidence',
+        'missing $path',
+        action: 'Pass an existing visualizer release manifest file or '
+            'directory.',
+      ),
+    );
+  }
+
+  final seenManifestPaths = <String>{};
+  final seenPlatforms = <String>{};
+  for (final manifest in manifestFiles) {
+    final path = manifest.absolute.path;
+    if (!seenManifestPaths.add(path)) continue;
+    final platform = await _validateVisualizerReleaseManifest(
+      manifest,
+      checks,
+      requireSignedMacosRelease: requireSignedMacosRelease,
+    );
+    if (platform != null) {
+      seenPlatforms.add(platform);
+    }
+  }
+
+  if (requiredPlatforms.isNotEmpty) {
+    const supportedPlatforms = {'macos', 'linux', 'windows'};
+    final unknownPlatforms =
+        requiredPlatforms.difference(supportedPlatforms).toList()..sort();
+    if (unknownPlatforms.isNotEmpty) {
+      checks.add(
+        _DoctorCheck.fail(
+          'visualizer release platforms',
+          'unknown required platform(s): ${unknownPlatforms.join(', ')}',
+          action: 'Use --require-visualizer-release-platforms='
+              'macos,linux,windows.',
+        ),
+      );
+    }
+
+    final missingPlatforms =
+        requiredPlatforms.difference(seenPlatforms).toList()..sort();
+    checks.add(
+      missingPlatforms.isEmpty
+          ? _DoctorCheck.ok(
+              'visualizer release platforms',
+              'found ${requiredPlatforms.toList()..sort()}',
+            )
+          : _DoctorCheck.fail(
+              'visualizer release platforms',
+              'missing ${missingPlatforms.join(', ')}',
+              action: 'Run the Visualizer Release workflow for every required '
+                  'platform and pass all downloaded manifests to doctor.',
+            ),
+    );
+  }
+
+  if (requireSignedMacosRelease && !seenPlatforms.contains('macos')) {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release signing',
+        'signed macOS release evidence was required but no macOS manifest was '
+            'provided',
+        action: 'Run the Visualizer Release workflow on macOS with signing and '
+            'notarization secrets configured.',
+      ),
+    );
+  }
+
+  return checks;
+}
+
+Future<String?> _validateVisualizerReleaseManifest(
+  File manifestFile,
+  List<_DoctorCheck> checks, {
+  required bool requireSignedMacosRelease,
+}) async {
+  late final Map<String, Object?> manifest;
+  try {
+    manifest = _readJsonMap(manifestFile.path);
+  } on Object catch (error) {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release manifest',
+        'invalid ${manifestFile.path}: $error',
+        action: 'Regenerate the visualizer release manifest with '
+            '`visualizer-check --package=host`.',
+      ),
+    );
+    return null;
+  }
+
+  if (manifest['schema'] != 'tracelite.visualizer_release.v1') {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release manifest',
+        '${manifestFile.path} has schema `${manifest['schema']}`',
+        action: 'Pass a tracelite.visualizer_release.v1 manifest.',
+      ),
+    );
+    return null;
+  }
+
+  final platform = manifest['platform'];
+  final abi = manifest['abi'];
+  if (platform is! String || platform.isEmpty) {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release manifest',
+        '${manifestFile.path} has no platform',
+        action: 'Regenerate the visualizer release manifest.',
+      ),
+    );
+    return null;
+  }
+  if (abi is! String || abi.isEmpty) {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release manifest',
+        '${manifestFile.path} has no ABI',
+        action: 'Regenerate the visualizer release manifest.',
+      ),
+    );
+    return platform;
+  }
+  checks.add(
+    _DoctorCheck.ok(
+      'visualizer release manifest',
+      '$platform/$abi ${manifestFile.path}',
+    ),
+  );
+
+  final archive = _visualizerReleaseArchiveFile(manifestFile, manifest);
+  if (archive == null || !archive.existsSync()) {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release archive',
+        'missing archive for ${manifestFile.path}',
+        action: 'Keep the release archive next to its manifest or regenerate '
+            'the package.',
+      ),
+    );
+  } else {
+    await _validateVisualizerReleaseArchive(archive, manifest, checks);
+  }
+
+  _validateVisualizerReleaseSource(manifestFile, manifest, checks);
+  _validateVisualizerReleaseSigning(
+    manifestFile,
+    platform,
+    manifest,
+    checks,
+    requireSignedMacosRelease: requireSignedMacosRelease,
+  );
+
+  return platform;
+}
+
+File? _visualizerReleaseArchiveFile(
+  File manifestFile,
+  Map<String, Object?> manifest,
+) {
+  final archivePath = manifest['archive_path'];
+  if (archivePath is! String || archivePath.isEmpty) return null;
+
+  final directPath = _isAbsolutePath(archivePath)
+      ? archivePath
+      : manifestFile.parent.uri.resolve(archivePath).toFilePath();
+  final direct = File(directPath);
+  if (direct.existsSync()) return direct;
+
+  final adjacent = File(
+    _joinPath(manifestFile.parent.path, _pathBasename(archivePath)),
+  );
+  if (adjacent.existsSync()) return adjacent;
+
+  return direct;
+}
+
+Future<void> _validateVisualizerReleaseArchive(
+  File archive,
+  Map<String, Object?> manifest,
+  List<_DoctorCheck> checks,
+) async {
+  final expectedBytes = manifest['archive_bytes'];
+  final actualBytes = await archive.length();
+  checks.add(
+    expectedBytes == actualBytes
+        ? _DoctorCheck.ok(
+            'visualizer release archive size',
+            '$actualBytes bytes ${archive.path}',
+          )
+        : _DoctorCheck.fail(
+            'visualizer release archive size',
+            'expected $expectedBytes bytes but found $actualBytes bytes for '
+                '${archive.path}',
+            action: 'Regenerate the archive and manifest together.',
+          ),
+  );
+
+  final expectedSha = manifest['archive_sha256'];
+  final actualSha = (await sha256.bind(archive.openRead()).first).toString();
+  checks.add(
+    expectedSha == actualSha
+        ? _DoctorCheck.ok('visualizer release checksum', actualSha)
+        : _DoctorCheck.fail(
+            'visualizer release checksum',
+            'expected $expectedSha but found $actualSha for ${archive.path}',
+            action: 'Regenerate the archive and manifest together.',
+          ),
+  );
+}
+
+void _validateVisualizerReleaseSource(
+  File manifestFile,
+  Map<String, Object?> manifest,
+  List<_DoctorCheck> checks,
+) {
+  final source = manifest['source'];
+  if (source is! Map<String, Object?>) {
+    checks.add(
+      _DoctorCheck.fail(
+        'visualizer release source',
+        '${manifestFile.path} has no source state',
+        action: 'Regenerate release evidence with '
+            '--require-clean-source=true.',
+      ),
+    );
+    return;
+  }
+
+  final dirty = source['dirty'];
+  checks.add(
+    dirty == false
+        ? _DoctorCheck.ok(
+            'visualizer release source',
+            'clean ${source['revision'] ?? 'unknown revision'}',
+          )
+        : _DoctorCheck.fail(
+            'visualizer release source',
+            'manifest was generated from dirty source',
+            action: 'Commit or discard local changes, then rerun '
+                '`visualizer-check --package=host '
+                '--require-clean-source=true`.',
+          ),
+  );
+}
+
+void _validateVisualizerReleaseSigning(
+  File manifestFile,
+  String platform,
+  Map<String, Object?> manifest,
+  List<_DoctorCheck> checks, {
+  required bool requireSignedMacosRelease,
+}) {
+  final signingStatus = _nestedString(manifest, 'signing', 'status');
+  final notarizationStatus = _nestedString(manifest, 'notarization', 'status');
+  if (platform == 'macos') {
+    final signingOk = signingStatus == 'signed';
+    checks.add(
+      signingOk
+          ? _DoctorCheck.ok('visualizer release signing', 'macOS signed')
+          : _releaseSigningCheck(
+              fail: requireSignedMacosRelease,
+              name: 'visualizer release signing',
+              detail: 'macOS signing status is `${signingStatus ?? 'missing'}` '
+                  'in ${manifestFile.path}',
+              action: 'Run visualizer-check with --macos-sign-identity or run '
+                  'the Visualizer Release workflow with signing secrets.',
+            ),
+    );
+
+    final notarizationOk = notarizationStatus == 'stapled';
+    checks.add(
+      notarizationOk
+          ? _DoctorCheck.ok('visualizer release notarization', 'macOS stapled')
+          : _releaseSigningCheck(
+              fail: requireSignedMacosRelease,
+              name: 'visualizer release notarization',
+              detail: 'macOS notarization status is '
+                  '`${notarizationStatus ?? 'missing'}` in '
+                  '${manifestFile.path}',
+              action: 'Run visualizer-check with --macos-notary-profile and '
+                  '--macos-sign-identity.',
+            ),
+    );
+    return;
+  }
+
+  checks.add(
+    signingStatus == 'external' || signingStatus == 'signed'
+        ? _DoctorCheck.ok(
+            'visualizer release signing',
+            '$platform signing status is `$signingStatus`',
+          )
+        : _DoctorCheck.warn(
+            'visualizer release signing',
+            '$platform signing status is `${signingStatus ?? 'missing'}`',
+            action: 'Use release-system signing for Linux/Windows archives and '
+                'record `external` or `signed` in the manifest.',
+          ),
+  );
+
+  checks.add(
+    notarizationStatus == 'not_applicable' || notarizationStatus == null
+        ? _DoctorCheck.ok(
+            'visualizer release notarization',
+            '$platform notarization is not applicable',
+          )
+        : _DoctorCheck.warn(
+            'visualizer release notarization',
+            '$platform notarization status is `$notarizationStatus`',
+            action: 'Regenerate the manifest with current visualizer-check.',
+          ),
+  );
+}
+
+_DoctorCheck _releaseSigningCheck({
+  required bool fail,
+  required String name,
+  required String detail,
+  required String action,
+}) {
+  return fail
+      ? _DoctorCheck.fail(name, detail, action: action)
+      : _DoctorCheck.warn(name, detail, action: action);
+}
+
+String? _nestedString(
+  Map<String, Object?> root,
+  String objectKey,
+  String valueKey,
+) {
+  final object = root[objectKey];
+  if (object is! Map<String, Object?>) return null;
+  final value = object[valueKey];
+  return value is String ? value : null;
+}
+
+String _pathBasename(String path) {
+  return path.split(RegExp(r'[\\/]')).where((part) => part.isNotEmpty).last;
+}
+
+bool _isAbsolutePath(String path) {
+  return path.startsWith('/') ||
+      path.startsWith(r'\\') ||
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path);
 }
 
 Future<void> _suite(List<String> args) async {
@@ -2568,7 +2984,10 @@ Never _usage({int exitCode = 64}) {
   final output = exitCode == 0 ? stdout : stderr;
   output.writeln('usage:');
   output.writeln('  dart run bin/tracelite.dart doctor '
-      '[--root=/path/to/tracelite] [--strict=true] [--json=doctor.json]');
+      '[--root=/path/to/tracelite] [--strict=true] [--json=doctor.json] '
+      '[--visualizer-release=manifest-or-dir] '
+      '[--require-visualizer-release-platforms=macos,linux,windows] '
+      '[--require-signed-macos-release=true]');
   output.writeln('  dart run bin/tracelite.dart report <region-path>');
   output.writeln('  dart run bin/tracelite.dart workload-summary <region-path> '
       '[--out-json=summary.json]');

@@ -179,6 +179,9 @@ signing/notarization is optional and requires the release secrets documented in
 the workflow. Hosted release packaging skips only the tagged heavyweight
 dense-trace widget stress test; run the direct visualizer check or
 `flutter test` locally for full visualizer stress coverage.
+After downloading release artifacts, `tracelite doctor --visualizer-release=...`
+audits manifest schema, platform coverage, archive size, SHA-256, clean source,
+and macOS signing/notarization evidence.
 For visualizer-only source-checkout validation, `dart tool/visualizer_check.dart`
 runs the same checks directly without rebuilding the root peer native assets.
 
