@@ -37,6 +37,15 @@ void main() {
     expect(result.stderr.toString(), contains('--flutter=/path/to/flutter'));
   });
 
+  test('visualizer check uses the Windows Flutter batch launcher', () {
+    final tool = File('tool/visualizer_check.dart').readAsStringSync();
+
+    expect(tool, contains("Platform.isWindows ? 'flutter.bat' : 'flutter'"));
+    expect(tool, contains("fileName == 'flutter.bat'"));
+    expect(tool, contains('runInShell: _requiresShellExecutable(executable)'));
+    expect(tool, contains("normalized.endsWith('.cmd')"));
+  });
+
   test('visualizer check rejects invalid package mode before Flutter',
       () async {
     final result = await Process.run(

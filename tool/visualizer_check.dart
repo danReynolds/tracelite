@@ -12,9 +12,9 @@ Future<void> main(List<String> args) async {
 
   final root = _checkoutRoot();
   final appDir = Directory(_joinPath(root.path, 'tool/visualizer_app'));
-  final flutter = options.flutterExecutable ??
-      Platform.environment['TRACELITE_FLUTTER'] ??
-      'flutter';
+  final flutter = _flutterExecutable(
+    options.flutterExecutable ?? Platform.environment['TRACELITE_FLUTTER'],
+  );
 
   if (!appDir.existsSync()) {
     stderr.writeln('missing visualizer app directory: ${appDir.path}');
@@ -227,6 +227,7 @@ Future<void> _runStep({
       arguments,
       workingDirectory: workingDirectory,
       mode: ProcessStartMode.inheritStdio,
+      runInShell: _requiresShellExecutable(executable),
     );
     final code = await process.exitCode;
     if (code != 0) {
@@ -250,7 +251,23 @@ Future<void> _runStep({
 
 bool _isFlutterExecutable(String executable) {
   final normalized = executable.replaceAll('\\', '/');
-  return normalized == 'flutter' || normalized.endsWith('/flutter');
+  final fileName = normalized.split('/').last.toLowerCase();
+  return fileName == 'flutter' ||
+      fileName == 'flutter.bat' ||
+      fileName == 'flutter.exe';
+}
+
+String _flutterExecutable(String? configured) {
+  if (configured == null || configured.isEmpty || configured == 'flutter') {
+    return Platform.isWindows ? 'flutter.bat' : 'flutter';
+  }
+  return configured;
+}
+
+bool _requiresShellExecutable(String executable) {
+  final normalized = executable.replaceAll('\\', '/').toLowerCase();
+  return Platform.isWindows &&
+      (normalized.endsWith('.bat') || normalized.endsWith('.cmd'));
 }
 
 Directory _checkoutRoot() {
