@@ -26,7 +26,15 @@ void _checkNativeSupportBoundary() {
   _expect(
     native_artifacts.sqliteShimBuildCommand(operatingSystem: 'windows') == null,
     'Windows SQLite shim build must stay explicitly unsupported until the shim '
-    'has a real Windows resolver strategy.',
+    'has a full sqlite3 ABI export/forwarding strategy.',
+  );
+  _expect(
+    native_artifacts
+            .sqliteShimUnsupportedReason(operatingSystem: 'windows')
+            ?.contains('full sqlite3 ABI') ==
+        true,
+    'Windows SQLite shim support boundary must explain the ABI-forwarding '
+    'requirement.',
   );
   _expect(
     native_artifacts.runtimeBuildCommand(operatingSystem: 'macos') != null,

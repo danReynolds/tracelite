@@ -28,6 +28,13 @@
  *   gcc -shared -fPIC ... -o libsqlite_traced.so
  *       -Wl,--no-as-needed -lsqlite3
  *
+ * Windows note:
+ *   A LoadLibrary/GetProcAddress resolver is not enough on its own.
+ *   package:sqlite3 resolves SQLite symbols from sqlite_traced.dll, and
+ *   Windows does not re-export dependency symbols from that handle. A Windows
+ *   shim needs full sqlite3 ABI forwarding or an embedded SQLite build before
+ *   it can support peer-suite tracing.
+ *
  * Loading from Dart:
  *   package:sqlite3 native hooks can be configured with
  *   `source: system, name: sqlite_traced`, and this repo copies the shim

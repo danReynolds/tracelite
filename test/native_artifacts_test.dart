@@ -82,4 +82,23 @@ void main() {
       isNull,
     );
   });
+
+  test('sqlite shim unsupported platforms explain the support boundary', () {
+    expect(
+      native_artifacts.sqliteShimUnsupportedReason(operatingSystem: 'macos'),
+      isNull,
+    );
+    expect(
+      native_artifacts.sqliteShimUnsupportedReason(operatingSystem: 'linux'),
+      isNull,
+    );
+    expect(
+      native_artifacts.sqliteShimUnsupportedReason(operatingSystem: 'windows'),
+      allOf(
+        contains('full sqlite3 ABI'),
+        contains('sqlite_traced.dll'),
+        contains('does not re-export dependency symbols'),
+      ),
+    );
+  });
 }

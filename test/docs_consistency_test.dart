@@ -89,6 +89,7 @@ void main() {
   test('docs and CI reflect peer suite and platform smoke coverage', () {
     final workflow = File('.github/workflows/ci.yml').readAsStringSync();
     final readme = File('README.md').readAsStringSync();
+    final doctor = File('doc/doctor.md').readAsStringSync();
     final plan = File('PLAN.md').readAsStringSync();
     final productionReadiness =
         File('doc/production-benchmark-readiness.md').readAsStringSync();
@@ -100,6 +101,10 @@ void main() {
     expect(workflow, contains('tool/native_runtime_smoke.dart'));
     for (final text in [readme, plan, productionReadiness]) {
       expect(text, contains('pinned four-peer `ci` suite'));
+    }
+    for (final text in [readme, doctor, productionReadiness]) {
+      expect(text, contains('full `sqlite3` ABI'));
+      expect(text, contains('sqlite_traced.dll'));
     }
   });
 

@@ -38,6 +38,17 @@ String sqliteShimLibraryPath({String? operatingSystem}) {
   return 'build/${sqliteShimLibraryName(operatingSystem: operatingSystem)}';
 }
 
+String? sqliteShimUnsupportedReason({String? operatingSystem}) {
+  final os = operatingSystem ?? Platform.operatingSystem;
+  return switch (os) {
+    'windows' => 'Windows SQLite shim tracing requires a full sqlite3 ABI '
+        'export/forwarding strategy. package:sqlite3 resolves SQLite symbols '
+        'from sqlite_traced.dll, and Windows does not re-export dependency '
+        'symbols from that DLL handle.',
+    _ => null,
+  };
+}
+
 String? sqliteShimBuildCommand({String? operatingSystem}) {
   final os = operatingSystem ?? Platform.operatingSystem;
   final output = sqliteShimLibraryPath(operatingSystem: os);

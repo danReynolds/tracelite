@@ -188,13 +188,15 @@ Future<void> _doctor(List<String> args) async {
             ),
     );
   } else {
+    final reason = native_artifacts.sqliteShimUnsupportedReason() ??
+        'sqlite shim build is not implemented for '
+            '${Platform.operatingSystem}.';
     checks.add(
       _DoctorCheck.warn(
         'sqlite shim',
-        'sqlite shim build is not implemented for '
-            '${Platform.operatingSystem}.',
-        action: 'Use macOS or Linux for native shim evidence until '
-            'Windows shim validation lands.',
+        reason,
+        action: 'Use macOS or Linux for native shim evidence until Windows '
+            'ships full sqlite3 ABI forwarding or embedded-shim support.',
       ),
     );
   }
@@ -1153,13 +1155,15 @@ Future<_CompareRunResult> _runPeerCompare({
 void _ensurePeerShimAvailable() {
   final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
   if (shimBuildCommand == null) {
+    final reason = native_artifacts.sqliteShimUnsupportedReason() ??
+        'sqlite shim comparison is not implemented for '
+            '${Platform.operatingSystem}.';
     stderr.writeln(
-      'sqlite shim comparison is not implemented for '
-      '${Platform.operatingSystem}.',
+      reason,
     );
     stderr.writeln(
-      'Use macOS or Linux for peer-suite evidence until Windows shim '
-      'validation lands.',
+      'Use macOS or Linux for peer-suite evidence until Windows ships full '
+      'sqlite3 ABI forwarding or embedded-shim support.',
     );
     exit(66);
   }

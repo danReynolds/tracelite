@@ -22,8 +22,9 @@ the calibrated production path. Linux has native shim smoke coverage and a
 pinned four-peer `ci` suite for the same Dart SQLite lanes, but production
 profile history is still macOS-validated. Windows now validates the
 platform-independent Dart artifact surface, native runtime attach, and
-visualizer package in CI, but SQLite shim validation and non-Dart bindings are
-future work.
+visualizer package in CI, but SQLite shim tracing is intentionally unsupported
+until Tracelite ships and validates full `sqlite3` ABI export/forwarding or an
+embedded-shim build.
 
 ## What It Does
 
@@ -45,6 +46,12 @@ packages that FFI-link to SQLite, a `libsqlite3` shim wraps high-value calls suc
 as prepare, step, bind, reset, finalize, and close. For libraries that embed
 SQLite into their own native asset, the same wrapper layer can be compiled into
 that asset with the real SQLite symbols renamed behind it.
+
+On macOS and Linux, unwrapped SQLite symbols are supplied by the platform link
+strategy while the shim times the wrapped calls. Windows needs a different
+contract: Dart resolves symbols from `sqlite_traced.dll` itself, so a production
+Windows shim must export or forward the full `sqlite3` ABI instead of only
+loading a real SQLite DLL internally.
 
 Native events and Dart `TraceRecorder` events write into one shared-memory
 region on the same monotonic clock. After a workload finishes, tracelite reads

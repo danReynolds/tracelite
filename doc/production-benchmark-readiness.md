@@ -38,7 +38,11 @@ gate cannot accidentally benchmark the pub package. Linux now has a focused
 package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite in CI. Windows
 now validates the platform-independent Dart artifact surface, native runtime
 attach, and core CLI surface in CI, but repeated production-profile history and
-Windows SQLite-shim tracing remain outside the current evidence set.
+Windows SQLite-shim tracing remain outside the current evidence set. That
+Windows gap is an ABI/export gap, not only a loader gap: a production Windows
+shim must expose the full `sqlite3` symbol surface from `sqlite_traced.dll`
+through generated forwarding or an embedded SQLite build before peer suites can
+claim Windows shim evidence.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -517,9 +521,11 @@ Linux four-peer `ci` suite, which proves the native-hook loading strategy and
 source-pinned peer harness outside macOS at CI scale. Windows now has a
 core-artifact CI lane for dependency resolution, generated-output freshness,
 analysis, native runtime attach, and platform-independent
-diff/insight/package-boundary tests. Windows SQLite substitution, plus full
-non-macOS production-profile history, is still required before this can be
-called production-quality across every Dart target.
+diff/insight/package-boundary tests. Windows SQLite substitution is deliberately
+not enabled yet because `sqlite_traced.dll` would need to export or forward the
+full `sqlite3` ABI, not just wrap the subset Tracelite times. That Windows shim
+work, plus full non-macOS production-profile history, is still required before
+this can be called production-quality across every Dart target.
 
 ## Recommended next iteration
 

@@ -24,8 +24,10 @@ Default mode fails only on broken checkout state, such as missing source or
 generated files. Missing build outputs are warnings with exact build commands,
 because a fresh clone can be healthy before native artifacts have been built.
 The native commands are platform-specific: macOS builds `*.dylib`, Linux builds
-`*.so`, and Windows reports the SQLite shim as unsupported until that loader
-strategy is implemented.
+`*.so`, and Windows reports the SQLite shim as unsupported until Tracelite has a
+full `sqlite3` ABI export/forwarding strategy or an embedded-shim build. A
+Windows DLL that only calls `LoadLibrary` for the real SQLite library is not
+enough, because Dart resolves SQLite symbols from `sqlite_traced.dll` itself.
 
 Strict mode treats warnings as failures. Use it for release images and benchmark
 hosts where the native runtime, SQLite shim, and dependency graph should already
