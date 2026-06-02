@@ -158,6 +158,8 @@ overrides used for sibling checkout testing do not affect the publish dry-run.
 It also runs the core CLI from an archive-shaped tree after source-checkout
 tools are removed. The check script itself is a checkout-only tool and is not
 shipped in the pub archive.
+The macOS CI lane runs the same publish archive smoke before the benchmark
+suite.
 
 For visualizer release hygiene, run
 `dart run bin/tracelite.dart visualizer-check --package=host`. It resolves the

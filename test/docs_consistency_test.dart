@@ -90,6 +90,8 @@ void main() {
         File('doc/production-benchmark-readiness.md').readAsStringSync();
 
     expect(workflow, contains('Linux CI benchmark suite'));
+    expect(workflow, contains('Publish archive smoke'));
+    expect(workflow, contains('tool/publish_check.dart'));
     expect(workflow, contains('--out-dir=build/tracelite-linux-ci-suite'));
     expect(workflow, contains('tool/native_runtime_smoke.dart'));
     for (final text in [readme, plan, productionReadiness]) {

@@ -69,9 +69,9 @@ The explicit resqlite merge gate is documented in
   run.
 - `.github/workflows/ci.yml` now defines the intended macOS and Linux CI
   baseline: generated-span freshness, native runtime/shim build, source-pinned
-  resqlite resolution, analysis/tests, and the four-peer `ci` suite. It assumes
-  a sibling resqlite repository checkout and supports `CROSS_REPO_READ_TOKEN`
-  for private installs.
+  resqlite resolution, analysis/tests, publish archive smoke, and the four-peer
+  `ci` suite. It assumes a sibling resqlite repository checkout and supports
+  `CROSS_REPO_READ_TOKEN` for private installs.
 - `tracelite calibrate` measures Dart recorder overhead with body-only,
   disabled-recorder, and active-recorder loops.
 - Compare artifacts now include deterministic workload parameters and

@@ -77,6 +77,10 @@ jobs:
         working-directory: tracelite
         run: dart test
 
+      - name: Publish archive smoke
+        working-directory: tracelite
+        run: dart run tool/publish_check.dart
+
       - name: CI benchmark suite
         working-directory: tracelite
         run: |
