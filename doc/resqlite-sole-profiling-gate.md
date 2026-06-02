@@ -1,13 +1,14 @@
 # resqlite sole-profiling acceptance gate
 
-Status: primary path credible, source pin integrated, sole-framework acceptance
-still needs adoption sign-off, 2026-06-01
+Status: regular workflow accepted for PR #109, legacy-profile deletion still
+requires adoption sign-off, 2026-06-02
 
-This is the merge blocker for accepting tracelite as resqlite's sole regular
-profiling and benchmarking framework. Tracelite can already replace the old
-profile artifact and dashboard pipeline for covered surfaces, but PR #109
-should stay gated until the release criteria below are satisfied with current
-artifacts and CI.
+This is the evidence gate for accepting tracelite as resqlite's regular
+profiling and benchmarking framework. Tracelite can replace the old profile
+artifact and dashboard pipeline for covered surfaces. The remaining decision is
+not whether PR #109 is credible; it is whether and when resqlite archives the
+legacy direct profile runner that is still useful as a compatibility/parity
+harness.
 
 ## Acceptance criteria
 
@@ -168,7 +169,17 @@ benchmark, decision, and profile workflows by running `tracelite explain` over
 the produced artifacts. These are review aids; acceptance still comes from the
 machine policy gates above.
 
-Remaining blockers before accepting tracelite as the sole framework:
+Current acceptance position:
+
+- Criteria 1 and 2 are satisfied for the current PR: PR #109 is non-draft,
+  source-pinned to `resqlite-profiling-gate-2026-06-01-r2`, and green at
+  `98f08c4a1d5e8d877c6b1ef3c11697b42d846d41`.
+- Criteria 3 and 4 are satisfied by the five-run release gate, routine
+  no-regression decision, and injected-regression rejection artifacts above.
+- Criteria 5 through 7 are satisfied for the covered resqlite profile surfaces,
+  graph-data exports, and explicit unsupported peer lanes documented above.
+
+Remaining blocker before deleting or archiving the old direct profile path:
 
 - Preserve, demote, or intentionally remove any old resqlite profile-only
   signals that are not needed now that tracelite emits workload summaries,

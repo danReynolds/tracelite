@@ -1,31 +1,32 @@
 # Production benchmark replacement readiness
 
-Status: resqlite pre-publish integration pass, updated 2026-06-01
+Status: resqlite pre-publish integration pass, updated 2026-06-02
 
 ## Verdict
 
-tracelite is viable as resqlite's pre-publish benchmark artifact, attribution,
-and decision-gating layer, but it is not accepted yet as resqlite's sole regular
-profiling framework. The current resqlite integration has a top-level
-`benchmark/run_tracelite.dart` gate, a baseline/candidate
+tracelite is accepted as resqlite's current pre-publish benchmark artifact,
+attribution, and decision-gating layer. The current resqlite integration has a
+top-level `benchmark/run_tracelite.dart` gate, a baseline/candidate
 `benchmark/decide_tracelite.dart` decision wrapper, trace-enabled profile
 capture, graph-data export for the dashboard, and build-hook smoke coverage for
 the native SQLite shim path, and Tracelite insight artifacts for operator
 review. PR #109 now pins the Tracelite source state to
 `resqlite-profiling-gate-2026-06-01-r2`
-(`06c00ac126b54027c14c96deb5634e5a38104973`); sole-framework acceptance still
-depends on the remaining adoption and portability checks below.
+(`06c00ac126b54027c14c96deb5634e5a38104973`) and is green at
+`98f08c4a1d5e8d877c6b1ef3c11697b42d846d41` with the Tracelite smoke lane
+passing. The remaining adoption decision is whether to delete, archive, or keep
+the old direct resqlite profile runner as a legacy compatibility/parity harness.
 
 The core direction held up: one trace format can capture sqlite3, drift,
 sqlite_async, and trace-enabled resqlite under the same SQLite call model, and
 the recorder overhead is small enough for profile-mode instrumentation. The
-remaining gap before making tracelite the sole resqlite workflow is no longer
-basic production-gate viability or source reproducibility. The current gap is
-adoption: resqlite needs to finish retiring or preserving old profile-only
-signals under the pinned integration, and Tracelite still needs public
-distribution polish (publishing metadata, signed packaged visualizer builds, and
-Windows native release host validation). Tracelite's own macOS and Linux CI
-pin and verify the trace-enabled resqlite sibling checkout at
+remaining gap before using tracelite as resqlite's regular workflow is no longer
+basic production-gate viability, source reproducibility, or PR CI. The current
+resqlite-specific gap is adoption cleanup: resqlite needs to decide which old
+profile-only signals are archived versus kept for parity. Tracelite still needs
+public distribution polish (publishing metadata, signed packaged visualizer
+builds, and Windows native release host validation). Tracelite's own macOS and
+Linux CI pin and verify the trace-enabled resqlite sibling checkout at
 `a2e684c6861980e2fbbbc437dd7a4797ae984f2f` before peer tests, so this repo's
 gate cannot accidentally benchmark the pub package. Linux now has a focused
 package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite in CI. Windows
@@ -516,8 +517,8 @@ every Dart target.
 
 ## Recommended next iteration
 
-1. Keep PR #109 green at the pinned `resqlite-profiling-gate-2026-06-01-r2` tag,
-   including the Tracelite smoke lane.
+1. Merge or accept PR #109 if the current non-draft, green CI state remains
+   true; keep the Tracelite smoke lane as the pin-bump gate.
 2. Decide whether to delete, archive, or demote resqlite's old direct profile
    runner now that tracelite emits workload summaries, graph data, decisions,
    and insight artifacts.

@@ -7,12 +7,29 @@ void main() {
     final readme = File('README.md').readAsStringSync();
     final productionReadiness =
         File('doc/production-benchmark-readiness.md').readAsStringSync();
+    final replacementChecklist =
+        File('doc/resqlite-replacement-checklist.md').readAsStringSync();
+    final soleProfilingGate =
+        File('doc/resqlite-sole-profiling-gate.md').readAsStringSync();
     const currentTag = 'resqlite-profiling-gate-2026-06-01-r2';
     const currentRevision = '06c00ac126b54027c14c96deb5634e5a38104973';
+    const currentResqlitePrRevision =
+        '98f08c4a1d5e8d877c6b1ef3c11697b42d846d41';
 
-    for (final text in [readme, productionReadiness]) {
+    for (final text in [
+      readme,
+      productionReadiness,
+      replacementChecklist,
+      soleProfilingGate,
+    ]) {
       expect(text, contains(currentTag));
-      expect(text, contains(currentRevision));
+      expect(
+        text,
+        anyOf(
+          contains(currentRevision),
+          contains(currentResqlitePrRevision),
+        ),
+      );
       expect(text, isNot(contains('resqlite-profiling-gate-2026-05-31')));
       expect(text, isNot(contains('resqlite-profiling-gate-2026-06-01`')));
       expect(
@@ -23,6 +40,7 @@ void main() {
         text,
         isNot(contains('1fc321113c5a3a1598fc2908b52ed401eb65737c')),
       );
+      expect(text, isNot(contains('should stay draft')));
     }
   });
 

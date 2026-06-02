@@ -1,6 +1,6 @@
 # resqlite profiling replacement checklist
 
-Status: production-readiness checklist, updated 2026-05-31
+Status: production-readiness checklist, updated 2026-06-02
 
 This is the deletion gate for moving profiling weight out of resqlite and into
 tracelite. The goal is not to delete every resqlite signal. The goal is to
@@ -76,8 +76,10 @@ the same workload parameters.
 
 - Ready to replace first: generic report generation, repetition artifact
   storage, workload-scoped span summaries, low-value wall-time wrappers, and
-  Timeline-style worker markers once the resqlite PR adopts the tracelite
-  report/export path.
+  Timeline-style worker markers. PR #109 now routes the regular benchmark and
+  profile-diagnostic workflows through tracelite wrappers; the remaining
+  deletion decision is whether resqlite wants to archive or keep the old direct
+  profile runner as a compatibility/parity harness.
 - Not ready to delete yet without a final migration PR: old profile JSON/diff
   call sites, `ProfiledDatabase` sample storage, custom many-streams
   fanout-delta JSON, and RSS memory capture. Tracelite now captures and exports
@@ -121,13 +123,13 @@ Summary:
 
 ## Current deletion position
 
-The parity gate is satisfied for the current resqlite profile surfaces, so the
-next PR slice can wire resqlite's profile workflow to consume `tracelite
-workload-summary`, then delete or archive the old resqlite-local
-report/diff/storage code that is now covered. That is not the same as declaring
-tracelite the sole regular profiling framework: the production release gate now
-passes, the routine no-regression decision path has been validated, and a known
-read-path regression was rejected through the same artifacts. PR #109 should
-stay draft until resqlite pins a stable tracelite source state. Keep the
+The parity gate is satisfied for the current resqlite profile surfaces, and
+PR #109 has the current integration evidence: it is non-draft, source-pinned to
+`resqlite-profiling-gate-2026-06-01-r2`, and green at
+`98f08c4a1d5e8d877c6b1ef3c11697b42d846d41` with the Tracelite smoke lane
+passing. That is enough for tracelite to own resqlite's regular profiling and
+benchmarking workflow. It is not, by itself, a command to delete every legacy
+profile file. Treat direct `benchmark/run_profile.dart` usage as a legacy
+compatibility/parity path until resqlite explicitly archives it. Keep the
 workload definitions, public diagnostics API, native diagnostics helpers, and
 tiny semantic emitters.
