@@ -77,6 +77,9 @@ final class TraceDocument {
   late final Map<int, List<TraceSpan>> completeSpansByTrack = _spansByTrack(
     completeSpans,
   );
+  late final int maxCompleteSpanDurationNs = _maxSpanDurationNs(completeSpans);
+  late final Map<int, SqlTraceLabel> statementSqlByPointer =
+      _statementSqlByPointer(trace);
 
   String get name => displayNameForPath(path);
   int get durationNs => trace.duration.inMicroseconds * 1000;
@@ -88,6 +91,52 @@ final class TraceDocument {
       trace.diagnostics.droppedEvents > 0 ||
       trace.diagnostics.unmatchedBeginEvents > 0 ||
       trace.diagnostics.unmatchedEndEvents > 0;
+
+  SqlTraceLabel? sqlForSpan(TraceSpan span) {
+    final prepare = prepareSqlForSpan(span);
+    if (prepare != null) return prepare;
+    final stmt = _statementPointerForSpan(span);
+    return stmt == null ? null : statementSqlByPointer[stmt];
+  }
+
+  SqlTraceLabel? prepareSqlForSpan(TraceSpan span) {
+    if (span.spanId != BuiltinSpans.sqlite3PrepareV2 &&
+        span.spanId != BuiltinSpans.sqlite3PrepareV3) {
+      return null;
+    }
+    if (span.beginArgs.length < 2) return null;
+    final label = trace.strings[span.beginArgs[1]];
+    return label == null ? null : SqlTraceLabel.fromTraceString(label);
+  }
+
+  List<TraceSpan> visibleSpansIn(int startNs, int endNs) {
+    final result = <TraceSpan>[];
+    forEachVisibleSpan(startNs, endNs, result.add);
+    return result;
+  }
+
+  int visibleSpanCountIn(int startNs, int endNs) {
+    var count = 0;
+    forEachVisibleSpan(startNs, endNs, (_) => count++);
+    return count;
+  }
+
+  void forEachVisibleSpan(
+    int startNs,
+    int endNs,
+    void Function(TraceSpan span) visit,
+  ) {
+    if (completeSpans.isEmpty || endNs <= startNs) return;
+    final earliestPossibleStart = startNs - maxCompleteSpanDurationNs;
+    var index = _lowerBoundSpanStart(completeSpans, earliestPossibleStart);
+    while (index < completeSpans.length) {
+      final span = completeSpans[index];
+      if (span.startNs >= endNs) break;
+      final end = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+      if (end > startNs) visit(span);
+      index++;
+    }
+  }
 }
 
 Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
@@ -101,9 +150,106 @@ Map<int, List<TraceSpan>> _spansByTrack(List<TraceSpan> spans) {
   };
 }
 
+int _maxSpanDurationNs(List<TraceSpan> spans) {
+  var maxDurationNs = 1;
+  for (final span in spans) {
+    maxDurationNs = math.max(maxDurationNs, math.max(1, span.durationNs));
+  }
+  return maxDurationNs;
+}
+
+int _lowerBoundSpanStart(List<TraceSpan> spans, int startNs) {
+  var low = 0;
+  var high = spans.length;
+  while (low < high) {
+    final mid = low + ((high - low) >> 1);
+    if (spans[mid].startNs < startNs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+}
+
+Map<int, SqlTraceLabel> _statementSqlByPointer(Trace trace) {
+  final result = <int, SqlTraceLabel>{};
+  for (final span in trace.spans.where((span) => span.isComplete)) {
+    if (span.spanId != BuiltinSpans.sqlite3PrepareV2 &&
+        span.spanId != BuiltinSpans.sqlite3PrepareV3) {
+      continue;
+    }
+    if (span.beginArgs.length < 2 || span.endArgs.length < 2) continue;
+    final rc = span.endArgs[1];
+    final stmt = span.endArgs[0];
+    if (rc != 0 || stmt == 0) continue;
+    final label = trace.strings[span.beginArgs[1]];
+    if (label == null) continue;
+    result[stmt] = SqlTraceLabel.fromTraceString(label);
+  }
+  return Map.unmodifiable(result);
+}
+
+int? _statementPointerForSpan(TraceSpan span) {
+  switch (span.spanId) {
+    case BuiltinSpans.sqlite3Step:
+    case BuiltinSpans.sqlite3Reset:
+    case BuiltinSpans.sqlite3Finalize:
+    case BuiltinSpans.sqlite3BindNull:
+    case BuiltinSpans.sqlite3BindInt:
+    case BuiltinSpans.sqlite3BindInt64:
+    case BuiltinSpans.sqlite3BindDouble:
+    case BuiltinSpans.sqlite3BindText:
+    case BuiltinSpans.sqlite3BindBlob:
+    case BuiltinSpans.sqlite3ClearBindings:
+    case BuiltinSpans.sqlite3ColumnCount:
+    case BuiltinSpans.sqlite3ColumnInt:
+    case BuiltinSpans.sqlite3ColumnInt64:
+    case BuiltinSpans.sqlite3ColumnDouble:
+    case BuiltinSpans.sqlite3ColumnText:
+    case BuiltinSpans.sqlite3ColumnBlob:
+    case BuiltinSpans.sqlite3ColumnBytes:
+      return span.beginArgs.isEmpty ? null : span.beginArgs.first;
+    default:
+      return null;
+  }
+}
+
+final class SqlTraceLabel {
+  const SqlTraceLabel({
+    required this.fingerprint,
+    required this.normalizedSql,
+    required this.mode,
+  });
+
+  final String fingerprint;
+  final String normalizedSql;
+  final String mode;
+
+  factory SqlTraceLabel.fromTraceString(String label) {
+    if (label == '<sql:redacted>') {
+      return const SqlTraceLabel(
+        fingerprint: 'sqlfp:v1:redacted',
+        normalizedSql: '<redacted>',
+        mode: 'redacted',
+      );
+    }
+    final parts = label.split(':');
+    if (parts.length >= 4 && parts[0] == 'sqlfp' && parts[1] == 'v1') {
+      return SqlTraceLabel(
+        fingerprint: 'sqlfp:v1:${parts[2]}',
+        normalizedSql: parts.sublist(3).join(':'),
+        mode: 'fingerprinted',
+      );
+    }
+    return SqlTraceLabel(fingerprint: 'raw', normalizedSql: label, mode: 'raw');
+  }
+}
+
 final class CompareDocument {
   CompareDocument({
     required this.path,
+    required this.artifact,
     required this.scenario,
     required this.rows,
     required this.repetitions,
@@ -112,6 +258,7 @@ final class CompareDocument {
   });
 
   final String path;
+  final Map<String, Object?> artifact;
   final String scenario;
   final int rows;
   final int repetitions;
@@ -124,6 +271,7 @@ final class CompareDocument {
     final peerObjects = _listOfMaps(json['peers']);
     return CompareDocument(
       path: path,
+      artifact: json,
       scenario: _string(json['scenario']) ?? displayNameForPath(path),
       rows: _int(json['rows']) ?? 0,
       repetitions: _int(json['repetitions']) ?? peerObjects.length,
@@ -241,6 +389,7 @@ final class PeerSample {
     required this.spans,
     required this.diagnostics,
     required this.spanGroups,
+    required this.sqlFingerprintGroups,
   });
 
   final int repetition;
@@ -251,6 +400,7 @@ final class PeerSample {
   final int spans;
   final TraceHealth diagnostics;
   final List<SampleSpanGroup> spanGroups;
+  final List<SampleSqlFingerprintGroup> sqlFingerprintGroups;
 
   factory PeerSample.fromJson(Map<String, Object?> json) {
     return PeerSample(
@@ -269,6 +419,15 @@ final class PeerSample {
             final byTotal = b.totalNs.compareTo(a.totalNs);
             if (byTotal != 0) return byTotal;
             return a.name.compareTo(b.name);
+          }),
+      sqlFingerprintGroups:
+          [
+            for (final group in _listOfMaps(json['sql_fingerprint_groups']))
+              SampleSqlFingerprintGroup.fromJson(group),
+          ]..sort((a, b) {
+            final byTotal = b.prepareTotalNs.compareTo(a.prepareTotalNs);
+            if (byTotal != 0) return byTotal;
+            return a.fingerprint.compareTo(b.fingerprint);
           }),
     );
   }
@@ -328,6 +487,38 @@ final class SampleSpanGroup {
   }
 }
 
+final class SampleSqlFingerprintGroup {
+  const SampleSqlFingerprintGroup({
+    required this.fingerprint,
+    required this.normalizedSql,
+    required this.prepareCount,
+    required this.prepareTotalNs,
+    required this.prepareP50Ns,
+    required this.prepareP90Ns,
+    required this.prepareP99Ns,
+  });
+
+  final String fingerprint;
+  final String normalizedSql;
+  final int prepareCount;
+  final int prepareTotalNs;
+  final int prepareP50Ns;
+  final int prepareP90Ns;
+  final int prepareP99Ns;
+
+  factory SampleSqlFingerprintGroup.fromJson(Map<String, Object?> json) {
+    return SampleSqlFingerprintGroup(
+      fingerprint: _string(json['fingerprint']) ?? 'unknown',
+      normalizedSql: _string(json['normalized_sql']) ?? '',
+      prepareCount: _int(json['prepare_count']) ?? 0,
+      prepareTotalNs: _int(json['prepare_total_ns']) ?? 0,
+      prepareP50Ns: _int(json['prepare_p50_ns']) ?? 0,
+      prepareP90Ns: _int(json['prepare_p90_ns']) ?? 0,
+      prepareP99Ns: _int(json['prepare_p99_ns']) ?? 0,
+    );
+  }
+}
+
 final class SuiteDocument {
   const SuiteDocument({
     required this.path,
@@ -378,30 +569,65 @@ final class SuiteRun {
 final class DecisionDocument {
   const DecisionDocument({
     required this.path,
+    required this.artifact,
     required this.verdict,
     required this.expectation,
+    required this.policy,
+    required this.gates,
+    required this.scenarioCount,
+    required this.generatedAt,
+    required this.baselinePath,
+    required this.candidatePath,
     required this.summary,
   });
 
   final String path;
+  final Map<String, Object?> artifact;
   final String verdict;
   final String expectation;
+  final Map<String, Object?> policy;
+  final Map<String, Object?> gates;
+  final int scenarioCount;
+  final String? generatedAt;
+  final String? baselinePath;
+  final String? candidatePath;
   final Map<String, Object?> summary;
 
   String get name => displayNameForPath(path);
 
   factory DecisionDocument.fromJson(String path, Map<String, Object?> json) {
+    final policy = _map(json['policy']);
+    final gates = _map(json['gates']);
     return DecisionDocument(
       path: path,
+      artifact: json,
       verdict:
           _string(json['verdict']) ??
           _string(json['decision']) ??
           _string(json['status']) ??
           'unknown',
-      expectation: _string(json['expectation']) ?? 'unknown',
+      expectation:
+          _string(json['expectation']) ??
+          _string(policy['expectation']) ??
+          'unknown',
+      policy: policy,
+      gates: gates,
+      scenarioCount:
+          _int(json['scenario_count']) ?? _decisionScenarioCount(gates),
+      generatedAt: _string(json['generated_at']),
+      baselinePath: _string(json['baseline_path']),
+      candidatePath: _string(json['candidate_path']),
       summary: _map(json['summary']),
     );
   }
+}
+
+int _decisionScenarioCount(Map<String, Object?> gates) {
+  final primary = _map(gates['primary']);
+  return {
+    for (final comparison in _listOfMaps(primary['comparisons']))
+      if (comparison['scenario'] is String) comparison['scenario']! as String,
+  }.length;
 }
 
 final class WorkloadSummaryDocument {

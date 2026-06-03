@@ -9,9 +9,9 @@
  *   - For each *wrapped* function: define our own symbol; the body
  *     resolves the real implementation via cached dlsym() and times the
  *     call.
- *   - For *unwrapped* functions: rely on the linker re-exporting the
- *     real library so untraced symbols are still resolvable from this
- *     shim's handle.
+ *   - For *unwrapped* functions: rely on the platform link strategy so
+ *     untraced symbols are still resolvable from this shim's handle
+ *     (re-export on macOS, libsqlite3 dependency lookup on Linux).
  *
  * Embedded mode:
  *   - Defining TRACELITE_SQLITE3_EMBEDDED builds the same wrappers into a
@@ -26,12 +26,20 @@
  *
  * Build (Linux):
  *   gcc -shared -fPIC ... -o libsqlite_traced.so
- *       -Wl,--default-symver -lsqlite3
+ *       -Wl,--no-as-needed -lsqlite3
+ *
+ * Windows note:
+ *   A LoadLibrary/GetProcAddress resolver is not enough on its own.
+ *   package:sqlite3 resolves SQLite symbols from sqlite_traced.dll, and
+ *   Windows does not re-export dependency symbols from that handle. A Windows
+ *   shim needs full sqlite3 ABI forwarding or an embedded SQLite build before
+ *   it can support peer-suite tracing.
  *
  * Loading from Dart:
  *   package:sqlite3 native hooks can be configured with
  *   `source: system, name: sqlite_traced`, and this repo copies the shim
- *   to libsqlite_traced.dylib before traced peer runs.
+ *   to the platform resolver name (`libsqlite_traced.dylib` on macOS or
+ *   `libsqlite_traced.so` on Linux) before traced peer runs.
  */
 
 #include "tracelite_runtime.h"
@@ -43,6 +51,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 /* ---------------------------------------------------------------------------
  * Real libsqlite3 symbol resolver.
@@ -83,11 +92,8 @@
  * Self-attach to TRACELITE_REGION on first call.
  * ------------------------------------------------------------------------- */
 
-static __thread int tracelite_thread_inited = 0;
-
 static void ensure_attached(void) {
-  if (tracelite_thread_inited) return;
-  tracelite_thread_inited = 1;
+  if (tlt_active && tlt_current_track_id() >= 0) return;
   if (!tlt_active) {
     tlt_attach(NULL);
   }
@@ -113,6 +119,226 @@ static uint64_t pack_f64(double value) {
   uint64_t bits = 0;
   memcpy(&bits, &value, sizeof(bits));
   return bits;
+}
+
+static int truthy_env(const char* name) {
+  const char* value = getenv(name);
+  if (!value || !*value) return 0;
+  return strcmp(value, "0") != 0 &&
+         strcmp(value, "false") != 0 &&
+         strcmp(value, "FALSE") != 0 &&
+         strcmp(value, "no") != 0 &&
+         strcmp(value, "NO") != 0;
+}
+
+static int sql_capture_raw(void) {
+  const char* mode = getenv("TRACELITE_SQL_CAPTURE");
+  return truthy_env("TRACELITE_RAW_SQL") ||
+         (mode && strcmp(mode, "raw") == 0);
+}
+
+static int sql_capture_redacted(void) {
+  const char* mode = getenv("TRACELITE_SQL_CAPTURE");
+  return mode && strcmp(mode, "redacted") == 0;
+}
+
+static void sqlfp_emit(char c, char* out, size_t out_cap, size_t* out_len,
+                       uint64_t* hash, int* last_space) {
+  if (c == ' ') {
+    if (*out_len == 0 || *last_space) return;
+    *last_space = 1;
+  } else {
+    *last_space = 0;
+  }
+
+  *hash ^= (uint8_t)c;
+  *hash *= 1099511628211ull;
+
+  if (*out_len + 1 < out_cap) {
+    out[*out_len] = c;
+    (*out_len)++;
+    out[*out_len] = '\0';
+  }
+}
+
+static void sqlfp_emit_literal(char* out, size_t out_cap, size_t* out_len,
+                               uint64_t* hash, int* last_space) {
+  sqlfp_emit('?', out, out_cap, out_len, hash, last_space);
+}
+
+static int is_identifier_char(unsigned char c) {
+  return isalnum(c) || c == '_';
+}
+
+static int token_is_literal_keyword(const char* token, size_t len) {
+  return (len == 4 && memcmp(token, "NULL", 4) == 0) ||
+         (len == 4 && memcmp(token, "TRUE", 4) == 0) ||
+         (len == 5 && memcmp(token, "FALSE", 5) == 0);
+}
+
+static size_t bounded_cstr_len(const char* value, size_t max_len) {
+  size_t len = 0;
+  while (len < max_len && value[len] != '\0') len++;
+  return len;
+}
+
+static uint32_t intern_fingerprinted_sql(const char* sql, int nByte) {
+  if (!sql) return 0xFFFFFFFFu;
+
+  size_t len = nByte < 0 ? strlen(sql) : (size_t)nByte;
+  size_t nul = bounded_cstr_len(sql, len);
+  len = nul < len ? nul : len;
+
+  if (sql_capture_raw()) {
+    return tlt_intern_string(sql, (uint32_t)len);
+  }
+  if (sql_capture_redacted()) {
+    static const char redacted[] = "<sql:redacted>";
+    return tlt_intern_string(redacted, (uint32_t)(sizeof(redacted) - 1));
+  }
+
+  char normalized[512];
+  size_t out_len = 0;
+  normalized[0] = '\0';
+  uint64_t hash = 1469598103934665603ull;
+  int last_space = 0;
+
+  for (size_t i = 0; i < len;) {
+    unsigned char c = (unsigned char)sql[i];
+
+    if (isspace(c)) {
+      sqlfp_emit(' ', normalized, sizeof(normalized), &out_len, &hash,
+                 &last_space);
+      i++;
+      continue;
+    }
+
+    if (c == '-' && i + 1 < len && sql[i + 1] == '-') {
+      i += 2;
+      while (i < len && sql[i] != '\n' && sql[i] != '\r') i++;
+      sqlfp_emit(' ', normalized, sizeof(normalized), &out_len, &hash,
+                 &last_space);
+      continue;
+    }
+
+    if (c == '/' && i + 1 < len && sql[i + 1] == '*') {
+      i += 2;
+      while (i + 1 < len && !(sql[i] == '*' && sql[i + 1] == '/')) i++;
+      i = i + 1 < len ? i + 2 : len;
+      sqlfp_emit(' ', normalized, sizeof(normalized), &out_len, &hash,
+                 &last_space);
+      continue;
+    }
+
+    if ((c == 'x' || c == 'X') && i + 1 < len && sql[i + 1] == '\'') {
+      i += 2;
+      while (i < len) {
+        if (sql[i] == '\'') {
+          if (i + 1 < len && sql[i + 1] == '\'') {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      sqlfp_emit_literal(normalized, sizeof(normalized), &out_len, &hash,
+                         &last_space);
+      continue;
+    }
+
+    if (c == '\'' || c == '"' || c == '`') {
+      char quote = (char)c;
+      i++;
+      while (i < len) {
+        if (sql[i] == quote) {
+          if (i + 1 < len && sql[i + 1] == quote) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      sqlfp_emit_literal(normalized, sizeof(normalized), &out_len, &hash,
+                         &last_space);
+      continue;
+    }
+
+    if (c == '[') {
+      i++;
+      while (i < len && sql[i] != ']') i++;
+      if (i < len) i++;
+      sqlfp_emit_literal(normalized, sizeof(normalized), &out_len, &hash,
+                         &last_space);
+      continue;
+    }
+
+    if (isdigit(c)) {
+      i++;
+      while (i < len && (isalnum((unsigned char)sql[i]) || sql[i] == '.' ||
+                         sql[i] == '_' || sql[i] == '+' || sql[i] == '-')) {
+        i++;
+      }
+      sqlfp_emit_literal(normalized, sizeof(normalized), &out_len, &hash,
+                         &last_space);
+      continue;
+    }
+
+    if (c == '?' || c == ':' || c == '@' || c == '$') {
+      i++;
+      while (i < len && is_identifier_char((unsigned char)sql[i])) i++;
+      sqlfp_emit_literal(normalized, sizeof(normalized), &out_len, &hash,
+                         &last_space);
+      continue;
+    }
+
+    if (isalpha(c) || c == '_') {
+      char token[96];
+      size_t token_len = 0;
+      while (i < len && is_identifier_char((unsigned char)sql[i])) {
+        if (token_len + 1 < sizeof(token)) {
+          token[token_len++] = (char)toupper((unsigned char)sql[i]);
+        }
+        i++;
+      }
+      if (token_is_literal_keyword(token, token_len)) {
+        sqlfp_emit_literal(normalized, sizeof(normalized), &out_len, &hash,
+                           &last_space);
+      } else {
+        for (size_t j = 0; j < token_len; j++) {
+          sqlfp_emit(token[j], normalized, sizeof(normalized), &out_len, &hash,
+                     &last_space);
+        }
+      }
+      continue;
+    }
+
+    sqlfp_emit((char)c, normalized, sizeof(normalized), &out_len, &hash,
+               &last_space);
+    i++;
+  }
+
+  while (out_len > 0 && normalized[out_len - 1] == ' ') {
+    out_len--;
+    normalized[out_len] = '\0';
+  }
+
+  hash = 1469598103934665603ull;
+  for (size_t j = 0; j < out_len; j++) {
+    hash ^= (uint8_t)normalized[j];
+    hash *= 1099511628211ull;
+  }
+
+  char label[640];
+  int written = snprintf(label, sizeof(label), "sqlfp:v1:%016llx:%s",
+                         (unsigned long long)hash, normalized);
+  if (written < 0) return 0xFFFFFFFFu;
+  size_t label_len = (size_t)written;
+  if (label_len >= sizeof(label)) label_len = sizeof(label) - 1;
+  return tlt_intern_string(label, (uint32_t)label_len);
 }
 
 /* sqlite3_open(filename, ppDb) */
@@ -199,8 +425,7 @@ int sqlite3_prepare_v3(sqlite3* db, const char* zSql, int nByte,
 
   uint32_t sql_id = 0xFFFFFFFFu;
   if (zSql) {
-    int len = nByte < 0 ? (int)strlen(zSql) : nByte;
-    sql_id = tlt_intern_string(zSql, (uint32_t)len);
+    sql_id = intern_fingerprinted_sql(zSql, nByte);
   }
 
   uint64_t begin_args[3] = { (uint64_t)(uintptr_t)db, sql_id, prepFlags };
@@ -225,8 +450,7 @@ int sqlite3_prepare_v2(sqlite3* db, const char* zSql, int nByte,
 
   uint32_t sql_id = 0xFFFFFFFFu;
   if (zSql) {
-    int len = nByte < 0 ? (int)strlen(zSql) : nByte;
-    sql_id = tlt_intern_string(zSql, (uint32_t)len);
+    sql_id = intern_fingerprinted_sql(zSql, nByte);
   }
   uint64_t begin_args[2] = { (uint64_t)(uintptr_t)db, sql_id };
   tlt_begin(SPAN_SQLITE3_PREPARE_V2, begin_args, 2);

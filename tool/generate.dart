@@ -47,7 +47,7 @@ void main(List<String> args) async {
     final actual = exists ? await file.readAsString() : '';
 
     if (check) {
-      if (actual != wanted) {
+      if (_normalizeLineEndings(actual) != _normalizeLineEndings(wanted)) {
         print('STALE: $path');
         failures++;
       }
@@ -66,6 +66,10 @@ void main(List<String> args) async {
   if (!check) {
     print('\nGenerated ${outputs.length} files from $yamlPath');
   }
+}
+
+String _normalizeLineEndings(String value) {
+  return value.replaceAll('\r\n', '\n');
 }
 
 String _findRepoRoot() {

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
+import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 
 void main() {
   test('compare writes repetition JSON and diff reads it', () async {
@@ -43,6 +44,15 @@ void main() {
     expect(artifact['schema'], 'tracelite.compare.v1');
     expect(artifact['workload'], isA<Map<String, Object?>>());
     expect(artifact['environment'], isA<Map<String, Object?>>());
+    final source = artifact['tracelite_source'] as Map<String, Object?>;
+    expect(source['kind'], 'git');
+    expect(source['revision'], isA<String>());
+    expect(source['dirty'], isA<bool>());
+    expect(source['dirty_count'], isA<int>());
+    final runner = artifact['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'app_jit');
+    expect(runner['requested_mode'], 'auto');
+    expect(runner['build_elapsed_ns'] as int, greaterThan(0));
     expect(artifact['repetitions'], 2);
     expect(artifact['ring_data_words'] as int, greaterThan(0));
     final peers = artifact['peers'] as List<Object?>;
@@ -59,6 +69,14 @@ void main() {
       expect(sample['measured_elapsed_ns'] as int, greaterThan(0));
       expect(sample['child_elapsed_ns'] as int, greaterThan(0));
       expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      final fingerprints = sample['sql_fingerprint_groups'] as List<Object?>;
+      expect(fingerprints, isNotEmpty);
+      final normalizedSql = fingerprints
+          .cast<Map<String, Object?>>()
+          .map((group) => group['normalized_sql'])
+          .join('\n');
+      expect(normalizedSql, contains('INSERT INTO TRACELITE_ITEMS'));
+      expect(normalizedSql, isNot(contains('name_')));
     }
 
     final diff = await Process.run(
@@ -83,4 +101,165 @@ void main() {
     expect(diff.stdout.toString(), contains('delta 95% CI'));
     expect(diff.stdout.toString(), contains('neutral'));
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('worker runner retargets repeated sqlite samples', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-worker-compare-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final artifactPath = '${tempDir.path}/compare.json';
+    final compare = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=narrow-batch-insert',
+        '--interfaces=sqlite3',
+        '--rows=3',
+        '--repetitions=2',
+        '--runner=worker',
+        '--out-json=$artifactPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      compare.exitCode,
+      0,
+      reason: 'worker compare failed.\nstdout:\n${compare.stdout}\n'
+          'stderr:\n${compare.stderr}',
+    );
+
+    final artifact = jsonDecode(File(artifactPath).readAsStringSync())
+        as Map<String, Object?>;
+    final runner = artifact['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'worker');
+    expect(runner['requested_mode'], 'worker');
+    expect(runner['runtime_libraries'] as List<Object?>, isNotEmpty);
+    final preflight = runner['preflight'] as Map<String, Object?>;
+    expect(preflight['status'], 'ok');
+    expect(preflight['peer'], 'sqlite3');
+    expect(preflight['scenario'], 'narrow-batch-insert');
+    expect(preflight['events'] as int, greaterThan(0));
+    expect(preflight['spans'] as int, greaterThan(0));
+    final nativeAssets = runner['native_assets'] as List<Object?>;
+    final sqliteNativeAsset = nativeAssets.cast<Map<String, Object?>>().single;
+    expect(
+      sqliteNativeAsset['asset'],
+      'package:sqlite3/src/ffi/libsqlite3.g.dart',
+    );
+    expect(sqliteNativeAsset['kind'], 'absolute');
+    expect(
+      sqliteNativeAsset['location'],
+      File(native_artifacts.sqliteShimLibraryPath()).absolute.path,
+    );
+    expect(sqliteNativeAsset['exists'], isTrue);
+
+    final peers = artifact['peers'] as List<Object?>;
+    final sqlite3 = peers.single as Map<String, Object?>;
+    expect(sqlite3['peer'], 'sqlite3');
+    expect(sqlite3['status'], 'ok');
+    final samples = sqlite3['samples'] as List<Object?>;
+    expect(samples, hasLength(2));
+    for (final sample in samples.cast<Map<String, Object?>>()) {
+      expect(sample['status'], 'ok');
+      expect(sample['child_elapsed_ns'] as int, greaterThan(0));
+      expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      expect(sample['sql_fingerprint_groups'] as List<Object?>, isNotEmpty);
+    }
+  }, timeout: const Timeout(Duration(minutes: 5)));
+
+  test('worker runner keeps resqlite reactive samples isolated', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-worker-resqlite-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final artifactPath = '${tempDir.path}/compare.json';
+    final compare = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=keyed-pk-subscriptions',
+        '--interfaces=resqlite',
+        '--rows=4',
+        '--repetitions=2',
+        '--runner=worker',
+        '--out-json=$artifactPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    expect(
+      compare.exitCode,
+      0,
+      reason: 'resqlite worker compare failed.\nstdout:\n${compare.stdout}\n'
+          'stderr:\n${compare.stderr}',
+    );
+
+    final artifact = jsonDecode(File(artifactPath).readAsStringSync())
+        as Map<String, Object?>;
+    final runner = artifact['runner'] as Map<String, Object?>;
+    expect(runner['mode'], 'worker');
+    final preflight = runner['preflight'] as Map<String, Object?>;
+    expect(preflight['peer'], 'resqlite');
+    expect(preflight['status'], 'ok');
+
+    final peers = artifact['peers'] as List<Object?>;
+    final resqlite = peers.single as Map<String, Object?>;
+    expect(resqlite['peer'], 'resqlite');
+    expect(resqlite['status'], 'ok');
+    final samples = resqlite['samples'] as List<Object?>;
+    expect(samples, hasLength(2));
+    for (final sample in samples.cast<Map<String, Object?>>()) {
+      expect(sample['status'], 'ok');
+      final diagnostics = sample['diagnostics'] as Map<String, Object?>;
+      expect(diagnostics['dropped_events'], 0);
+      expect(diagnostics['unmatched_begin_events'], 0);
+      expect(diagnostics['unmatched_end_events'], 0);
+      expect(sample['trace_duration_ns'] as int, lessThan(1000000000));
+      expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      expect(sample['sql_fingerprint_groups'] as List<Object?>, isNotEmpty);
+    }
+  }, timeout: const Timeout(Duration(minutes: 5)));
+
+  test('require-clean-source rejects dirty source checkouts', () async {
+    final marker = File(
+      '.tracelite-clean-source-test-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    marker.writeAsStringSync('temporary dirty marker for test\n');
+    addTearDown(() {
+      if (marker.existsSync()) marker.deleteSync();
+    });
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'compare',
+        '--scenario=narrow-batch-insert',
+        '--interfaces=sqlite3',
+        '--rows=1',
+        '--require-clean-source=true',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(
+      result.stderr.toString(),
+      contains('tracelite source has uncommitted changes'),
+    );
+  });
 }

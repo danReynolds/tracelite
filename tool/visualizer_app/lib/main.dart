@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:tracelite/tracelite.dart';
 
 import 'src/workspace.dart';
@@ -153,6 +154,11 @@ class _VisualizerHomeState extends State<VisualizerHome> {
                             label: Text('Compare'),
                           ),
                           NavigationRailDestination(
+                            icon: Icon(Icons.fact_check_outlined),
+                            selectedIcon: Icon(Icons.fact_check),
+                            label: Text('Decision'),
+                          ),
+                          NavigationRailDestination(
                             icon: Icon(Icons.inventory_2_outlined),
                             selectedIcon: Icon(Icons.inventory_2),
                             label: Text('Artifacts'),
@@ -167,6 +173,7 @@ class _VisualizerHomeState extends State<VisualizerHome> {
                             OverviewPage(workspace: workspace),
                             TracePage(workspace: workspace),
                             ComparePage(workspace: workspace),
+                            DecisionPage(workspace: workspace),
                             ArtifactsPage(workspace: workspace),
                           ],
                         ),
@@ -265,6 +272,7 @@ class OverviewPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final insights = _workspaceInsights(workspace);
     return _PageScaffold(
       title: 'Workspace',
       subtitle: workspace.rootPath,
@@ -303,6 +311,13 @@ class OverviewPage extends StatelessWidget {
               ),
             ],
           ),
+          if (insights.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _Section(
+              title: 'Workspace Insights',
+              child: _InsightList(insights: insights.take(6).toList()),
+            ),
+          ],
           const SizedBox(height: 20),
           _Section(
             title: 'Loaded Artifacts',
@@ -330,6 +345,12 @@ class OverviewPage extends StatelessWidget {
                   title: 'Peer Compare',
                   body:
                       'Compare peers by measured elapsed time, scenario time, SQLite work, and trace health.',
+                ),
+                _ToolGuideEntry(
+                  icon: Icons.fact_check,
+                  title: 'Decision Review',
+                  body:
+                      'Audit accepted, rejected, or inconclusive benchmark decisions by gate, metric, and guardrail.',
                 ),
                 _ToolGuideEntry(
                   icon: Icons.inventory_2,
@@ -371,6 +392,24 @@ class OverviewPage extends StatelessWidget {
     }
     return '${peers.length} peers';
   }
+
+  List<BenchmarkInsight> _workspaceInsights(VisualizerWorkspace workspace) {
+    final insights = <BenchmarkInsight>[];
+    for (final decision in workspace.decisions) {
+      insights.addAll(benchmarkArtifactInsights(decision.artifact));
+    }
+    for (final compare in workspace.compares) {
+      insights.addAll(benchmarkArtifactInsights(compare.artifact));
+    }
+    insights.sort((a, b) {
+      final bySeverity = _insightSeverityRank(
+        a.severity,
+      ).compareTo(_insightSeverityRank(b.severity));
+      if (bySeverity != 0) return bySeverity;
+      return a.title.compareTo(b.title);
+    });
+    return insights;
+  }
 }
 
 class TracePage extends StatefulWidget {
@@ -386,7 +425,9 @@ class _TracePageState extends State<TracePage> {
   final TextEditingController _spanFilterController = TextEditingController();
   int _selectedIndex = 0;
   TraceSpan? _selectedSpan;
+  _VisibleRange? _visibleRange;
   String _spanFilter = '';
+  bool _spanIndexVisibleOnly = false;
 
   @override
   void dispose() {
@@ -402,6 +443,8 @@ class _TracePageState extends State<TracePage> {
     }
     if (oldWidget.workspace != widget.workspace) {
       _selectedSpan = null;
+      _visibleRange = null;
+      _spanIndexVisibleOnly = false;
     }
   }
 
@@ -409,7 +452,19 @@ class _TracePageState extends State<TracePage> {
   Widget build(BuildContext context) {
     final traces = widget.workspace.traces;
     final trace = traces.isEmpty ? null : traces[_selectedIndex];
-    final matchingSpans = trace == null ? <TraceSpan>[] : _matchingSpans(trace);
+    final visibleRange = trace == null ? null : _visibleRangeFor(trace);
+    final allMatchingSpans = trace == null
+        ? <TraceSpan>[]
+        : _matchingSpans(trace);
+    final matchingSpans = trace == null
+        ? <TraceSpan>[]
+        : _spanIndexMatches(allMatchingSpans, visibleRange);
+    final visibleSpans = trace == null || visibleRange == null
+        ? <TraceSpan>[]
+        : _visibleSpans(trace, visibleRange);
+    final visibleGroups = trace == null
+        ? <SpanGroupStats>[]
+        : _spanGroupsFor(trace, visibleSpans);
     return _PageScaffold(
       title: 'Trace Inspector',
       subtitle: trace?.path ?? 'Open a .tlt-region trace to inspect spans',
@@ -420,6 +475,7 @@ class _TracePageState extends State<TracePage> {
               body: 'Open a .tlt-region file or a directory containing traces.',
             )
           : ListView(
+              key: const ValueKey('trace-page-scroll'),
               padding: const EdgeInsets.all(20),
               children: [
                 if (traces.length > 1) ...[
@@ -433,6 +489,7 @@ class _TracePageState extends State<TracePage> {
                       setState(() {
                         _selectedIndex = index;
                         _selectedSpan = null;
+                        _visibleRange = null;
                       });
                     },
                   ),
@@ -488,7 +545,7 @@ class _TracePageState extends State<TracePage> {
                         icon: Icons.zoom_in,
                         title: 'Zoom',
                         body:
-                            'Use the +/- buttons or scroll over the timeline to inspect dense spans.',
+                            'Use the slider, +/- buttons, double-click, or scroll over the timeline to inspect dense spans.',
                       ),
                       _ToolGuideEntry(
                         icon: Icons.pan_tool_alt,
@@ -500,7 +557,19 @@ class _TracePageState extends State<TracePage> {
                         icon: Icons.touch_app,
                         title: 'Preview',
                         body:
-                            'Hover to preview. Click a bar or span row to pin it in the inspector.',
+                            'Hover to preview. Click near a tiny bar or a span row to pin it in the inspector.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.filter_alt,
+                        title: 'Span Index',
+                        body:
+                            'Search by span, SQL, args, track, or correlation, then limit results to the visible window.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.keyboard,
+                        title: 'Keyboard',
+                        body:
+                            '+/- zoom, left/right pan, F focuses the active span, Home fits the trace.',
                       ),
                     ],
                   ),
@@ -516,6 +585,7 @@ class _TracePageState extends State<TracePage> {
                       onSelected: (span) {
                         setState(() => _selectedSpan = span);
                       },
+                      onViewportChanged: _handleViewportChanged,
                     ),
                   ),
                 ),
@@ -525,10 +595,15 @@ class _TracePageState extends State<TracePage> {
                   child: SpanIndexPanel(
                     trace: trace,
                     spans: matchingSpans,
+                    totalMatches: allMatchingSpans.length,
+                    visibleOnly: _spanIndexVisibleOnly,
                     selected: _selectedSpan,
                     filterController: _spanFilterController,
                     onFilterChanged: (value) {
                       setState(() => _spanFilter = value.trim());
+                    },
+                    onVisibleOnlyChanged: (value) {
+                      setState(() => _spanIndexVisibleOnly = value);
                     },
                     onSelected: (span) {
                       setState(() => _selectedSpan = span);
@@ -537,8 +612,8 @@ class _TracePageState extends State<TracePage> {
                 ),
                 const SizedBox(height: 16),
                 _Section(
-                  title: 'Visible Span Aggregation',
-                  child: SpanAggregationTable(groups: trace.spanGroups),
+                  title: 'Visible Span Aggregation (${visibleSpans.length})',
+                  child: SpanAggregationTable(groups: visibleGroups),
                 ),
               ],
             ),
@@ -551,7 +626,9 @@ class _TracePageState extends State<TracePage> {
         trace.completeSpans.where((span) {
           if (filter.isEmpty) return true;
           final name = trace.trace.spanName(span.spanId).toLowerCase();
+          final args = _spanArgsSummary(trace, span).toLowerCase();
           return name.contains(filter) ||
+              args.contains(filter) ||
               '${span.trackId}'.contains(filter) ||
               '${span.begin.correlationId ?? ''}'.contains(filter);
         }).toList()..sort((a, b) {
@@ -561,6 +638,75 @@ class _TracePageState extends State<TracePage> {
         });
     return spans;
   }
+
+  List<TraceSpan> _spanIndexMatches(
+    List<TraceSpan> allMatches,
+    _VisibleRange? visibleRange,
+  ) {
+    if (!_spanIndexVisibleOnly || visibleRange == null) {
+      return allMatches;
+    }
+    return [
+      for (final span in allMatches)
+        if (_spanOverlapsRange(span, visibleRange)) span,
+    ];
+  }
+
+  bool _spanOverlapsRange(TraceSpan span, _VisibleRange range) {
+    final endNs = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+    return endNs > range.startNs && span.startNs < range.endNs;
+  }
+
+  _VisibleRange _visibleRangeFor(TraceDocument trace) {
+    final full = _fullTraceRange(trace);
+    final current = _visibleRange;
+    if (current == null) return full;
+    final start = current.startNs.clamp(full.startNs, full.endNs - 1).toInt();
+    final end = current.endNs.clamp(start + 1, full.endNs).toInt();
+    return _VisibleRange(start, end);
+  }
+
+  void _handleViewportChanged(int startNs, int endNs) {
+    if (!mounted) return;
+    final current = _visibleRange;
+    if (current != null &&
+        current.startNs == startNs &&
+        current.endNs == endNs) {
+      return;
+    }
+    setState(() {
+      _visibleRange = _VisibleRange(startNs, endNs);
+    });
+  }
+
+  List<TraceSpan> _visibleSpans(
+    TraceDocument trace,
+    _VisibleRange visibleRange,
+  ) {
+    return trace.visibleSpansIn(visibleRange.startNs, visibleRange.endNs);
+  }
+
+  List<SpanGroupStats> _spanGroupsFor(
+    TraceDocument trace,
+    Iterable<TraceSpan> spans,
+  ) {
+    return spans
+        .groupStatsByType(spanNames: trace.trace.spanNames)
+        .where((group) => group.stats.count > 0)
+        .toList()
+      ..sort((a, b) {
+        final byTotal = b.stats.totalNs.compareTo(a.stats.totalNs);
+        if (byTotal != 0) return byTotal;
+        return a.spanName.compareTo(b.spanName);
+      });
+  }
+}
+
+final class _VisibleRange {
+  const _VisibleRange(this.startNs, this.endNs);
+
+  final int startNs;
+  final int endNs;
 }
 
 class ComparePage extends StatefulWidget {
@@ -587,6 +733,9 @@ class _ComparePageState extends State<ComparePage> {
   Widget build(BuildContext context) {
     final compares = widget.workspace.compares;
     final compare = compares.isEmpty ? null : compares[_selectedIndex];
+    final insights = compare == null
+        ? const <BenchmarkInsight>[]
+        : benchmarkArtifactInsights(compare.artifact);
     return _PageScaffold(
       title: 'Peer Comparison',
       subtitle: compare == null
@@ -640,6 +789,11 @@ class _ComparePageState extends State<ComparePage> {
                   ],
                 ),
                 const SizedBox(height: 20),
+                _Section(
+                  title: 'Compare Insights',
+                  child: _InsightList(insights: insights.take(6).toList()),
+                ),
+                const SizedBox(height: 16),
                 const _Section(
                   title: 'Compare Tools',
                   child: _ToolGuide(
@@ -662,6 +816,12 @@ class _ComparePageState extends State<ComparePage> {
                         body:
                             'Dropped, unmatched-begin, and unmatched-end event counts. Non-zero means inspect before trusting timings.',
                       ),
+                      _ToolGuideEntry(
+                        icon: Icons.fingerprint,
+                        title: 'SQL Fingerprints',
+                        body:
+                            'Normalized prepare groups show query-shape cost without exposing literal values.',
+                      ),
                     ],
                   ),
                 ),
@@ -669,6 +829,11 @@ class _ComparePageState extends State<ComparePage> {
                 _Section(
                   title: 'Peer Metrics',
                   child: PeerComparisonTable(compare: compare),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'SQL Query Shapes',
+                  child: PeerSqlFingerprintBreakdown(compare: compare),
                 ),
                 const SizedBox(height: 16),
                 _Section(
@@ -689,6 +854,425 @@ class _ComparePageState extends State<ComparePage> {
         .map((entry) => '${entry.key}: ${entry.value}')
         .join(', ');
   }
+}
+
+class DecisionPage extends StatefulWidget {
+  const DecisionPage({super.key, required this.workspace});
+
+  final VisualizerWorkspace workspace;
+
+  @override
+  State<DecisionPage> createState() => _DecisionPageState();
+}
+
+class _DecisionPageState extends State<DecisionPage> {
+  int _selectedIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant DecisionPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedIndex >= widget.workspace.decisions.length) {
+      _selectedIndex = math.max(0, widget.workspace.decisions.length - 1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decisions = widget.workspace.decisions;
+    final decision = decisions.isEmpty ? null : decisions[_selectedIndex];
+    final insights = decision == null
+        ? const <BenchmarkInsight>[]
+        : benchmarkArtifactInsights(decision.artifact);
+    final primaryRows = decision == null
+        ? const <Map<String, Object?>>[]
+        : _decisionRows(decision, 'primary');
+    final guardrailRows = decision == null
+        ? const <Map<String, Object?>>[]
+        : _guardrailFindings(decision);
+    final traceIssues = decision == null
+        ? const <Map<String, Object?>>[]
+        : _traceIssues(decision);
+
+    return _PageScaffold(
+      title: 'Decision Review',
+      subtitle: decision == null
+          ? 'Open a tracelite.decision.v1 artifact to audit benchmark gates'
+          : '${decision.verdict} - ${decision.expectation} - ${decision.name}',
+      child: decision == null
+          ? const _EmptyState(
+              icon: Icons.fact_check,
+              title: 'No decision artifact loaded',
+              body: 'Open a decision JSON or a directory containing decisions.',
+            )
+          : ListView(
+              key: const ValueKey('decision-page-scroll'),
+              padding: const EdgeInsets.all(20),
+              children: [
+                if (decisions.length > 1) ...[
+                  _ArtifactPicker(
+                    label: 'Decision artifact',
+                    value: _selectedIndex,
+                    itemCount: decisions.length,
+                    itemLabel: (index) =>
+                        '${decisions[index].verdict} (${decisions[index].name})',
+                    onChanged: (index) {
+                      if (index == null) return;
+                      setState(() => _selectedIndex = index);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _MetricTile(
+                      icon: _decisionIcon(decision.verdict),
+                      label: 'decision',
+                      value: decision.verdict,
+                      detail: decision.generatedAt ?? decision.name,
+                    ),
+                    _MetricTile(
+                      icon: Icons.rule,
+                      label: 'expectation',
+                      value: decision.expectation,
+                      detail: _primaryPolicyDetail(decision),
+                    ),
+                    _MetricTile(
+                      icon: Icons.route,
+                      label: 'scenarios',
+                      value: '${decision.scenarioCount}',
+                      detail: _sourcePairDetail(decision),
+                    ),
+                    _MetricTile(
+                      icon: Icons.fact_check,
+                      label: 'gates passed',
+                      value: _gateSummaryValue(decision),
+                      detail: _gateSummaryDetail(decision),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _Section(
+                  title: 'Decision Insights',
+                  child: _InsightList(insights: insights.take(6).toList()),
+                ),
+                const SizedBox(height: 16),
+                const _Section(
+                  title: 'Decision Tools',
+                  child: _ToolGuide(
+                    entries: [
+                      _ToolGuideEntry(
+                        icon: Icons.check_circle_outline,
+                        title: 'Verdict',
+                        body:
+                            'Accepted means the primary gate passed and trace/guardrail gates did not block it.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.track_changes,
+                        title: 'Primary Gate',
+                        body:
+                            'The experiment metric under review, usually the peer and metric named in the policy.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.shield_outlined,
+                        title: 'Guardrails',
+                        body:
+                            'Secondary metrics that can reject or mark a run inconclusive even when the primary improves.',
+                      ),
+                      _ToolGuideEntry(
+                        icon: Icons.health_and_safety,
+                        title: 'Trace Health',
+                        body:
+                            'Missing scenarios, unsupported peers, dropped events, or bad statuses that make timings unsafe to trust.',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Decision Policy',
+                  child: _decisionPolicyTable(decision),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Gate Status',
+                  child: _gateStatusTable(decision),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Primary Comparisons',
+                  child: _decisionComparisonTable(
+                    primaryRows,
+                    emptyMessage: 'No primary comparisons in this decision.',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Guardrail Findings',
+                  child: _decisionComparisonTable(
+                    guardrailRows,
+                    emptyMessage: 'No failing or inconclusive guardrails.',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _Section(
+                  title: 'Trace Health Findings',
+                  child: _traceIssueTable(traceIssues),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _decisionPolicyTable(DecisionDocument decision) {
+    return _SimpleArtifactTable(
+      headers: const ['setting', 'value', 'detail'],
+      rows: [
+        ['expectation', decision.expectation, 'primary gate direction'],
+        [
+          'primary metric',
+          _primaryPolicyDetail(decision),
+          _formatPercentSetting(
+            decision.policy['primary_threshold_percent'],
+            label: 'threshold',
+          ),
+        ],
+        [
+          'max regression',
+          _formatPercentSetting(decision.policy['max_regression_percent']),
+          'guardrail budget',
+        ],
+        [
+          'max CV',
+          _formatPercentSetting(decision.policy['max_cv_percent']),
+          'noise gate',
+        ],
+        [
+          'baseline',
+          decision.baselinePath == null
+              ? '-'
+              : displayNameForPath(decision.baselinePath!),
+          decision.baselinePath ?? '-',
+        ],
+        [
+          'candidate',
+          decision.candidatePath == null
+              ? '-'
+              : displayNameForPath(decision.candidatePath!),
+          decision.candidatePath ?? '-',
+        ],
+      ],
+    );
+  }
+
+  Widget _gateStatusTable(DecisionDocument decision) {
+    return _SimpleArtifactTable(
+      headers: const ['gate', 'status', 'evidence'],
+      rows: [
+        [
+          'trace health',
+          _gateStatus(decision, 'trace_health'),
+          '${_traceIssues(decision).length} issues',
+        ],
+        [
+          'primary',
+          _gateStatus(decision, 'primary'),
+          '${_decisionRows(decision, 'primary').length} comparisons',
+        ],
+        [
+          'guardrails',
+          _gateStatus(decision, 'guardrails'),
+          '${_decisionRows(decision, 'guardrails').length} comparisons',
+        ],
+      ],
+    );
+  }
+
+  Widget _decisionComparisonTable(
+    List<Map<String, Object?>> rows, {
+    required String emptyMessage,
+  }) {
+    if (rows.isEmpty) return Text(emptyMessage);
+    return _SimpleArtifactTable(
+      headers: const [
+        'scenario',
+        'peer',
+        'metric',
+        'baseline',
+        'candidate',
+        'change',
+        'cv',
+        'p',
+        'status',
+        'effect',
+      ],
+      rows: [
+        for (final row in rows.take(80))
+          [
+            _textValue(row['scenario']),
+            _textValue(row['peer']),
+            _textValue(row['metric']),
+            _metricMean(row, 'baseline_mean'),
+            _metricMean(row, 'candidate_mean'),
+            _signedPercent(row['change_percent']),
+            _formatPercentSetting(row['max_cv_percent']),
+            _pValue(row['nonparametric_p_value']),
+            _textValue(row['status']),
+            _textValue(row['gate_effect']),
+          ],
+      ],
+    );
+  }
+
+  Widget _traceIssueTable(List<Map<String, Object?>> rows) {
+    if (rows.isEmpty) return const Text('No trace-health findings.');
+    return _SimpleArtifactTable(
+      headers: const ['scenario', 'peer', 'baseline', 'candidate', 'effect'],
+      rows: [
+        for (final row in rows)
+          [
+            _textValue(row['scenario']),
+            _textValue(row['peer']),
+            _textValue(row['baseline_status']),
+            _textValue(row['candidate_status']),
+            _textValue(row['gate_effect']),
+          ],
+      ],
+    );
+  }
+
+  List<Map<String, Object?>> _guardrailFindings(DecisionDocument decision) {
+    return _decisionRows(
+      decision,
+      'guardrails',
+    ).where((row) => row['gate_effect'] != 'pass').toList();
+  }
+
+  List<Map<String, Object?>> _decisionRows(
+    DecisionDocument decision,
+    String gateName,
+  ) {
+    return _objectListOfMaps(
+      _objectMap(decision.gates[gateName])['comparisons'],
+    );
+  }
+
+  List<Map<String, Object?>> _traceIssues(DecisionDocument decision) {
+    return _objectListOfMaps(
+      _objectMap(decision.gates['trace_health'])['issues'],
+    );
+  }
+
+  String _gateStatus(DecisionDocument decision, String gateName) {
+    return _textValue(_objectMap(decision.gates[gateName])['status']);
+  }
+
+  String _gateSummaryValue(DecisionDocument decision) {
+    final statuses = [
+      _gateStatus(decision, 'trace_health'),
+      _gateStatus(decision, 'primary'),
+      _gateStatus(decision, 'guardrails'),
+    ];
+    final passed = statuses.where((status) => status == 'passed').length;
+    return '$passed/${statuses.length}';
+  }
+
+  String _gateSummaryDetail(DecisionDocument decision) {
+    return [
+      'trace ${_gateStatus(decision, 'trace_health')}',
+      'primary ${_gateStatus(decision, 'primary')}',
+      'guardrails ${_gateStatus(decision, 'guardrails')}',
+    ].join(', ');
+  }
+
+  String _primaryPolicyDetail(DecisionDocument decision) {
+    final peer = _textValue(decision.policy['primary_peer']);
+    final metric = _textValue(decision.policy['primary_metric']);
+    return '$peer $metric'.trim();
+  }
+
+  String _sourcePairDetail(DecisionDocument decision) {
+    final baseline = decision.baselinePath == null
+        ? 'baseline -'
+        : 'base ${displayNameForPath(decision.baselinePath!)}';
+    final candidate = decision.candidatePath == null
+        ? 'candidate -'
+        : 'candidate ${displayNameForPath(decision.candidatePath!)}';
+    return '$baseline -> $candidate';
+  }
+
+  IconData _decisionIcon(String verdict) {
+    return switch (verdict) {
+      'accepted' => Icons.check_circle,
+      'rejected' => Icons.error_outline,
+      _ => Icons.warning_amber,
+    };
+  }
+}
+
+Map<String, Object?> _objectMap(Object? value) {
+  if (value is Map) return Map<String, Object?>.from(value);
+  return const {};
+}
+
+List<Map<String, Object?>> _objectListOfMaps(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map) Map<String, Object?>.from(item),
+  ];
+}
+
+String _textValue(Object? value) {
+  if (value == null) return '-';
+  if (value is num) return _trimNumber(value);
+  final text = value.toString();
+  return text.isEmpty ? '-' : text;
+}
+
+String _metricMean(Map<String, Object?> row, String key) {
+  final value = row[key];
+  if (value is! num) return '-';
+  final metric = row['metric'];
+  final metricName = metric is String ? metric : '';
+  if (metricName.endsWith('_ns')) return formatNs(value.round());
+  if (metricName.endsWith('_bytes')) return '${_trimNumber(value)} B';
+  if (metricName.endsWith('_mb')) return '${_trimNumber(value)} MB';
+  if (metricName.endsWith('_percent')) return '${_trimNumber(value)}%';
+  return _trimNumber(value);
+}
+
+String _formatPercentSetting(Object? value, {String? label}) {
+  if (value is! num) return '-';
+  final formatted = '${_trimNumber(value)}%';
+  return label == null ? formatted : '$label $formatted';
+}
+
+String _signedPercent(Object? value) {
+  if (value is! num) return '-';
+  final number = value.toDouble();
+  if (!number.isFinite) return number.isNegative ? '-inf%' : '+inf%';
+  final prefix = number > 0 ? '+' : '';
+  return '$prefix${_trimNumber(number)}%';
+}
+
+String _pValue(Object? value) {
+  if (value is! num) return '-';
+  final number = value.toDouble();
+  if (!number.isFinite) return '-';
+  if (number < 0.001) return '<0.001';
+  return number.toStringAsFixed(3);
+}
+
+String _trimNumber(num value) {
+  final number = value.toDouble();
+  if (!number.isFinite) return number.isNegative ? '-inf' : 'inf';
+  if (number == number.roundToDouble()) return number.toStringAsFixed(0);
+  final magnitude = number.abs();
+  if (magnitude >= 100) return number.toStringAsFixed(1);
+  if (magnitude >= 10) return number.toStringAsFixed(2);
+  return number.toStringAsFixed(3);
 }
 
 class ArtifactsPage extends StatelessWidget {
@@ -758,8 +1342,15 @@ class ArtifactsPage extends StatelessWidget {
 }
 
 const double _timelineTop = 34;
-const double _timelineLaneHeight = 30;
+const double _timelineLaneHeight = 34;
 const double _timelineRightPadding = 18;
+const double _timelineBarTopInset = 7;
+const double _timelineBarHeight = 20;
+const double _timelineMinBarWidth = 5;
+const double _timelineHitSlopPixels = 9;
+const double _timelineNearestPickPixels = 16;
+const int _maxDetailedTimelineSpans = 10000;
+const double _minDetailedTimelineSpanPixels = 2.5;
 
 double _timelineLeftGutter(double width) {
   return math.min(190, math.max(118, width * 0.30));
@@ -777,26 +1368,36 @@ int _traceStartNs(TraceDocument trace) {
   return events.isEmpty ? 0 : events.first.timestampNs;
 }
 
+_VisibleRange _fullTraceRange(TraceDocument trace) {
+  final start = _traceStartNs(trace);
+  return _VisibleRange(start, start + math.max(1, trace.durationNs));
+}
+
 class TraceTimeline extends StatefulWidget {
   const TraceTimeline({
     super.key,
     required this.trace,
     required this.selected,
     required this.onSelected,
+    required this.onViewportChanged,
   });
 
   final TraceDocument trace;
   final TraceSpan? selected;
   final ValueChanged<TraceSpan?> onSelected;
+  final void Function(int startNs, int endNs) onViewportChanged;
 
   @override
   State<TraceTimeline> createState() => _TraceTimelineState();
 }
 
 class _TraceTimelineState extends State<TraceTimeline> {
+  static const double _minimumFocusedSpanPixels = 28;
+
   TraceSpan? _hoveredSpan;
   late int _viewStartNs;
   late int _viewEndNs;
+  double _lastTimelineWidth = 1000;
 
   @override
   void initState() {
@@ -812,7 +1413,11 @@ class _TraceTimelineState extends State<TraceTimeline> {
       _fitToTrace(notify: false);
     } else if (!identical(oldWidget.selected, widget.selected) &&
         widget.selected != null) {
-      _ensureSpanVisible(widget.selected!);
+      final selected = widget.selected!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(widget.selected, selected)) return;
+        _focusSpan(selected);
+      });
     }
   }
 
@@ -825,10 +1430,15 @@ class _TraceTimelineState extends State<TraceTimeline> {
       children: [
         _TimelineToolbar(
           visibleLabel: _visibleWindowLabel,
+          densityLabel: '${_visibleSpanCount()} visible spans',
           selectedLabel: activeSpan == null
               ? '${trace.spans.length} spans'
               : trace.spanName(activeSpan.spanId),
+          zoomLevel: _zoomLevel,
+          onZoomLevelChanged: _setZoomLevel,
           onFit: () => _fitToTrace(),
+          canFocusSelection: activeSpan != null,
+          onFocusSelection: _focusActiveSpan,
           onZoomIn: () => _zoomAtFraction(0.5, 0.55),
           onZoomOut: () => _zoomAtFraction(0.5, 1.8),
         ),
@@ -845,9 +1455,12 @@ class _TraceTimelineState extends State<TraceTimeline> {
           ),
         ),
         const SizedBox(height: 8),
+        const _TimelineGestureLegend(),
+        const SizedBox(height: 8),
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
+              _lastTimelineWidth = constraints.maxWidth;
               final size = Size(constraints.maxWidth, constraints.maxHeight);
               return DecoratedBox(
                 decoration: BoxDecoration(
@@ -857,40 +1470,46 @@ class _TraceTimelineState extends State<TraceTimeline> {
                   ),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Listener(
-                  onPointerSignal: (event) => _handlePointerSignal(event, size),
-                  child: MouseRegion(
-                    onHover: (event) {
-                      final span = _spanAt(event.localPosition, size);
-                      if (!identical(span, _hoveredSpan)) {
-                        setState(() => _hoveredSpan = span);
-                      }
-                    },
-                    onExit: (_) {
-                      if (_hoveredSpan != null) {
-                        setState(() => _hoveredSpan = null);
-                      }
-                    },
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragUpdate: (details) {
-                        _panByPixels(details.delta.dx, size.width);
+                child: Focus(
+                  autofocus: true,
+                  onKeyEvent: _handleKeyEvent,
+                  child: Listener(
+                    onPointerSignal: (event) =>
+                        _handlePointerSignal(event, size),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.precise,
+                      onHover: (event) {
+                        final span = _spanAt(event.localPosition, size);
+                        if (!identical(span, _hoveredSpan)) {
+                          setState(() => _hoveredSpan = span);
+                        }
                       },
-                      onDoubleTapDown: (details) {
-                        _zoomAt(details.localPosition, size.width, 0.45);
+                      onExit: (_) {
+                        if (_hoveredSpan != null) {
+                          setState(() => _hoveredSpan = null);
+                        }
                       },
-                      onTapUp: (details) {
-                        final span = _spanAt(details.localPosition, size);
-                        widget.onSelected(span);
-                      },
-                      child: CustomPaint(
-                        painter: _TimelinePainter(
-                          trace: widget.trace,
-                          selected: widget.selected,
-                          hovered: _hoveredSpan,
-                          colorScheme: Theme.of(context).colorScheme,
-                          viewStartNs: _viewStartNs,
-                          viewEndNs: _viewEndNs,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragUpdate: (details) {
+                          _panByPixels(details.delta.dx, size.width);
+                        },
+                        onDoubleTapDown: (details) {
+                          _zoomAt(details.localPosition, size.width, 0.45);
+                        },
+                        onTapUp: (details) {
+                          final span = _spanAt(details.localPosition, size);
+                          widget.onSelected(span);
+                        },
+                        child: CustomPaint(
+                          painter: _TimelinePainter(
+                            trace: widget.trace,
+                            selected: widget.selected,
+                            hovered: _hoveredSpan,
+                            colorScheme: Theme.of(context).colorScheme,
+                            viewStartNs: _viewStartNs,
+                            viewEndNs: _viewEndNs,
+                          ),
                         ),
                       ),
                     ),
@@ -902,7 +1521,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
         ),
         const SizedBox(height: 10),
         _SelectedSpanDetails(
-          trace: trace,
+          trace: widget.trace,
           span: widget.selected,
           hoveredSpan: _hoveredSpan,
         ),
@@ -915,6 +1534,17 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final visibleDuration = math.max(1, _viewEndNs - _viewStartNs);
     final percent = (visibleDuration / fullDuration) * 100;
     return '${formatNs(visibleDuration)} visible (${_formatPercent(percent)}%)';
+  }
+
+  double get _zoomLevel {
+    final fullDuration = math.max(1, _traceEndNs - _traceStartNs);
+    final visibleDuration = math.max(1, _viewEndNs - _viewStartNs);
+    final minWindow = _minimumWindowNs(fullDuration);
+    if (fullDuration <= minWindow) return 1;
+    final fullLog = math.log(fullDuration);
+    final minLog = math.log(minWindow);
+    final visibleLog = math.log(visibleDuration.clamp(minWindow, fullDuration));
+    return ((fullLog - visibleLog) / (fullLog - minLog)).clamp(0.0, 1.0);
   }
 
   int get _traceStartNs {
@@ -932,6 +1562,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
 
     if (notify) {
       setState(update);
+      widget.onViewportChanged(_traceStartNs, _traceEndNs);
     } else {
       update();
     }
@@ -947,12 +1578,67 @@ class _TraceTimelineState extends State<TraceTimeline> {
     _zoomAt(event.localPosition, size.width, factor);
   }
 
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _panByPixels(80, _lastTimelineWidth);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _panByPixels(-80, _lastTimelineWidth);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd) {
+      _zoomAtFraction(0.5, 0.82);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      _zoomAtFraction(0.5, 1.20);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyF) {
+      _focusActiveSpan();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.home) {
+      _fitToTrace();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _setZoomLevel(double value) {
+    final fullStart = _traceStartNs;
+    final fullEnd = _traceEndNs;
+    final fullDuration = math.max(1, fullEnd - fullStart);
+    final minWindow = _minimumWindowNs(fullDuration);
+    if (fullDuration <= minWindow) return;
+    final fullLog = math.log(fullDuration);
+    final minLog = math.log(minWindow);
+    final targetLog = fullLog - (fullLog - minLog) * value.clamp(0.0, 1.0);
+    final targetDuration = math
+        .exp(targetLog)
+        .round()
+        .clamp(minWindow, fullDuration)
+        .toInt();
+    final center = _viewStartNs + ((_viewEndNs - _viewStartNs) / 2).round();
+    _setViewport(
+      center - (targetDuration / 2).round(),
+      center + (targetDuration / 2).round(),
+    );
+  }
+
   void _zoomAtFraction(double fraction, double factor) {
-    final leftGutter = _timelineLeftGutter(1000);
-    final timelineWidth = _timelineWidthFor(1000);
+    final width = _lastTimelineWidth;
+    final leftGutter = _timelineLeftGutter(width);
+    final timelineWidth = _timelineWidthFor(width);
     _zoomAt(
       Offset(leftGutter + timelineWidth * fraction, _timelineTop),
-      1000,
+      width,
       factor,
     );
   }
@@ -962,7 +1648,7 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final fullEnd = _traceEndNs;
     final fullDuration = math.max(1, fullEnd - fullStart);
     final currentDuration = math.max(1, _viewEndNs - _viewStartNs);
-    final minWindow = math.max(1000, (fullDuration / 100000).round());
+    final minWindow = _minimumWindowNs(fullDuration);
     final requested = (currentDuration * factor).round();
     final newDuration = requested.clamp(minWindow, fullDuration).toInt();
     final leftGutter = _timelineLeftGutter(width);
@@ -992,22 +1678,44 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final maxStart = fullEnd - duration;
     final start = startNs.clamp(fullStart, maxStart).toInt();
     final end = start + duration;
+    if (_viewStartNs == start && _viewEndNs == end) return;
     setState(() {
       _viewStartNs = start;
       _viewEndNs = end;
     });
+    widget.onViewportChanged(start, end);
   }
 
-  void _ensureSpanVisible(TraceSpan span) {
+  void _focusActiveSpan() {
+    final span = widget.selected ?? _hoveredSpan;
+    if (span == null) return;
+    _focusSpan(span, force: true);
+  }
+
+  void _focusSpan(TraceSpan span, {bool force = false}) {
     final endNs = span.endNs ?? span.startNs;
-    if (span.startNs >= _viewStartNs && endNs <= _viewEndNs) return;
     final fullStart = _traceStartNs;
     final fullEnd = _traceEndNs;
     final fullDuration = math.max(1, fullEnd - fullStart);
     final spanDuration = math.max(1, endNs - span.startNs);
+    final timelineWidth = _timelineWidthFor(_lastTimelineWidth);
+    final currentDuration = math.max(1, _viewEndNs - _viewStartNs);
+    final currentVisualWidth = (spanDuration / currentDuration) * timelineWidth;
+    final fullyVisible = span.startNs >= _viewStartNs && endNs <= _viewEndNs;
+    if (!force &&
+        fullyVisible &&
+        currentVisualWidth >= _minimumFocusedSpanPixels) {
+      return;
+    }
+    final targetWindow = math.max(
+      spanDuration,
+      ((spanDuration * timelineWidth) / _minimumFocusedSpanPixels).round(),
+    );
+    final contextWindow = spanDuration * 24;
+    final minWindow = math.max(1000, spanDuration);
     final window = math.min(
       fullDuration,
-      math.max(spanDuration * 12, (fullDuration / 20).round()),
+      math.max(minWindow, math.min(contextWindow, targetWindow)),
     );
     final center = span.startNs + (spanDuration / 2).round();
     _setViewport(center - (window / 2).round(), center + (window / 2).round());
@@ -1031,10 +1739,13 @@ class _TraceTimelineState extends State<TraceTimeline> {
     final tappedNs =
         _viewStartNs +
         (((position.dx - leftGutter) / timelineWidth) * duration).round();
-    final laneTop = _timelineTop + laneIndex * _timelineLaneHeight + 7;
-    final laneBottom = laneTop + 15;
+    final laneTop =
+        _timelineTop + laneIndex * _timelineLaneHeight + _timelineBarTopInset;
+    final laneBottom = laneTop + _timelineBarHeight;
     final visibleRight = leftGutter + timelineWidth;
     final candidates = <TraceSpan>[];
+    TraceSpan? nearest;
+    var nearestDistance = double.infinity;
     for (final span
         in widget.trace.completeSpansByTrack[trackId] ?? const <TraceSpan>[]) {
       final end = span.endNs ?? span.startNs;
@@ -1047,48 +1758,130 @@ class _TraceTimelineState extends State<TraceTimeline> {
       final right =
           leftGutter +
           ((end - _viewStartNs) / duration).clamp(0.0, 1.0) * timelineWidth;
-      final visualWidth = math.max(3.0, right - x);
+      final visualWidth = math.max(_timelineMinBarWidth, right - x);
+      final visualLeft = x.clamp(leftGutter, visibleRight).toDouble();
       final visualRect = Rect.fromLTWH(
-        x.clamp(leftGutter, visibleRight).toDouble(),
+        visualLeft,
         laneTop,
         visualWidth,
         laneBottom - laneTop,
-      ).inflate(5);
+      ).inflate(_timelineHitSlopPixels);
       if (visualRect.contains(position) ||
           (tappedNs >= span.startNs && tappedNs <= end)) {
         candidates.add(span);
+        continue;
+      }
+      final spanCenterX = visualLeft + visualWidth / 2;
+      final spanCenterY = laneTop + (laneBottom - laneTop) / 2;
+      final distance = math.sqrt(
+        math.pow(position.dx - spanCenterX, 2) +
+            math.pow(position.dy - spanCenterY, 2),
+      );
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = span;
       }
     }
     candidates.sort((a, b) => a.durationNs.compareTo(b.durationNs));
-    return candidates.isEmpty ? null : candidates.first;
+    if (candidates.isNotEmpty) return candidates.first;
+    return nearestDistance <= _timelineNearestPickPixels ? nearest : null;
+  }
+
+  int _visibleSpanCount() {
+    return widget.trace.visibleSpanCountIn(_viewStartNs, _viewEndNs);
+  }
+
+  int _minimumWindowNs(int fullDurationNs) {
+    return math.min(fullDurationNs, math.max(1000, fullDurationNs ~/ 100000));
   }
 }
 
 class _TimelineToolbar extends StatelessWidget {
   const _TimelineToolbar({
     required this.visibleLabel,
+    required this.densityLabel,
     required this.selectedLabel,
+    required this.zoomLevel,
+    required this.onZoomLevelChanged,
     required this.onFit,
+    required this.canFocusSelection,
+    required this.onFocusSelection,
     required this.onZoomIn,
     required this.onZoomOut,
   });
 
   final String visibleLabel;
+  final String densityLabel;
   final String selectedLabel;
+  final double zoomLevel;
+  final ValueChanged<double> onZoomLevelChanged;
   final VoidCallback onFit;
+  final bool canFocusSelection;
+  final VoidCallback onFocusSelection;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Row(
+    final controls = [
+      Tooltip(
+        message: 'Drag to change the visible time window',
+        child: SizedBox(
+          width: 210,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.zoom_in_map, color: colors.primary, size: 18),
+              const SizedBox(width: 6),
+              const Text(
+                'Zoom',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+              Expanded(
+                child: Slider(value: zoomLevel, onChanged: onZoomLevelChanged),
+              ),
+            ],
+          ),
+        ),
+      ),
+      Tooltip(
+        message: 'Focus selected span',
+        child: IconButton.filledTonal(
+          onPressed: canFocusSelection ? onFocusSelection : null,
+          icon: const Icon(Icons.center_focus_strong),
+        ),
+      ),
+      Tooltip(
+        message: 'Zoom out',
+        child: IconButton.filledTonal(
+          onPressed: onZoomOut,
+          icon: const Icon(Icons.remove),
+        ),
+      ),
+      Tooltip(
+        message: 'Zoom in',
+        child: IconButton.filledTonal(
+          onPressed: onZoomIn,
+          icon: const Icon(Icons.add),
+        ),
+      ),
+      Tooltip(
+        message: 'Fit full trace',
+        child: IconButton.filledTonal(
+          onPressed: onFit,
+          icon: const Icon(Icons.fit_screen),
+        ),
+      ),
+    ];
+
+    final label = Row(
       children: [
         Icon(Icons.travel_explore, color: colors.primary, size: 20),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            '$visibleLabel - $selectedLabel',
+            '$visibleLabel - $densityLabel - $selectedLabel',
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: colors.onSurfaceVariant,
@@ -1096,30 +1889,94 @@ class _TimelineToolbar extends StatelessWidget {
             ),
           ),
         ),
-        Tooltip(
-          message: 'Zoom out',
-          child: IconButton.filledTonal(
-            onPressed: onZoomOut,
-            icon: const Icon(Icons.remove),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Tooltip(
-          message: 'Zoom in',
-          child: IconButton.filledTonal(
-            onPressed: onZoomIn,
-            icon: const Icon(Icons.add),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Tooltip(
-          message: 'Fit full trace',
-          child: IconButton.filledTonal(
-            onPressed: onFit,
-            icon: const Icon(Icons.fit_screen),
-          ),
-        ),
       ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 760) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              label,
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: controls,
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: label),
+            const SizedBox(width: 8),
+            Wrap(
+              spacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: controls,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _TimelineGestureLegend extends StatelessWidget {
+  const _TimelineGestureLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: const [
+        _GestureChip(icon: Icons.mouse, label: 'scroll zoom'),
+        _GestureChip(icon: Icons.open_with, label: 'drag pan'),
+        _GestureChip(icon: Icons.touch_app, label: 'click select'),
+        _GestureChip(icon: Icons.keyboard, label: '+/- arrows F Home'),
+      ],
+    );
+  }
+}
+
+class _GestureChip extends StatelessWidget {
+  const _GestureChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.55),
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: colors.primary, size: 14),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1224,6 +2081,10 @@ class _MinimapPainter extends CustomPainter {
       ..color = colorScheme.primary
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
+    final brushHandlePaint = Paint()
+      ..color = colorScheme.primary
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.square;
 
     final laneHeight = math.max(3.0, (size.height - 10) / trackCount);
     const maxMinimapMarks = 12000;
@@ -1264,6 +2125,16 @@ class _MinimapPainter extends CustomPainter {
     );
     canvas.drawRect(brush, brushPaint);
     canvas.drawRect(brush, brushBorderPaint);
+    canvas.drawLine(
+      Offset(brush.left, 8),
+      Offset(brush.left, size.height - 8),
+      brushHandlePaint,
+    );
+    canvas.drawLine(
+      Offset(brush.right, 8),
+      Offset(brush.right, size.height - 8),
+      brushHandlePaint,
+    );
   }
 
   @override
@@ -1309,6 +2180,14 @@ class _TimelinePainter extends CustomPainter {
       ..color = colorScheme.error.withValues(alpha: 0.90);
     final hoveredPaint = Paint()
       ..color = colorScheme.tertiary.withValues(alpha: 0.92);
+    final selectedOutlinePaint = Paint()
+      ..color = colorScheme.error
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    final hoveredOutlinePaint = Paint()
+      ..color = colorScheme.tertiary
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
 
     canvas.drawRect(
       Rect.fromLTWH(leftGutter, 0, timelineWidth, size.height),
@@ -1352,19 +2231,15 @@ class _TimelinePainter extends CustomPainter {
         math.max(0, size.height - _timelineTop),
       ),
     );
-    const maxTimelineSpans = 10000;
-    var rendered = 0;
-    var clippedByCap = false;
-    for (final span in trace.completeSpans) {
-      final lane = trackIndex[span.trackId];
-      if (lane == null) continue;
-      final endNs = span.endNs ?? span.startNs;
-      if (span.startNs > viewEndNs) break;
-      if (endNs < viewStartNs || span.startNs > viewEndNs) continue;
-      if (rendered >= maxTimelineSpans) {
-        clippedByCap = true;
-        continue;
-      }
+
+    final visibleSpanCount = trace.visibleSpanCountIn(viewStartNs, viewEndNs);
+    final densityMode = visibleSpanCount > _maxDetailedTimelineSpans;
+    final detailedSpans = <_TimelineSpanRect>[];
+    final densityRows = <int, _TimelineDensityBuckets>{};
+
+    _TimelineSpanRect? spanRectFor(TraceSpan span, int lane) {
+      final endNs = math.max(span.startNs + 1, span.endNs ?? span.startNs + 1);
+      if (endNs <= viewStartNs || span.startNs >= viewEndNs) return null;
       final x =
           leftGutter +
           ((span.startNs - viewStartNs) / durationNs).clamp(0.0, 1.0) *
@@ -1372,16 +2247,30 @@ class _TimelinePainter extends CustomPainter {
       final right =
           leftGutter +
           ((endNs - viewStartNs) / durationNs).clamp(0.0, 1.0) * timelineWidth;
-      final width = math.max(3.0, right - x);
-      final rect = Rect.fromLTWH(
-        x.clamp(leftGutter, timelineRight).toDouble(),
-        _timelineTop + lane * _timelineLaneHeight + 7,
-        width,
-        15,
+      final projectedWidth = math.max(0.0, right - x);
+      return _TimelineSpanRect(
+        span: span,
+        rect: Rect.fromLTWH(
+          x.clamp(leftGutter, timelineRight).toDouble(),
+          _timelineTop + lane * _timelineLaneHeight + _timelineBarTopInset,
+          math.max(_timelineMinBarWidth, projectedWidth),
+          _timelineBarHeight,
+        ),
+        projectedLeft: (x - leftGutter).clamp(0.0, timelineWidth).toDouble(),
+        projectedRight: (right - leftGutter)
+            .clamp(0.0, timelineWidth)
+            .toDouble(),
+        projectedWidth: projectedWidth,
       );
-      final paint = identical(span, selected)
+    }
+
+    void drawSpanRect(_TimelineSpanRect spanRect) {
+      final span = spanRect.span;
+      final isSelected = identical(span, selected);
+      final isHovered = identical(span, hovered);
+      final paint = isSelected
           ? selectedPaint
-          : identical(span, hovered)
+          : isHovered
           ? hoveredPaint
           : spanPaints.putIfAbsent(
               trace.trace.spanName(span.spanId),
@@ -1390,12 +2279,107 @@ class _TimelinePainter extends CustomPainter {
                     ..color = _spanColor(trace.trace.spanName(span.spanId)),
             );
       canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+        RRect.fromRectAndRadius(spanRect.rect, const Radius.circular(3)),
         paint,
       );
-      rendered++;
+      if (isSelected || isHovered) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            spanRect.rect.inflate(1),
+            const Radius.circular(4),
+          ),
+          isSelected ? selectedOutlinePaint : hoveredOutlinePaint,
+        );
+      }
+    }
+
+    trace.forEachVisibleSpan(viewStartNs, viewEndNs, (span) {
+      final lane = trackIndex[span.trackId];
+      if (lane == null) return;
+      final spanRect = spanRectFor(span, lane);
+      if (spanRect == null) return;
+      if (densityMode) {
+        densityRows
+            .putIfAbsent(
+              lane,
+              () => _TimelineDensityBuckets(timelineWidth.ceil()),
+            )
+            .add(spanRect.projectedLeft, spanRect.projectedRight);
+        if (spanRect.projectedWidth < _minDetailedTimelineSpanPixels ||
+            detailedSpans.length >= _maxDetailedTimelineSpans) {
+          return;
+        }
+      }
+      detailedSpans.add(spanRect);
+    });
+
+    if (densityMode) {
+      final densityPaint = Paint();
+      for (final entry in densityRows.entries) {
+        final lane = entry.key;
+        final row = entry.value;
+        final laneTop =
+            _timelineTop + lane * _timelineLaneHeight + _timelineBarTopInset;
+        final maxCount = math.max(1, row.maxCount);
+        final maxLog = math.log(maxCount + 1);
+        for (var bucket = 0; bucket < row.counts.length; bucket++) {
+          final count = row.counts[bucket];
+          if (count == 0) continue;
+          final intensity = math.log(count + 1) / maxLog;
+          final height = math.max(
+            4.0,
+            _timelineBarHeight * (0.35 + intensity * 0.65),
+          );
+          densityPaint.color = colorScheme.primary.withValues(
+            alpha: 0.14 + intensity * 0.50,
+          );
+          canvas.drawRect(
+            Rect.fromLTWH(
+              leftGutter + bucket,
+              laneTop + (_timelineBarHeight - height) / 2,
+              1.25,
+              height,
+            ),
+            densityPaint,
+          );
+        }
+      }
+    }
+
+    for (final spanRect in detailedSpans) {
+      drawSpanRect(spanRect);
+    }
+
+    for (final highlighted in [selected, hovered]) {
+      if (highlighted == null) continue;
+      final lane = trackIndex[highlighted.trackId];
+      if (lane == null) continue;
+      final spanRect = spanRectFor(highlighted, lane);
+      if (spanRect == null) continue;
+      drawSpanRect(spanRect);
     }
     canvas.restore();
+
+    final markerSpan = selected ?? hovered;
+    if (markerSpan != null) {
+      final markerX =
+          leftGutter +
+          ((markerSpan.startNs - viewStartNs) / durationNs).clamp(0.0, 1.0) *
+              timelineWidth;
+      if (markerSpan.startNs >= viewStartNs &&
+          markerSpan.startNs <= viewEndNs) {
+        final markerPaint = Paint()
+          ..color =
+              (selected == null ? colorScheme.tertiary : colorScheme.error)
+                  .withValues(alpha: 0.60)
+          ..strokeWidth = 1;
+        canvas.drawLine(
+          Offset(markerX, _timelineTop),
+          Offset(markerX, size.height),
+          markerPaint,
+        );
+      }
+    }
 
     textPainter
       ..text = TextSpan(
@@ -1410,13 +2394,14 @@ class _TimelinePainter extends CustomPainter {
       ..layout(maxWidth: size.width - 20);
     textPainter.paint(canvas, const Offset(10, 8));
 
-    if (clippedByCap) {
+    if (densityMode) {
       textPainter
         ..text = TextSpan(
-          text: 'Large trace mode: zoom in to render all visible spans.',
+          text:
+              'Large trace mode: showing density for $visibleSpanCount spans; zoom in for individual spans.',
           style: TextStyle(
-            fontSize: 12,
-            color: colorScheme.error,
+            fontSize: 11,
+            color: colorScheme.primary,
             fontWeight: FontWeight.w700,
           ),
         )
@@ -1435,6 +2420,41 @@ class _TimelinePainter extends CustomPainter {
   }
 }
 
+class _TimelineSpanRect {
+  const _TimelineSpanRect({
+    required this.span,
+    required this.rect,
+    required this.projectedLeft,
+    required this.projectedRight,
+    required this.projectedWidth,
+  });
+
+  final TraceSpan span;
+  final Rect rect;
+  final double projectedLeft;
+  final double projectedRight;
+  final double projectedWidth;
+}
+
+class _TimelineDensityBuckets {
+  _TimelineDensityBuckets(int bucketCount)
+    : counts = List<int>.filled(math.max(1, bucketCount), 0);
+
+  final List<int> counts;
+  int maxCount = 0;
+
+  void add(double left, double right) {
+    final bucketCount = counts.length;
+    final start = left.floor().clamp(0, bucketCount - 1).toInt();
+    final end = math.max(start, right.ceil().clamp(0, bucketCount - 1).toInt());
+    for (var bucket = start; bucket <= end; bucket++) {
+      final count = counts[bucket] + 1;
+      counts[bucket] = count;
+      maxCount = math.max(maxCount, count);
+    }
+  }
+}
+
 class _SelectedSpanDetails extends StatelessWidget {
   const _SelectedSpanDetails({
     required this.trace,
@@ -1442,7 +2462,7 @@ class _SelectedSpanDetails extends StatelessWidget {
     required this.hoveredSpan,
   });
 
-  final Trace trace;
+  final TraceDocument trace;
   final TraceSpan? span;
   final TraceSpan? hoveredSpan;
 
@@ -1461,32 +2481,250 @@ class _SelectedSpanDetails extends StatelessWidget {
       );
     }
     final selected = activeSpan;
+    final sql = trace.sqlForSpan(selected);
     return _InspectorPanel(
       icon: Icons.manage_search,
       title: span == null ? 'Hovered Span' : 'Selected Span',
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 10,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _InlineDatum(label: 'span', value: trace.spanName(selected.spanId)),
-          _InlineDatum(label: 'duration', value: formatNs(selected.durationNs)),
-          _InlineDatum(label: 'track', value: '${selected.trackId}'),
-          if (selected.begin.correlationId != null)
-            _InlineDatum(
-              label: 'correlation',
-              value: '${selected.begin.correlationId}',
-            ),
-          _InlineDatum(
-            label: 'begin args',
-            value: selected.beginArgs.join(', '),
+          Wrap(
+            spacing: 16,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _InlineDatum(
+                label: 'span',
+                value: trace.trace.spanName(selected.spanId),
+              ),
+              _InlineDatum(
+                label: 'duration',
+                value: formatNs(selected.durationNs),
+              ),
+              _InlineDatum(label: 'track', value: '${selected.trackId}'),
+              if (selected.begin.correlationId != null)
+                _InlineDatum(
+                  label: 'correlation',
+                  value: '${selected.begin.correlationId}',
+                ),
+              if (selected.beginArgs.isNotEmpty)
+                _InlineDatum(
+                  label: 'begin args',
+                  value: _formatSpanArgs(
+                    trace,
+                    selected,
+                    selected.beginArgs,
+                    phase: _SpanArgPhase.begin,
+                  ),
+                ),
+              if (selected.endArgs.isNotEmpty)
+                _InlineDatum(
+                  label: 'end args',
+                  value: _formatSpanArgs(
+                    trace,
+                    selected,
+                    selected.endArgs,
+                    phase: _SpanArgPhase.end,
+                  ),
+                ),
+            ],
           ),
-          if (selected.endArgs.isNotEmpty)
-            _InlineDatum(label: 'end args', value: selected.endArgs.join(', ')),
+          if (sql != null) ...[
+            const SizedBox(height: 10),
+            Divider(color: colors.outlineVariant, height: 1),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 16,
+              runSpacing: 10,
+              children: [
+                _InlineDatum(label: 'sql fingerprint', value: sql.fingerprint),
+                _InlineDatum(label: 'sql mode', value: sql.mode),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SelectableText.rich(
+              TextSpan(
+                style: DefaultTextStyle.of(context).style,
+                children: [
+                  TextSpan(
+                    text: 'normalized SQL: ',
+                    style: TextStyle(
+                      color: colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  TextSpan(text: sql.normalizedSql),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+}
+
+enum _SpanArgPhase { begin, end }
+
+String _formatSpanArgs(
+  TraceDocument trace,
+  TraceSpan span,
+  List<int> args, {
+  required _SpanArgPhase phase,
+}) {
+  switch ((span.spanId, phase)) {
+    case (BuiltinSpans.sqlite3Open, _SpanArgPhase.begin):
+      return _joinNamedArgs([('filename', _stringArg(trace, args, 0))]);
+    case (BuiltinSpans.sqlite3OpenV2, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('filename', _stringArg(trace, args, 0)),
+        ('flags', _intArg(args, 1)),
+        ('vfs', _stringArg(trace, args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3PrepareV2, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('db', _ptrArg(args, 0)),
+        ('sql', _prepareSqlSummary(trace, span)),
+      ]);
+    case (BuiltinSpans.sqlite3PrepareV3, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('db', _ptrArg(args, 0)),
+        ('sql', _prepareSqlSummary(trace, span)),
+        ('flags', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3PrepareV2, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3PrepareV3, _SpanArgPhase.end):
+      return _joinNamedArgs([
+        ('stmt', _ptrArg(args, 0)),
+        ('rc', _intArg(args, 1)),
+      ]);
+    case (BuiltinSpans.sqlite3Step, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3Reset, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3Finalize, _SpanArgPhase.begin):
+      return _joinNamedArgs([('stmt', _stmtArg(trace, span, args, 0))]);
+    case (BuiltinSpans.sqlite3Step, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3Reset, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3Finalize, _SpanArgPhase.end):
+      return _joinNamedArgs([('rc', _intArg(args, 0))]);
+    case (BuiltinSpans.sqlite3BindNull, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+      ]);
+    case (BuiltinSpans.sqlite3BindInt, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3BindInt64, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+        ('value', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3BindDouble, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+        ('bits', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3BindText, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3BindBlob, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('idx', _intArg(args, 1)),
+        ('len', _intArg(args, 2)),
+      ]);
+    case (BuiltinSpans.sqlite3ClearBindings, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnCount, _SpanArgPhase.begin):
+      return _joinNamedArgs([('stmt', _stmtArg(trace, span, args, 0))]);
+    case (BuiltinSpans.sqlite3ColumnInt, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnInt64, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnDouble, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnText, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnBlob, _SpanArgPhase.begin):
+    case (BuiltinSpans.sqlite3ColumnBytes, _SpanArgPhase.begin):
+      return _joinNamedArgs([
+        ('stmt', _stmtArg(trace, span, args, 0)),
+        ('col', _intArg(args, 1)),
+      ]);
+    case (BuiltinSpans.sqlite3BindNull, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindInt, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindInt64, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindDouble, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindText, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3BindBlob, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ClearBindings, _SpanArgPhase.end):
+      return _joinNamedArgs([('rc', _intArg(args, 0))]);
+    case (BuiltinSpans.sqlite3ColumnCount, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnInt, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnInt64, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnDouble, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnText, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnBlob, _SpanArgPhase.end):
+    case (BuiltinSpans.sqlite3ColumnBytes, _SpanArgPhase.end):
+      return _joinNamedArgs([('value', _intArg(args, 0))]);
+    default:
+      return args.join(', ');
+  }
+}
+
+String _spanArgsSummary(TraceDocument trace, TraceSpan span) {
+  final parts = [
+    if (span.beginArgs.isNotEmpty)
+      'begin ${_formatSpanArgs(trace, span, span.beginArgs, phase: _SpanArgPhase.begin)}',
+    if (span.endArgs.isNotEmpty)
+      'end ${_formatSpanArgs(trace, span, span.endArgs, phase: _SpanArgPhase.end)}',
+  ];
+  return parts.isEmpty ? '-' : parts.join(' / ');
+}
+
+String _prepareSqlSummary(TraceDocument trace, TraceSpan span) {
+  final details = trace.prepareSqlForSpan(span);
+  if (details == null) return _intArg(span.beginArgs, 1);
+  if (details.fingerprint == 'raw') {
+    return _truncateForTable(details.normalizedSql);
+  }
+  return '${_shortFingerprint(details.fingerprint)} ${_truncateForTable(details.normalizedSql)}';
+}
+
+String _joinNamedArgs(List<(String, String)> args) {
+  return [
+    for (final (name, value) in args)
+      if (value.isNotEmpty) '$name=$value',
+  ].join(', ');
+}
+
+String _stringArg(TraceDocument trace, List<int> args, int index) {
+  if (index >= args.length) return '';
+  final id = args[index];
+  final value = trace.trace.strings[id];
+  if (value == null) return '$id';
+  return '"${_truncateForTable(value)}"';
+}
+
+String _stmtArg(
+  TraceDocument trace,
+  TraceSpan span,
+  List<int> args,
+  int index,
+) {
+  final pointer = _ptrArg(args, index);
+  final sql = trace.sqlForSpan(span);
+  if (sql == null) return pointer;
+  return '$pointer ${_shortFingerprint(sql.fingerprint)} ${_truncateForTable(sql.normalizedSql, maxLength: 96)}';
+}
+
+String _ptrArg(List<int> args, int index) {
+  if (index >= args.length) return '';
+  final value = args[index];
+  return '0x${value.toRadixString(16)}';
+}
+
+String _intArg(List<int> args, int index) {
+  if (index >= args.length) return '';
+  return '${args[index]}';
+}
+
+String _truncateForTable(String value, {int maxLength = 140}) {
+  if (value.length <= maxLength) return value;
+  return '${value.substring(0, maxLength - 1)}...';
 }
 
 class PeerComparisonTable extends StatelessWidget {
@@ -1584,109 +2822,173 @@ class PeerSpanBreakdown extends StatelessWidget {
   }
 }
 
+class PeerSqlFingerprintBreakdown extends StatelessWidget {
+  const PeerSqlFingerprintBreakdown({super.key, required this.compare});
+
+  final CompareDocument compare;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <List<String>>[];
+    for (final peer in compare.peers) {
+      final sample = peer.samples
+          .where((sample) => sample.status == 'ok')
+          .firstOrNull;
+      if (sample == null) {
+        rows.add([peer.name, peer.status, '-', '-', '-', '-']);
+        continue;
+      }
+      if (sample.sqlFingerprintGroups.isEmpty) {
+        rows.add([peer.name, 'no SQL fingerprints', '-', '-', '-', '-']);
+        continue;
+      }
+      for (final group in sample.sqlFingerprintGroups.take(8)) {
+        rows.add([
+          peer.name,
+          _shortFingerprint(group.fingerprint),
+          '${group.prepareCount}',
+          formatNs(group.prepareTotalNs),
+          formatNs(group.prepareP90Ns),
+          group.normalizedSql,
+        ]);
+      }
+    }
+    return _SimpleArtifactTable(
+      headers: const ['peer', 'fingerprint', 'prepares', 'total', 'p90', 'sql'],
+      rows: rows,
+    );
+  }
+}
+
+String _shortFingerprint(String fingerprint) {
+  const prefix = 'sqlfp:v1:';
+  if (!fingerprint.startsWith(prefix)) return fingerprint;
+  final hash = fingerprint.substring(prefix.length);
+  return hash.length <= 8 ? fingerprint : '$prefix${hash.substring(0, 8)}';
+}
+
 class SpanIndexPanel extends StatelessWidget {
   const SpanIndexPanel({
     super.key,
     required this.trace,
     required this.spans,
+    required this.totalMatches,
+    required this.visibleOnly,
     required this.selected,
     required this.filterController,
     required this.onFilterChanged,
+    required this.onVisibleOnlyChanged,
     required this.onSelected,
   });
 
   final TraceDocument trace;
   final List<TraceSpan> spans;
+  final int totalMatches;
+  final bool visibleOnly;
   final TraceSpan? selected;
   final TextEditingController filterController;
   final ValueChanged<String> onFilterChanged;
+  final ValueChanged<bool> onVisibleOnlyChanged;
   final ValueChanged<TraceSpan> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    final visibleRows = spans.take(300).toList();
-    final omitted = spans.length - visibleRows.length;
     final colors = Theme.of(context).colorScheme;
+    final tableHeight = math.min(
+      420.0,
+      42.0 + math.max(1, spans.length) * _spanIndexRowHeight,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: filterController,
-                onChanged: onFilterChanged,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.search),
-                  labelText: 'Filter spans by name, track, or correlation',
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final search = TextField(
+              controller: filterController,
+              onChanged: onFilterChanged,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.search),
+                labelText:
+                    'Filter spans by name, SQL, args, track, or correlation',
               ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              '${spans.length} matches',
-              style: TextStyle(
-                color: colors.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+            );
+            final tools = _SpanIndexScopeTools(
+              visibleOnly: visibleOnly,
+              visibleMatches: spans.length,
+              totalMatches: totalMatches,
+              onVisibleOnlyChanged: onVisibleOnlyChanged,
+            );
+            if (constraints.maxWidth < 780) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  search,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: tools),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: search),
+                const SizedBox(width: 12),
+                tools,
+              ],
+            );
+          },
         ),
         const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowHeight: 34,
-            dataRowMinHeight: 34,
-            dataRowMaxHeight: 42,
-            columns: const [
-              DataColumn(label: Text('span')),
-              DataColumn(label: Text('start'), numeric: true),
-              DataColumn(label: Text('duration'), numeric: true),
-              DataColumn(label: Text('track'), numeric: true),
-              DataColumn(label: Text('correlation'), numeric: true),
-              DataColumn(label: Text('args')),
-            ],
-            rows: [
-              for (final (index, span) in visibleRows.indexed)
-                DataRow(
-                  key: ValueKey('span-row-$index'),
-                  selected: identical(span, selected),
-                  onSelectChanged: (_) => onSelected(span),
-                  cells: [
-                    DataCell(
-                      Text(
-                        trace.trace.spanName(span.spanId),
-                        key: ValueKey('span-row-$index-name'),
-                      ),
-                    ),
-                    DataCell(Text(formatNs(_startOffsetNs(span)))),
-                    DataCell(Text(formatNs(span.durationNs))),
-                    DataCell(Text('${span.trackId}')),
-                    DataCell(Text('${span.begin.correlationId ?? '-'}')),
-                    DataCell(
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 340),
-                        child: Text(
-                          _argsSummary(span),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+        SizedBox(
+          height: tableHeight,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: _spanIndexTableWidth,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: colors.outlineVariant),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(
+                  children: [
+                    const _SpanIndexHeaderRow(),
+                    Divider(height: 1, color: colors.outlineVariant),
+                    Expanded(
+                      child: spans.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No matching spans',
+                                style: TextStyle(
+                                  color: colors.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              itemExtent: _spanIndexRowHeight,
+                              itemCount: spans.length,
+                              itemBuilder: (context, index) {
+                                final span = spans[index];
+                                return _SpanIndexRow(
+                                  key: ValueKey('span-row-$index'),
+                                  trace: trace,
+                                  span: span,
+                                  index: index,
+                                  selected: identical(span, selected),
+                                  startOffsetNs: _startOffsetNs(span),
+                                  onSelected: onSelected,
+                                );
+                              },
+                            ),
                     ),
                   ],
                 ),
-            ],
+              ),
+            ),
           ),
         ),
-        if (omitted > 0) ...[
-          const SizedBox(height: 8),
-          Text(
-            'Showing the first ${visibleRows.length}; refine the filter to narrow $omitted more spans.',
-            style: TextStyle(color: colors.onSurfaceVariant),
-          ),
-        ],
       ],
     );
   }
@@ -1696,13 +2998,236 @@ class SpanIndexPanel extends StatelessWidget {
     final start = events.isEmpty ? 0 : events.first.timestampNs;
     return math.max(0, span.startNs - start);
   }
+}
 
-  String _argsSummary(TraceSpan span) {
-    final parts = [
-      if (span.beginArgs.isNotEmpty) 'begin ${span.beginArgs.join(',')}',
-      if (span.endArgs.isNotEmpty) 'end ${span.endArgs.join(',')}',
-    ];
-    return parts.isEmpty ? '-' : parts.join(' / ');
+class _SpanIndexScopeTools extends StatelessWidget {
+  const _SpanIndexScopeTools({
+    required this.visibleOnly,
+    required this.visibleMatches,
+    required this.totalMatches,
+    required this.onVisibleOnlyChanged,
+  });
+
+  final bool visibleOnly;
+  final int visibleMatches;
+  final int totalMatches;
+  final ValueChanged<bool> onVisibleOnlyChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final countLabel = visibleOnly
+        ? '$visibleMatches/$totalMatches matches'
+        : '$visibleMatches matches';
+    return Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Tooltip(
+          message:
+              'Limit the span index to rows overlapping the current timeline window',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () => onVisibleOnlyChanged(!visibleOnly),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    key: const ValueKey('span-index-visible-toggle'),
+                    value: visibleOnly,
+                    onChanged: onVisibleOnlyChanged,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Visible window only',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Text(
+          countLabel,
+          style: TextStyle(
+            color: colors.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+const double _spanIndexRowHeight = 42;
+const double _spanIndexSpanWidth = 230;
+const double _spanIndexStartWidth = 120;
+const double _spanIndexDurationWidth = 120;
+const double _spanIndexTrackWidth = 76;
+const double _spanIndexCorrelationWidth = 120;
+const double _spanIndexArgsWidth = 420;
+const double _spanIndexTableWidth =
+    _spanIndexSpanWidth +
+    _spanIndexStartWidth +
+    _spanIndexDurationWidth +
+    _spanIndexTrackWidth +
+    _spanIndexCorrelationWidth +
+    _spanIndexArgsWidth;
+
+class _SpanIndexHeaderRow extends StatelessWidget {
+  const _SpanIndexHeaderRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
+      child: DefaultTextStyle(
+        style: TextStyle(
+          color: colors.onSurfaceVariant,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+        child: const Row(
+          children: [
+            _SpanIndexHeaderCell(width: _spanIndexSpanWidth, label: 'span'),
+            _SpanIndexHeaderCell(width: _spanIndexStartWidth, label: 'start'),
+            _SpanIndexHeaderCell(
+              width: _spanIndexDurationWidth,
+              label: 'duration',
+            ),
+            _SpanIndexHeaderCell(width: _spanIndexTrackWidth, label: 'track'),
+            _SpanIndexHeaderCell(
+              width: _spanIndexCorrelationWidth,
+              label: 'correlation',
+            ),
+            _SpanIndexHeaderCell(width: _spanIndexArgsWidth, label: 'args'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SpanIndexHeaderCell extends StatelessWidget {
+  const _SpanIndexHeaderCell({required this.width, required this.label});
+
+  final double width;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: 36,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(label, overflow: TextOverflow.ellipsis),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpanIndexRow extends StatelessWidget {
+  const _SpanIndexRow({
+    super.key,
+    required this.trace,
+    required this.span,
+    required this.index,
+    required this.selected,
+    required this.startOffsetNs,
+    required this.onSelected,
+  });
+
+  final TraceDocument trace;
+  final TraceSpan span;
+  final int index;
+  final bool selected;
+  final int startOffsetNs;
+  final ValueChanged<TraceSpan> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final background = selected
+        ? colors.primaryContainer.withValues(alpha: 0.70)
+        : index.isEven
+        ? colors.surface
+        : colors.surfaceContainerHighest.withValues(alpha: 0.20);
+    final textStyle = TextStyle(
+      color: selected ? colors.onPrimaryContainer : colors.onSurface,
+      fontSize: 12,
+      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+    );
+    return Material(
+      color: background,
+      child: InkWell(
+        onTap: () => onSelected(span),
+        child: DefaultTextStyle(
+          style: textStyle,
+          child: Row(
+            children: [
+              _SpanIndexCell(
+                width: _spanIndexSpanWidth,
+                child: Text(
+                  trace.trace.spanName(span.spanId),
+                  key: ValueKey('span-row-$index-name'),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexStartWidth,
+                child: Text(formatNs(startOffsetNs)),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexDurationWidth,
+                child: Text(formatNs(span.durationNs)),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexTrackWidth,
+                child: Text('${span.trackId}'),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexCorrelationWidth,
+                child: Text('${span.begin.correlationId ?? '-'}'),
+              ),
+              _SpanIndexCell(
+                width: _spanIndexArgsWidth,
+                child: Text(
+                  _spanArgsSummary(trace, span),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpanIndexCell extends StatelessWidget {
+  const _SpanIndexCell({required this.width, required this.child});
+
+  final double width;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: _spanIndexRowHeight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      ),
+    );
   }
 }
 
@@ -1995,6 +3520,92 @@ class _ToolGuideTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _InsightList extends StatelessWidget {
+  const _InsightList({required this.insights});
+
+  final List<BenchmarkInsight> insights;
+
+  @override
+  Widget build(BuildContext context) {
+    if (insights.isEmpty) {
+      return const Text('No interpreted findings for this artifact.');
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final insight in insights)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _InsightRow(insight: insight),
+          ),
+      ],
+    );
+  }
+}
+
+class _InsightRow extends StatelessWidget {
+  const _InsightRow({required this.insight});
+
+  final BenchmarkInsight insight;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final color = _insightColor(colors, insight.severity);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(_insightIcon(insight.severity), color: color, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                insight.title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                insight.body,
+                style: TextStyle(color: colors.onSurfaceVariant, height: 1.25),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Color _insightColor(ColorScheme colors, String severity) {
+  return switch (severity) {
+    'critical' => colors.error,
+    'warning' => const Color(0xff8a5a00),
+    'good' => const Color(0xff177245),
+    _ => colors.primary,
+  };
+}
+
+IconData _insightIcon(String severity) {
+  return switch (severity) {
+    'critical' => Icons.error_outline,
+    'warning' => Icons.warning_amber,
+    'good' => Icons.check_circle_outline,
+    _ => Icons.info_outline,
+  };
+}
+
+int _insightSeverityRank(String severity) {
+  return switch (severity) {
+    'critical' => 0,
+    'warning' => 1,
+    'info' => 2,
+    'good' => 3,
+    _ => 4,
+  };
 }
 
 class _InspectorPanel extends StatelessWidget {

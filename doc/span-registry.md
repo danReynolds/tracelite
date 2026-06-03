@@ -158,7 +158,13 @@ Without these, a trace cannot be safely compared to another trace — engine ver
 
 1. **Wide vs narrow API coverage.** v0.1 wraps the most common SQLite calls (~40 of ~150). Should the C shim grow to wrap *every* SQLite API or stay narrow? Wide coverage future-proofs the shim; narrow keeps the binary small. Probably driven by encountered gaps in real peer benchmarks.
 
-2. **String IDs for parameterized SQL.** When a peer library calls `prepare(sql)` repeatedly with the same SQL, the string-id arg points at the same pool entry — perfect dedup. But ORM-generated SQL is often slightly different per call (reordered WHERE clauses, etc.). Need a `sql_fingerprint_id` arg derived from a normalized form for fair grouping. Reserved as a future arg type / METADATA extension.
+2. **String IDs for parameterized SQL.** The SQLite shim now stores
+   fingerprinted prepare labels by default:
+   `sqlfp:v1:<hash>:<normalized-sql>`, with literal values replaced by `?`.
+   Raw SQL capture is opt-in via `TRACELITE_SQL_CAPTURE=raw` or
+   `TRACELITE_RAW_SQL=1`. A dedicated `sql_fingerprint_id` arg type or
+   metadata table could still replace the string-label convention later, but
+   committed artifacts no longer need raw SQL text for query-shape grouping.
 
 3. **`bind` event volume.** A 10-column INSERT generates 10 `sqlite3_bind_*` events. Wide-batch inserts (10K rows) = ~130K events per call, which sizes the ring at audit-time. Optionally elide bind events at the shim level (configurable via env var); the aggregator sees a single `sqlite3_bind_batch_summary` instead. Reserved span ID `0x107F` for the summary form when it lands.
 

@@ -5,6 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tracelite/tracelite.dart';
 import 'package:tracelite_visualizer/main.dart';
+import 'package:tracelite_visualizer/src/workspace.dart';
+
+const _denseWidgetSpanCount = 3000;
+const _heavyNativeTraceTags = ['heavy', 'native-trace'];
+const _nativeTraceTags = ['native-trace'];
 
 void main() {
   testWidgets('renders the visualizer shell', (tester) async {
@@ -19,83 +24,272 @@ void main() {
     expect(find.text('Open'), findsOneWidget);
   });
 
-  testWidgets('renders loaded trace and compare views at desktop size', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 920);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'renders loaded trace, compare, and decision views at desktop size',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 920);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final temp = Directory.systemTemp.createTempSync('tracelite-viz-ui-');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    _writeDemoWorkspace(temp);
+      final temp = Directory.systemTemp.createTempSync('tracelite-viz-ui-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      _writeDemoWorkspace(temp);
 
-    await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Workspace'), findsOneWidget);
-    expect(find.text('Loaded Artifacts'), findsOneWidget);
-    expect(find.text('Tools'), findsOneWidget);
-    expect(find.text('Raw Trace'), findsOneWidget);
-    expect(find.text('Peer Compare'), findsOneWidget);
-    expect(find.textContaining('point-select'), findsWidgets);
+      expect(find.text('Workspace'), findsOneWidget);
+      expect(find.text('Workspace Insights'), findsOneWidget);
+      expect(find.text('Loaded Artifacts'), findsOneWidget);
+      expect(find.text('Tools'), findsOneWidget);
+      expect(find.text('Raw Trace'), findsOneWidget);
+      expect(find.text('Peer Compare'), findsOneWidget);
+      expect(find.text('Decision Review'), findsOneWidget);
+      expect(find.textContaining('point-select'), findsWidgets);
 
-    await tester.tap(find.text('Trace'));
-    await tester.pumpAndSettle();
-    expect(find.text('Trace Inspector'), findsOneWidget);
-    expect(find.text('Trace Tools'), findsOneWidget);
-    expect(find.text('Minimap'), findsOneWidget);
-    expect(find.text('Zoom'), findsOneWidget);
-    expect(find.text('Pan'), findsOneWidget);
-    expect(find.text('Preview'), findsOneWidget);
-    expect(find.text('Timeline'), findsOneWidget);
-    expect(find.text('No span selected'), findsOneWidget);
+      await tester.tap(find.text('Trace'));
+      await tester.pumpAndSettle();
+      expect(find.text('Trace Inspector'), findsOneWidget);
+      expect(find.text('Trace Tools'), findsOneWidget);
+      expect(find.text('Minimap'), findsOneWidget);
+      expect(find.text('Zoom'), findsWidgets);
+      expect(find.text('Pan'), findsOneWidget);
+      expect(find.text('Preview'), findsOneWidget);
+      expect(find.text('Keyboard'), findsOneWidget);
+      expect(find.text('Timeline'), findsOneWidget);
+      expect(find.byType(Slider), findsOneWidget);
+      expect(find.text('click select'), findsOneWidget);
+      expect(find.byIcon(Icons.center_focus_strong), findsOneWidget);
+      expect(find.text('No span selected'), findsOneWidget);
 
-    await tester.tap(find.text('Compare'));
-    await tester.pumpAndSettle();
-    expect(find.text('Peer Comparison'), findsOneWidget);
-    expect(find.text('Compare Tools'), findsOneWidget);
-    expect(find.text('Measured Mean'), findsOneWidget);
-    expect(find.text('Peer Metrics'), findsOneWidget);
-    expect(find.text('sqlite3'), findsWidgets);
-  });
+      await tester.tap(find.text('Compare'));
+      await tester.pumpAndSettle();
+      expect(find.text('Peer Comparison'), findsOneWidget);
+      expect(find.text('Compare Insights'), findsOneWidget);
+      expect(find.text('Compare Tools'), findsOneWidget);
+      expect(find.text('Measured Mean'), findsOneWidget);
+      expect(find.text('Peer Metrics'), findsOneWidget);
+      expect(find.text('SQL Query Shapes'), findsOneWidget);
+      expect(find.text('SQL Fingerprints'), findsOneWidget);
+      expect(
+        find.textContaining('INSERT INTO TRACELITE_ITEMS'),
+        findsOneWidget,
+      );
+      expect(find.text('sqlite3'), findsWidgets);
 
-  testWidgets('renders dense trace with searchable linked span index', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 1200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.tap(find.text('Decision'));
+      await tester.pumpAndSettle();
+      expect(find.text('Decision Review'), findsOneWidget);
+      expect(find.text('Decision Insights'), findsOneWidget);
+      expect(find.text('Decision Tools'), findsOneWidget);
+      expect(find.text('accepted'), findsWidgets);
+      expect(find.text('improvement'), findsWidgets);
+      expect(find.text('Primary Gate'), findsOneWidget);
+      expect(find.text('Guardrails'), findsOneWidget);
 
-    final temp = Directory.systemTemp.createTempSync('tracelite-viz-dense-');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    await _writeDenseTraceWorkspace(temp, spanCount: 12000);
+      await tester.drag(
+        find.byKey(const ValueKey('decision-page-scroll')),
+        const Offset(0, -800),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Decision Policy'), findsOneWidget);
+      expect(find.text('Gate Status'), findsOneWidget);
+      expect(find.text('Primary Comparisons'), findsOneWidget);
+      expect(find.text('Guardrail Findings'), findsOneWidget);
+      expect(find.text('elapsed_ns'), findsWidgets);
+      expect(find.text('-6%'), findsWidgets);
+    },
+  );
 
-    await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'renders dense trace with searchable linked span index',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.tap(find.text('Trace'));
-    await tester.pumpAndSettle();
-    expect(find.text('Trace Inspector'), findsOneWidget);
-    expect(find.text('12000'), findsWidgets);
+      final temp = Directory.systemTemp.createTempSync('tracelite-viz-dense-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      await _writeDenseTraceWorkspace(temp, spanCount: _denseWidgetSpanCount);
 
-    await tester.drag(find.byType(ListView).last, const Offset(0, -900));
-    await tester.pumpAndSettle();
-    expect(find.text('Span Index'), findsOneWidget);
-    expect(find.text('12000 matches'), findsOneWidget);
+      await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+      await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
-    await tester.pumpAndSettle();
-    expect(find.text('sqlite3_step'), findsWidgets);
+      await tester.tap(find.text('Trace'));
+      await _pumpInteraction(tester);
+      expect(find.text('Trace Inspector'), findsOneWidget);
+      expect(find.text('$_denseWidgetSpanCount'), findsWidgets);
 
-    await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
-    await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView).last, const Offset(0, 900));
-    await tester.pumpAndSettle();
-    expect(find.text('Selected Span'), findsOneWidget);
-  });
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, -900),
+      );
+      await _pumpInteraction(tester);
+      expect(find.text('Span Index'), findsOneWidget);
+      expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
+
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, -700),
+      );
+      await _pumpInteraction(tester);
+      expect(
+        find.textContaining('Visible Span Aggregation', skipOffstage: false),
+        findsOneWidget,
+      );
+
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, 700),
+      );
+      await _pumpInteraction(tester);
+      await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
+      await _pumpInteraction(tester);
+      expect(find.text('sqlite3_step'), findsWidgets);
+
+      await tester.enterText(find.byType(TextField).last, 'target_dense_span');
+      await _pumpInteraction(tester);
+      expect(find.text('1 matches'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
+      await _pumpInteraction(tester);
+      await tester.enterText(find.byType(TextField).last, '');
+      await _pumpInteraction(tester);
+      expect(find.text('$_denseWidgetSpanCount matches'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('span-index-visible-toggle')));
+      await _pumpInteraction(tester);
+      expect(find.text('Visible window only'), findsOneWidget);
+      expect(find.text('$_denseWidgetSpanCount matches'), findsNothing);
+      expect(
+        find.byWidgetPredicate((widget) {
+          return widget is Text &&
+              widget.data != null &&
+              RegExp(
+                '^\\d+/$_denseWidgetSpanCount matches\$',
+              ).hasMatch(widget.data!) &&
+              widget.data !=
+                  '$_denseWidgetSpanCount/$_denseWidgetSpanCount matches';
+        }),
+        findsOneWidget,
+      );
+
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, 900),
+      );
+      await _pumpInteraction(tester);
+      expect(find.text('Selected Span'), findsOneWidget);
+      expect(
+        find.textContaining('target_dense_span', findRichText: true),
+        findsWidgets,
+      );
+    },
+    tags: _heavyNativeTraceTags,
+  );
+
+  test(
+    'TraceDocument visible range queries find late dense spans',
+    () async {
+      final temp = Directory.systemTemp.createTempSync(
+        'tracelite-viz-dense-query-',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      await _writeDenseTraceWorkspace(temp, spanCount: 12000);
+
+      final workspace = await VisualizerWorkspace.load(temp.path);
+      final trace = workspace.traces.single;
+      final target = trace.completeSpans.lastWhere(
+        (span) => trace.trace.spanName(span.spanId) == 'target_dense_span',
+      );
+      final visible = trace.visibleSpansIn(target.startNs, target.startNs + 1);
+
+      expect(visible, contains(target));
+      expect(
+        trace.visibleSpanCountIn(target.startNs, target.startNs + 1),
+        greaterThanOrEqualTo(1),
+      );
+    },
+    tags: _nativeTraceTags,
+  );
+
+  testWidgets(
+    'decodes SQLite statement SQL fingerprints in trace views',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final temp = Directory.systemTemp.createTempSync('tracelite-viz-sql-');
+      addTearDown(() => temp.deleteSync(recursive: true));
+      await _writeSqlTraceWorkspace(temp);
+
+      await tester.pumpWidget(TraceliteVisualizerApp(initialPath: temp.path));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Trace'));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, -700),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Span Index'), findsOneWidget);
+      expect(find.textContaining('sqlfp:v1:2a1aa0dd'), findsWidgets);
+      expect(
+        find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
+        findsWidgets,
+      );
+
+      await tester.enterText(find.byType(TextField).last, 'TRACELITE_ITEMS');
+      await tester.pumpAndSettle();
+      expect(find.text('2 matches'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).last, 'sqlite3_step');
+      await tester.pumpAndSettle();
+      expect(find.text('1 matches'), findsOneWidget);
+      expect(
+        find.textContaining('SELECT * FROM TRACELITE_ITEMS WHERE ID = ?'),
+        findsWidgets,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('span-row-0-name')));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('trace-page-scroll')),
+        const Offset(0, 700),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Selected Span'), findsOneWidget);
+      expect(find.text('sqlite3_step'), findsWidgets);
+      expect(
+        find.textContaining('sql fingerprint', findRichText: true),
+        findsWidgets,
+      );
+      expect(
+        find.textContaining('fingerprinted', findRichText: true),
+        findsWidgets,
+      );
+      expect(
+        find.textContaining(
+          'SELECT * FROM TRACELITE_ITEMS WHERE ID = ?',
+          findRichText: true,
+        ),
+        findsWidgets,
+      );
+    },
+    tags: _nativeTraceTags,
+  );
+}
+
+Future<void> _pumpInteraction(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 100));
 }
 
 void _writeDemoWorkspace(Directory dir) {
@@ -147,11 +341,90 @@ void _writeDemoWorkspace(Directory dir) {
                   'p99_ns': 3000,
                 },
               ],
+              'sql_fingerprint_groups': [
+                {
+                  'fingerprint': 'sqlfp:v1:2a1aa0dda20c1116',
+                  'normalized_sql':
+                      'INSERT INTO TRACELITE_ITEMS(ID, NAME) VALUES (?, ?)',
+                  'prepare_count': 10,
+                  'prepare_total_ns': 700000,
+                  'prepare_p50_ns': 40000,
+                  'prepare_p90_ns': 80000,
+                  'prepare_p99_ns': 90000,
+                },
+              ],
             },
           ],
           'capabilities': ['sql'],
         },
       ],
+    }),
+  );
+  File('${dir.path}/decision.json').writeAsStringSync(
+    jsonEncode({
+      'schema': 'tracelite.decision.v1',
+      'generated_at': '2026-05-12T00:05:00Z',
+      'decision': 'accepted',
+      'baseline_path': 'baseline/manifest.json',
+      'candidate_path': 'candidate/manifest.json',
+      'scenario_count': 1,
+      'policy': {
+        'expectation': 'improvement',
+        'primary_peer': 'sqlite3',
+        'primary_metric': 'elapsed_ns',
+        'primary_threshold_percent': 5.0,
+        'max_regression_percent': 3.0,
+        'max_cv_percent': 15.0,
+      },
+      'gates': {
+        'trace_health': {'status': 'passed', 'issues': []},
+        'primary': {
+          'status': 'passed',
+          'comparisons': [
+            {
+              'role': 'primary',
+              'scenario': 'point-select',
+              'peer': 'sqlite3',
+              'metric': 'elapsed_ns',
+              'status': 'improved',
+              'gate_effect': 'pass',
+              'baseline_status': 'ok',
+              'candidate_status': 'ok',
+              'baseline_samples': 5,
+              'candidate_samples': 5,
+              'baseline_mean': 1000000.0,
+              'candidate_mean': 940000.0,
+              'delta': -60000.0,
+              'change_percent': -6.0,
+              'max_cv_percent': 2.0,
+              'nonparametric_p_value': 0.031,
+            },
+          ],
+        },
+        'guardrails': {
+          'status': 'passed',
+          'comparisons': [
+            {
+              'role': 'guardrail',
+              'scenario': 'point-select',
+              'peer': 'sqlite3',
+              'metric': 'sqlite3_step_total_ns',
+              'status': 'similar',
+              'gate_effect': 'pass',
+              'baseline_status': 'ok',
+              'candidate_status': 'ok',
+              'baseline_samples': 5,
+              'candidate_samples': 5,
+              'baseline_mean': 900000.0,
+              'candidate_mean': 880000.0,
+              'delta': -20000.0,
+              'change_percent': -2.2,
+              'max_cv_percent': 2.8,
+              'nonparametric_p_value': 0.250,
+            },
+          ],
+        },
+      },
     }),
   );
 }
@@ -177,11 +450,48 @@ Future<void> _writeDenseTraceWorkspace(
       category: 'sqlite',
     );
   }
+  recorder.registerSpan(
+    userSpanIdStart + 4,
+    'target_dense_span',
+    category: 'sqlite',
+  );
   for (var i = 0; i < spanCount; i++) {
-    final spanId = userSpanIdStart + (i % 4);
+    final spanId = i == spanCount - 1
+        ? userSpanIdStart + 4
+        : userSpanIdStart + (i % 4);
     recorder.begin(spanId, args: [i]);
     recorder.end(spanId, args: [i % 17]);
   }
+  recorder.detach();
+}
+
+Future<void> _writeSqlTraceWorkspace(Directory dir) async {
+  final runtime = await _ensureRuntimeLibrary();
+  final tracePath = '${dir.path}/sql.tlt-region';
+  TraceRegion.createFile(tracePath, ringDataWords: 1 << 14);
+  final recorder = TraceRecorder.attach(
+    regionPath: tracePath,
+    runtimeLibraryPath: runtime.absolute.path,
+    processName: 'visualizer_sql_test',
+    threadName: 'main',
+  );
+  expect(recorder.isActive, isTrue);
+
+  final sqlId = recorder.internString(
+    'sqlfp:v1:2a1aa0dda20c1116:SELECT * FROM TRACELITE_ITEMS WHERE ID = ?',
+  );
+  recorder.begin(
+    BuiltinSpans.sqlite3PrepareV3,
+    args: [0x101, sqlId, 0],
+    correlationId: 99,
+  );
+  recorder.end(
+    BuiltinSpans.sqlite3PrepareV3,
+    args: [0x202, 0],
+    correlationId: 99,
+  );
+  recorder.begin(BuiltinSpans.sqlite3Step, args: [0x202], correlationId: 99);
+  recorder.end(BuiltinSpans.sqlite3Step, args: [101], correlationId: 99);
   recorder.detach();
 }
 

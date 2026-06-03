@@ -1,3 +1,7 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 /*
  * tracelite — runtime implementation.
  *
@@ -27,29 +31,50 @@
 
 #include "tracelite_runtime.h"
 
-#include <fcntl.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#endif
+
+#if defined(_MSC_VER)
+#define TLT_THREAD_LOCAL __declspec(thread)
+#else
+#define TLT_THREAD_LOCAL __thread
+#endif
 
 /* ---- Globals ---- */
 
 volatile int tlt_active = 0;
 
+#ifdef _WIN32
+static HANDLE g_region_file = INVALID_HANDLE_VALUE;
+static HANDLE g_region_mapping = NULL;
+#else
 static int g_region_fd = -1;
+#endif
 static void* g_region_base = NULL;
 static size_t g_region_size = 0;
 static tlt_region_header_t* g_region = NULL;
 static tlt_registry_slot_t* g_registry = NULL;
 static uint8_t* g_string_pool = NULL;
 static uint8_t* g_ring_section = NULL;
-static __thread int tlt_my_track_id = -1;
-static __thread tlt_ring_header_t* tlt_my_ring = NULL;
+static _Atomic(uint64_t) g_runtime_generation = 1;
+static TLT_THREAD_LOCAL int tlt_my_track_id = -1;
+static TLT_THREAD_LOCAL tlt_ring_header_t* tlt_my_ring = NULL;
+static TLT_THREAD_LOCAL uint64_t tlt_my_generation = 0;
 
 static uint64_t g_start_monotonic_ns = 0;
 
@@ -57,13 +82,28 @@ static uint64_t g_start_monotonic_ns = 0;
 static uint64_t monotonic_ns(void);
 static tlt_ring_header_t* ring_for_track(int track_id);
 static int valid_track_id(int track_id);
+static int has_active_tracks(void);
+static void reset_mapping_state(void);
+static uint64_t current_runtime_generation(void);
 
 /* ---- Clock ---- */
 
 static uint64_t monotonic_ns(void) {
+#ifdef _WIN32
+  LARGE_INTEGER counter;
+  LARGE_INTEGER frequency;
+  if (!QueryPerformanceCounter(&counter) ||
+      !QueryPerformanceFrequency(&frequency) ||
+      frequency.QuadPart <= 0) {
+    return 0;
+  }
+  return (uint64_t)(((long double)counter.QuadPart * 1000000000.0L) /
+                    (long double)frequency.QuadPart);
+#else
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+#endif
 }
 
 uint64_t tlt_now_ns(void) {
@@ -73,6 +113,8 @@ uint64_t tlt_now_ns(void) {
 /* ---- Attach ---- */
 
 int tlt_attach(const char* explicit_path) {
+  if (tlt_active) return 0;
+
   const char* path = explicit_path;
   if (!path) path = getenv("TRACELITE_REGION");
   if (!path) {
@@ -80,6 +122,35 @@ int tlt_attach(const char* explicit_path) {
     return -1;
   }
 
+#ifdef _WIN32
+  HANDLE file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    fprintf(stderr, "tracelite: CreateFile(%s) failed\n", path);
+    return -1;
+  }
+
+  LARGE_INTEGER file_size;
+  if (!GetFileSizeEx(file, &file_size) || file_size.QuadPart <= 0) {
+    CloseHandle(file);
+    return -1;
+  }
+
+  HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+  if (!mapping) {
+    CloseHandle(file);
+    return -1;
+  }
+
+  size_t size = (size_t)file_size.QuadPart;
+  void* base = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+  if (!base) {
+    CloseHandle(mapping);
+    CloseHandle(file);
+    return -1;
+  }
+#else
   int fd = open(path, O_RDWR);
   if (fd < 0) {
     fprintf(stderr, "tracelite: open(%s) failed\n", path);
@@ -98,16 +169,28 @@ int tlt_attach(const char* explicit_path) {
     close(fd);
     return -1;
   }
+#endif
 
   tlt_region_header_t* header = (tlt_region_header_t*)base;
   if (header->magic != TRACELITE_REGION_MAGIC ||
       header->format_major != TRACELITE_FORMAT_MAJOR_RUNTIME) {
+#ifdef _WIN32
+    UnmapViewOfFile(base);
+    CloseHandle(mapping);
+    CloseHandle(file);
+#else
     munmap(base, size);
     close(fd);
+#endif
     return -1;
   }
 
+#ifdef _WIN32
+  g_region_file = file;
+  g_region_mapping = mapping;
+#else
   g_region_fd = fd;
+#endif
   g_region_base = base;
   g_region_size = size;
   g_region = header;
@@ -115,22 +198,79 @@ int tlt_attach(const char* explicit_path) {
   g_string_pool = (uint8_t*)base + header->string_pool_offset;
   g_ring_section = (uint8_t*)base + header->producer_ring_offset;
   g_start_monotonic_ns = header->start_monotonic_ns;
+  atomic_fetch_add_explicit(&g_runtime_generation, 1, memory_order_acq_rel);
   tlt_active = 1;
+  atexit(reset_mapping_state);
   return 0;
 }
 
 void tlt_detach(void) {
-  if (tlt_my_track_id >= 0) {
-    tlt_detach_track((uint8_t)tlt_my_track_id);
-    tlt_my_track_id = -1;
-    tlt_my_ring = NULL;
+  int track_id = tlt_current_track_id();
+  if (track_id >= 0) {
+    tlt_detach_track((uint8_t)track_id);
   }
+  tlt_my_track_id = -1;
+  tlt_my_ring = NULL;
+  tlt_my_generation = 0;
+}
+
+int tlt_current_track_id(void) {
+  if (tlt_my_generation != current_runtime_generation()) return -1;
+  return tlt_my_track_id;
+}
+
+void tlt_reset_runtime(void) {
+  if (!tlt_active) return;
+
+  if (g_region && g_registry) {
+    uint32_t max = g_region->max_producers;
+    for (uint32_t i = 0; i < max; i++) {
+      uint8_t state = atomic_load_explicit(
+          (_Atomic(uint8_t)*)&g_registry[i].state,
+          memory_order_acquire);
+      if (state == 1 || state == 2) {
+        atomic_store_explicit((_Atomic(uint8_t)*)&g_registry[i].state, 3,
+                              memory_order_release);
+        ring_for_track((int)i)->producer_state = 3;
+      }
+    }
+  }
+
+  reset_mapping_state();
+}
+
+static void reset_mapping_state(void) {
+#ifdef _WIN32
+  if (g_region_base) UnmapViewOfFile(g_region_base);
+  if (g_region_mapping) CloseHandle(g_region_mapping);
+  if (g_region_file != INVALID_HANDLE_VALUE) CloseHandle(g_region_file);
+  g_region_file = INVALID_HANDLE_VALUE;
+  g_region_mapping = NULL;
+#else
+  if (g_region_base && g_region_size > 0) munmap(g_region_base, g_region_size);
+  if (g_region_fd >= 0) close(g_region_fd);
+  g_region_fd = -1;
+#endif
+  g_region_base = NULL;
+  g_region_size = 0;
+  g_region = NULL;
+  g_registry = NULL;
+  g_string_pool = NULL;
+  g_ring_section = NULL;
+  g_start_monotonic_ns = 0;
+  tlt_my_track_id = -1;
+  tlt_my_ring = NULL;
+  tlt_my_generation = 0;
+  tlt_active = 0;
 }
 
 void tlt_detach_track(uint8_t track_id) {
   if (!tlt_active || !valid_track_id(track_id)) return;
   g_registry[track_id].state = 3;  /* ended */
   ring_for_track(track_id)->producer_state = 3;
+  if (!has_active_tracks()) {
+    reset_mapping_state();
+  }
 }
 
 /* ---- Producer registry ---- */
@@ -167,7 +307,12 @@ int tlt_register_producer(uint8_t kind, const char* process_name, const char* th
 
   tlt_my_track_id = slot;
   tlt_my_ring = ring_for_track(slot);
+  tlt_my_generation = current_runtime_generation();
   return slot;
+}
+
+static uint64_t current_runtime_generation(void) {
+  return atomic_load_explicit(&g_runtime_generation, memory_order_acquire);
 }
 
 static tlt_ring_header_t* ring_for_track(int track_id) {
@@ -177,6 +322,18 @@ static tlt_ring_header_t* ring_for_track(int track_id) {
 
 static int valid_track_id(int track_id) {
   return g_region && track_id >= 0 && (uint32_t)track_id < g_region->max_producers;
+}
+
+static int has_active_tracks(void) {
+  if (!g_region || !g_registry) return 0;
+  uint32_t max = g_region->max_producers;
+  for (uint32_t i = 0; i < max; i++) {
+    uint8_t state = atomic_load_explicit(
+        (_Atomic(uint8_t)*)&g_registry[i].state,
+        memory_order_acquire);
+    if (state == 1 || state == 2) return 1;
+  }
+  return 0;
 }
 
 /* ---- String pool (CAS allocator) ---- */
@@ -283,8 +440,9 @@ static void write_event_with_correlation_on_track_id(uint8_t track_id,
 static void write_event_with_correlation(uint8_t tag, uint16_t span_id,
                          uint64_t correlation_id, int has_correlation,
                          const uint64_t* args, uint8_t arg_count) {
-  if (tlt_my_track_id < 0) return;
-  write_event_with_correlation_on_track_id((uint8_t)tlt_my_track_id, tag,
+  int track_id = tlt_current_track_id();
+  if (track_id < 0) return;
+  write_event_with_correlation_on_track_id((uint8_t)track_id, tag,
                                            span_id, correlation_id,
                                            has_correlation, args, arg_count);
 }

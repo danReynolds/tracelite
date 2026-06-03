@@ -1,298 +1,44 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
-
-import 'package:drift/drift.dart' as drift;
-import 'package:drift/backends.dart' as drift_backend;
-import 'package:drift/native.dart' as drift_native;
-import 'package:resqlite/resqlite.dart' as resqlite;
-import 'package:sqlite3/sqlite3.dart' as sqlite3;
-import 'package:sqlite_async/sqlite_async.dart' as sqlite_async;
 import 'package:tracelite/resqlite.dart' as tracelite_resqlite;
 
-const String narrowBatchInsertScenario = 'narrow-batch-insert';
-const String pointSelectScenario = 'point-select';
-const String feedPagingScenario = 'feed-paging';
-const String syncBurstScenario = 'sync-burst';
-const String chatSimScenario = 'chat-sim';
-const String largeWorkingSetScenario = 'large-working-set';
-const String keyedPkSubscriptionsScenario = 'keyed-pk-subscriptions';
-const String highCardinalityFanoutScenario = 'high-cardinality-fanout';
-const String manyStreamsWriterThroughputScenario =
-    'many-streams-writer-throughput';
-const String sqliteDiagnosticsScenario = 'sqlite-diagnostics';
+import 'peer_contract.dart';
+import 'peer_definitions.dart';
+import 'peer_drift.dart' deferred as drift_adapter;
+import 'peer_resqlite.dart' deferred as resqlite_adapter;
+import 'peer_sqlite3.dart' deferred as sqlite3_adapter;
+import 'peer_sqlite_async.dart' deferred as sqlite_async_adapter;
 
-const List<String> defaultScenarioNames = [
-  narrowBatchInsertScenario,
-  pointSelectScenario,
-  feedPagingScenario,
-  syncBurstScenario,
-  chatSimScenario,
-  largeWorkingSetScenario,
-  keyedPkSubscriptionsScenario,
-  highCardinalityFanoutScenario,
-  manyStreamsWriterThroughputScenario,
-  sqliteDiagnosticsScenario,
-];
+export 'peer_contract.dart';
 
-const int _feedPagingSeed = 0xFEED;
-const int _feedPagingPageSize = 10;
-const int _feedPagingPageCount = 4;
-const int _feedPagingLikeWrites = 8;
-const int _syncBurstChunkSize = 25;
-const int _syncBurstMergeRounds = 3;
-const int _syncBurstMergeRowsPerRound = 10;
-const int _chatSimSeed = 0x5EED;
-const double _chatSimZipfExponent = 1.0;
-const int _largeWorkingSetSeed = 0xB16B00B5;
-const int _largeWorkingSetPayloadLength = 128;
-const int _reactiveSeed = 0xBEEF;
-const int _fanoutSeed = 0xCAFEF0;
-
-const List<String> defaultPeerNames = [
-  'sqlite3',
-  'drift',
-  'sqlite_async',
-  'resqlite',
-];
-
-abstract interface class SqlitePeer {
-  String get name;
-
-  Future<void> open(String path);
-
-  Future<void> close();
-
-  Future<void> execute(String sql, [List<Object?> parameters = const []]);
-
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]);
-
-  Future<void> executeBatch(String sql, List<List<Object?>> parameterSets);
-}
-
-abstract interface class ReactiveSqlitePeer implements SqlitePeer {
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  });
-}
-
-abstract interface class DiagnosticSqlitePeer implements SqlitePeer {
-  Future<SqliteDiagnosticSnapshot> snapshotDiagnostics();
-}
-
-final class SqliteDiagnosticSnapshot {
-  const SqliteDiagnosticSnapshot({
-    required this.sqlitePageCacheBytes,
-    required this.sqliteSchemaBytes,
-    required this.sqliteStmtBytes,
-    required this.walBytes,
-    required this.streamCount,
-    required this.readerBusy,
-  });
-
-  final int sqlitePageCacheBytes;
-  final int sqliteSchemaBytes;
-  final int sqliteStmtBytes;
-  final int walBytes;
-  final int streamCount;
-  final bool readerBusy;
-
-  int get sqliteTotalBytes =>
-      sqlitePageCacheBytes + sqliteSchemaBytes + sqliteStmtBytes;
-
-  Map<String, Object?> toJson() => {
-        'sqlite_total_bytes': sqliteTotalBytes,
-        'sqlite_page_cache_bytes': sqlitePageCacheBytes,
-        'sqlite_schema_bytes': sqliteSchemaBytes,
-        'sqlite_stmt_bytes': sqliteStmtBytes,
-        'wal_bytes': walBytes,
-        'stream_count': streamCount,
-        'reader_busy': readerBusy,
-      };
-}
-
-final class PeerScenarioResult {
-  const PeerScenarioResult({
-    required this.setupElapsedNs,
-    required this.warmupElapsedNs,
-    required this.measuredElapsedNs,
-    this.measurements = const {},
-  });
-
-  final int setupElapsedNs;
-  final int warmupElapsedNs;
-  final int measuredElapsedNs;
-  final Map<String, Object?> measurements;
-
-  Map<String, Object?> toJson() => {
-        'setup_elapsed_ns': setupElapsedNs,
-        'warmup_elapsed_ns': warmupElapsedNs,
-        'measured_elapsed_ns': measuredElapsedNs,
-        if (measurements.isNotEmpty) 'measurements': measurements,
-      };
-}
-
-final class UnsupportedPeerScenario implements Exception {
-  const UnsupportedPeerScenario(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
-}
-
-SqlitePeer createPeer(String name) {
+Future<SqlitePeer> createPeer(String name) async {
   return switch (name) {
-    'sqlite3' => Sqlite3Peer(),
-    'drift' => DriftPeer(),
-    'sqlite_async' => SqliteAsyncPeer(),
-    'resqlite' => ResqlitePeer(),
+    'sqlite3' => await _sqlite3Peer(),
+    'drift' => await _driftPeer(),
+    'sqlite_async' => await _sqliteAsyncPeer(),
+    'resqlite' => await _resqlitePeer(),
     _ => throw ArgumentError.value(name, 'name', 'unknown peer'),
   };
 }
 
-List<String> peerCapabilities(String peerName) {
-  final capabilities = <String>['sql', 'batch'];
-  if (peerName == 'resqlite' || peerName == 'sqlite_async') {
-    capabilities.add('reactive');
-  }
-  if (peerName == 'resqlite') {
-    capabilities.add('diagnostics');
-  }
-  return capabilities;
+Future<SqlitePeer> _sqlite3Peer() async {
+  await sqlite3_adapter.loadLibrary();
+  return sqlite3_adapter.Sqlite3Peer();
 }
 
-Map<String, Object?> peerScenarioParameters(
-  String scenarioName, {
-  required int rows,
-}) {
-  return switch (scenarioName) {
-    narrowBatchInsertScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'columns': 2,
-        'measured_operations': ['execute_batch', 'count_select'],
-      },
-    pointSelectScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql'],
-        'lookups': rows,
-        'seed': 0,
-        'measured_operations': ['point_select'],
-      },
-    feedPagingScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'seed': _feedPagingSeed,
-        'page_size': math.min(_feedPagingPageSize, math.max(1, rows)),
-        'page_count': _feedPagingPageCount,
-        'like_writes': math.min(_feedPagingLikeWrites, math.max(1, rows)),
-        'measured_operations': [
-          'keyset_page_select',
-          'point_update',
-          'latest_page_select',
-        ],
-      },
-    syncBurstScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'bulk_chunk_size': math.min(_syncBurstChunkSize, math.max(1, rows)),
-        'merge_rounds': _syncBurstMergeRounds,
-        'merge_rows_per_round': math.min(
-          _syncBurstMergeRowsPerRound,
-          math.max(1, rows),
-        ),
-        'measured_operations': [
-          'chunked_execute_batch',
-          'insert_or_replace_merge',
-          'count_select',
-        ],
-      },
-    chatSimScenario => {
-        'operations': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'warmup_operations': _chatWarmupOps(rows),
-        'users': _chatUserCount(rows),
-        'conversations': _chatConversationCount(rows),
-        'seed_messages': _chatSeedMessageCount(rows),
-        'seed': _chatSimSeed,
-        'zipf_exponent': _chatSimZipfExponent,
-        'operation_mix': {
-          'insert_message_percent': 5,
-          'update_conversation_percent': 5,
-          'read_messages_percent': 45,
-          'read_user_percent': 45,
-        },
-      },
-    largeWorkingSetScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'batch'],
-        'seed': _largeWorkingSetSeed,
-        'payload_bytes': _largeWorkingSetPayloadLength,
-        'point_queries': _largeWorkingSetPointQueries(rows),
-        'range_scans': _largeWorkingSetRangeScans(rows),
-        'range_scan_limit': _largeWorkingSetRangeLimit(rows),
-        'measured_operations': [
-          'random_point_select',
-          'range_scan_select',
-          'pragma_shrink_memory',
-        ],
-      },
-    keyedPkSubscriptionsScenario => {
-        'rows': _reactiveRowCount(rows),
-        'stream_count': _reactiveStreamCount(rows),
-        'write_count': _reactiveWriteCount(rows),
-        'seed': _reactiveSeed,
-        'required_capabilities': ['sql', 'reactive'],
-        'measured_operations': [
-          'stream_initial_drain',
-          'random_pk_update',
-          'stream_settle',
-        ],
-      },
-    highCardinalityFanoutScenario => {
-        'rows': _fanoutRowCount(rows),
-        'stream_count': _fanoutStreamCount(rows),
-        'write_count': _fanoutWriteCount(rows),
-        'seed': _fanoutSeed,
-        'required_capabilities': ['sql', 'reactive'],
-        'measured_operations': [
-          'partition_stream_initial_drain',
-          'random_partition_update',
-          'stream_settle',
-        ],
-      },
-    manyStreamsWriterThroughputScenario => {
-        'rows': _writerRowCount(rows),
-        'stream_count': _writerStreamCount(rows),
-        'write_count': _writerWriteCount(rows),
-        'required_capabilities': ['sql', 'reactive'],
-        'measured_operations': [
-          'baseline_updates',
-          'disjoint_updates_with_streams',
-          'overlap_updates_with_streams',
-        ],
-      },
-    sqliteDiagnosticsScenario => {
-        'rows': rows,
-        'required_capabilities': ['sql', 'diagnostics'],
-        'measured_operations': [
-          'seed',
-          'warm_read',
-          'diagnostic_snapshot',
-        ],
-      },
-    _ => throw ArgumentError.value(
-        scenarioName,
-        'scenarioName',
-        'unknown scenario',
-      ),
-  };
+Future<SqlitePeer> _driftPeer() async {
+  await drift_adapter.loadLibrary();
+  return drift_adapter.DriftPeer();
+}
+
+Future<SqlitePeer> _sqliteAsyncPeer() async {
+  await sqlite_async_adapter.loadLibrary();
+  return sqlite_async_adapter.SqliteAsyncPeer();
+}
+
+Future<SqlitePeer> _resqlitePeer() async {
+  await resqlite_adapter.loadLibrary();
+  return resqlite_adapter.ResqlitePeer();
 }
 
 Future<PeerScenarioResult> runPeerScenario({
@@ -300,8 +46,9 @@ Future<PeerScenarioResult> runPeerScenario({
   required String scenarioName,
   required String databasePath,
   int rows = 100,
+  String? traceRegionPath,
 }) async {
-  final peer = createPeer(peerName);
+  final peer = await createPeer(peerName);
   try {
     await peer.open(databasePath);
     switch (scenarioName) {
@@ -324,7 +71,11 @@ Future<PeerScenarioResult> runPeerScenario({
       case manyStreamsWriterThroughputScenario:
         return await _runManyStreamsWriterThroughput(peer, rows: rows);
       case sqliteDiagnosticsScenario:
-        return await _runSqliteDiagnostics(peer, rows: rows);
+        return await _runSqliteDiagnostics(
+          peer,
+          rows: rows,
+          traceRegionPath: traceRegionPath,
+        );
       default:
         throw ArgumentError.value(
           scenarioName,
@@ -417,7 +168,7 @@ Future<PeerScenarioResult> _runFeedPaging(
     'ON tracelite_feed_items(created_at DESC, id DESC)',
   );
 
-  final prng = math.Random(_feedPagingSeed);
+  final prng = math.Random(feedPagingSeed);
   await peer.executeBatch(
     'INSERT INTO tracelite_feed_items('
     'id, author_id, created_at, body, like_count'
@@ -436,7 +187,7 @@ Future<PeerScenarioResult> _runFeedPaging(
   setup.stop();
 
   final warmup = Stopwatch()..start();
-  await _selectLatestFeedPage(peer, math.min(_feedPagingPageSize, rows));
+  await _selectLatestFeedPage(peer, math.min(feedPagingPageSize, rows));
   warmup.stop();
 
   final measured = Stopwatch()..start();
@@ -444,7 +195,7 @@ Future<PeerScenarioResult> _runFeedPaging(
   await _applyFeedLikeWrites(peer, rows: rows);
   final latest = await _selectLatestFeedPage(
     peer,
-    math.min(_feedPagingPageSize, rows),
+    math.min(feedPagingPageSize, rows),
   );
   if (latest.isEmpty) {
     throw StateError('${peer.name} returned no feed rows');
@@ -474,7 +225,7 @@ Future<PeerScenarioResult> _runSyncBurst(
   setup.stop();
 
   final measured = Stopwatch()..start();
-  final chunkSize = math.min(_syncBurstChunkSize, math.max(1, rows));
+  final chunkSize = math.min(syncBurstChunkSize, math.max(1, rows));
   for (var offset = 0; offset < rows; offset += chunkSize) {
     final n = math.min(chunkSize, rows - offset);
     await peer.executeBatch(
@@ -486,8 +237,8 @@ Future<PeerScenarioResult> _runSyncBurst(
     );
   }
 
-  final mergeRows = math.min(_syncBurstMergeRowsPerRound, math.max(1, rows));
-  for (var round = 0; round < _syncBurstMergeRounds; round++) {
+  final mergeRows = math.min(syncBurstMergeRowsPerRound, math.max(1, rows));
+  for (var round = 0; round < syncBurstMergeRounds; round++) {
     await peer.executeBatch(
       'INSERT OR REPLACE INTO tracelite_sync_items('
       'external_id, payload, dirty'
@@ -521,7 +272,7 @@ Future<PeerScenarioResult> _runSyncBurst(
     'SELECT COUNT(*) AS count FROM tracelite_sync_items WHERE external_id >= ?',
     [0],
   );
-  final expected = rows + _syncBurstMergeRounds * mergeRows;
+  final expected = rows + syncBurstMergeRounds * mergeRows;
   final count = result.single['count'];
   if (count != expected) {
     throw StateError('${peer.name} synced $count row(s), expected $expected');
@@ -539,9 +290,9 @@ Future<PeerScenarioResult> _runChatSim(
   SqlitePeer peer, {
   required int rows,
 }) async {
-  final userCount = _chatUserCount(rows);
-  final conversationCount = _chatConversationCount(rows);
-  final seedMessages = _chatSeedMessageCount(rows);
+  final userCount = chatUserCount(rows);
+  final conversationCount = chatConversationCount(rows);
+  final seedMessages = chatSeedMessageCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_chat_messages');
@@ -585,10 +336,10 @@ Future<PeerScenarioResult> _runChatSim(
   );
   final seedZipf = _ZipfianSampler(
     conversationCount,
-    _chatSimZipfExponent,
-    _chatSimSeed ^ 0xABC,
+    chatSimZipfExponent,
+    chatSimSeed ^ 0xABC,
   );
-  final seedPrng = math.Random(_chatSimSeed ^ 0xDEF);
+  final seedPrng = math.Random(chatSimSeed ^ 0xDEF);
   await peer.executeBatch(
     'INSERT INTO tracelite_chat_messages('
     'id, conv_id, sender_id, body, sent_at'
@@ -612,7 +363,7 @@ Future<PeerScenarioResult> _runChatSim(
     conversationCount: conversationCount,
     seedMessageCount: seedMessages,
   );
-  final warmupOps = _chatWarmupOps(rows);
+  final warmupOps = chatWarmupOps(rows);
   final warmup = Stopwatch()..start();
   for (final op in ops.take(warmupOps)) {
     await _executeChatOp(peer, op);
@@ -643,7 +394,7 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
     'id INTEGER PRIMARY KEY, '
     'payload TEXT NOT NULL)',
   );
-  final payload = List.filled(_largeWorkingSetPayloadLength, 'x').join();
+  final payload = List.filled(largeWorkingSetPayloadLength, 'x').join();
   await peer.executeBatch(
     'INSERT INTO tracelite_large_items(id, payload) VALUES (?, ?)',
     [
@@ -660,8 +411,8 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
   warmup.stop();
 
   final measured = Stopwatch()..start();
-  final prng = math.Random(_largeWorkingSetSeed);
-  for (var i = 0; i < _largeWorkingSetPointQueries(rows); i++) {
+  final prng = math.Random(largeWorkingSetSeed);
+  for (var i = 0; i < largeWorkingSetPointQueries(rows); i++) {
     final id = prng.nextInt(rows) + 1;
     final result = await peer.select(
       'SELECT payload FROM tracelite_large_items WHERE id = ?',
@@ -672,8 +423,8 @@ Future<PeerScenarioResult> _runLargeWorkingSet(
     }
     _consumeRows(result);
   }
-  final rangeLimit = _largeWorkingSetRangeLimit(rows);
-  for (var i = 0; i < _largeWorkingSetRangeScans(rows); i++) {
+  final rangeLimit = largeWorkingSetRangeLimit(rows);
+  for (var i = 0; i < largeWorkingSetRangeScans(rows); i++) {
     final start = prng.nextInt(math.max(1, rows - rangeLimit + 1)) + 1;
     final result = await peer.select(
       'SELECT payload FROM tracelite_large_items '
@@ -699,9 +450,9 @@ Future<PeerScenarioResult> _runKeyedPkSubscriptions(
   required int rows,
 }) async {
   final reactive = _requireReactivePeer(peer);
-  final rowCount = _reactiveRowCount(rows);
-  final streamCount = _reactiveStreamCount(rows);
-  final writeCount = _reactiveWriteCount(rows);
+  final rowCount = reactiveRowCount(rows);
+  final streamCount = reactiveStreamCount(rows);
+  final writeCount = reactiveWriteCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_keyed_items');
@@ -746,7 +497,7 @@ Future<PeerScenarioResult> _runKeyedPkSubscriptions(
       emitCounts[i] = 0;
     }
 
-    final prng = math.Random(_reactiveSeed);
+    final prng = math.Random(reactiveSeed);
     var observedHits = 0;
     final measured = Stopwatch()..start();
     for (var i = 0; i < writeCount; i++) {
@@ -782,9 +533,9 @@ Future<PeerScenarioResult> _runHighCardinalityFanout(
   required int rows,
 }) async {
   final reactive = _requireReactivePeer(peer);
-  final rowCount = _fanoutRowCount(rows);
-  final streamCount = _fanoutStreamCount(rows);
-  final writeCount = _fanoutWriteCount(rows);
+  final rowCount = fanoutRowCount(rows);
+  final streamCount = fanoutStreamCount(rows);
+  final writeCount = fanoutWriteCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_fanout_items');
@@ -832,7 +583,7 @@ Future<PeerScenarioResult> _runHighCardinalityFanout(
       emitCounts[i] = 0;
     }
 
-    final prng = math.Random(_fanoutSeed);
+    final prng = math.Random(fanoutSeed);
     final touchedOwners = <int>{};
     final measured = Stopwatch()..start();
     for (var i = 0; i < writeCount; i++) {
@@ -867,9 +618,9 @@ Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
   required int rows,
 }) async {
   final reactive = _requireReactivePeer(peer);
-  final rowCount = _writerRowCount(rows);
-  final streamCount = _writerStreamCount(rows);
-  final writeCount = _writerWriteCount(rows);
+  final rowCount = writerRowCount(rows);
+  final streamCount = writerStreamCount(rows);
+  final writeCount = writerWriteCount(rows);
 
   final setup = Stopwatch()..start();
   await peer.execute('DROP TABLE IF EXISTS tracelite_wide_items');
@@ -981,6 +732,7 @@ Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
 Future<PeerScenarioResult> _runSqliteDiagnostics(
   SqlitePeer peer, {
   required int rows,
+  String? traceRegionPath,
 }) async {
   final diagnosticPeer = _requireDiagnosticPeer(peer);
   final setup = Stopwatch()..start();
@@ -1007,6 +759,7 @@ Future<PeerScenarioResult> _runSqliteDiagnostics(
   }
   final snapshot = await diagnosticPeer.snapshotDiagnostics();
   final session = tracelite_resqlite.TraceSession.attach(
+    regionPath: traceRegionPath,
     processName: 'tracelite_peer',
     threadName: 'resqlite_diagnostics',
     vocabularies: const [tracelite_resqlite.resqliteTraceVocabulary],
@@ -1048,10 +801,10 @@ Future<void> _seedNarrowItems(SqlitePeer peer, {required int rows}) async {
 }
 
 Future<void> _walkFeedPages(SqlitePeer peer, {required int rows}) async {
-  final pageSize = math.min(_feedPagingPageSize, math.max(1, rows));
+  final pageSize = math.min(feedPagingPageSize, math.max(1, rows));
   int? lastCreatedAt;
   int? lastId;
-  for (var page = 0; page < _feedPagingPageCount; page++) {
+  for (var page = 0; page < feedPagingPageCount; page++) {
     final result = page == 0
         ? await _selectLatestFeedPage(peer, pageSize)
         : await peer.select(
@@ -1081,8 +834,8 @@ Future<List<Map<String, Object?>>> _selectLatestFeedPage(
 }
 
 Future<void> _applyFeedLikeWrites(SqlitePeer peer, {required int rows}) async {
-  final prng = math.Random(_feedPagingSeed);
-  final writes = math.min(_feedPagingLikeWrites, math.max(1, rows));
+  final prng = math.Random(feedPagingSeed);
+  final writes = math.min(feedPagingLikeWrites, math.max(1, rows));
   for (var i = 0; i < writes; i++) {
     final id = prng.nextInt(rows) + 1;
     await peer.execute(
@@ -1099,11 +852,11 @@ List<_ChatOp> _generateChatOps({
   required int conversationCount,
   required int seedMessageCount,
 }) {
-  final prng = math.Random(_chatSimSeed);
+  final prng = math.Random(chatSimSeed);
   final zipf = _ZipfianSampler(
     conversationCount,
-    _chatSimZipfExponent,
-    _chatSimSeed,
+    chatSimZipfExponent,
+    chatSimSeed,
   );
   final ops = <_ChatOp>[];
   var clock = seedMessageCount + 1;
@@ -1184,20 +937,6 @@ void _consumeRows(List<Map<String, Object?>> rows) {
   }
 }
 
-int _chatUserCount(int rows) => math.max(10, rows * 2);
-
-int _chatConversationCount(int rows) => math.max(4, rows);
-
-int _chatSeedMessageCount(int rows) => math.max(20, rows * 20);
-
-int _chatWarmupOps(int rows) => math.min(rows ~/ 10, math.max(0, rows - 1));
-
-int _largeWorkingSetPointQueries(int rows) => math.max(1, rows ~/ 2);
-
-int _largeWorkingSetRangeScans(int rows) => math.max(1, rows ~/ 20);
-
-int _largeWorkingSetRangeLimit(int rows) => math.min(25, math.max(1, rows));
-
 ReactiveSqlitePeer _requireReactivePeer(SqlitePeer peer) {
   if (peer is ReactiveSqlitePeer) return peer;
   throw UnsupportedPeerScenario('${peer.name} does not support reactive watch');
@@ -1257,27 +996,6 @@ Future<void> _runWideUpdates(
 }
 
 int _sum(int a, int b) => a + b;
-
-int _reactiveStreamCount(int rows) => math.min(50, math.max(1, rows));
-
-int _reactiveWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
-
-int _reactiveRowCount(int rows) =>
-    math.max(_reactiveStreamCount(rows) * 4, rows * 100);
-
-int _fanoutStreamCount(int rows) => math.min(100, math.max(2, rows));
-
-int _fanoutWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
-
-int _fanoutRowCount(int rows) =>
-    math.max(_fanoutStreamCount(rows) * 10, rows * 100);
-
-int _writerStreamCount(int rows) => math.min(50, math.max(2, rows));
-
-int _writerWriteCount(int rows) => math.min(100, math.max(10, rows * 4));
-
-int _writerRowCount(int rows) =>
-    math.max(_writerStreamCount(rows) * 10, rows * 100);
 
 enum _ChatOpKind {
   insertMessage,
@@ -1356,251 +1074,3 @@ final class _ZipfianSampler {
 }
 
 int _elapsedNs(Stopwatch stopwatch) => stopwatch.elapsedMicroseconds * 1000;
-
-final class Sqlite3Peer implements SqlitePeer {
-  sqlite3.Database? _db;
-
-  @override
-  String get name => 'sqlite3';
-
-  @override
-  Future<void> open(String path) async {
-    _db = sqlite3.sqlite3.open(path);
-  }
-
-  @override
-  Future<void> close() async {
-    _db?.close();
-    _db = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    _db!.execute(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    return [
-      for (final row in _db!.select(sql, parameters))
-        Map<String, Object?>.from(row),
-    ];
-  }
-
-  @override
-  Future<void> executeBatch(
-    String sql,
-    List<List<Object?>> parameterSets,
-  ) async {
-    _db!.execute('BEGIN');
-    final statement = _db!.prepare(sql);
-    try {
-      for (final parameters in parameterSets) {
-        statement.execute(parameters);
-      }
-      _db!.execute('COMMIT');
-    } catch (_) {
-      _db!.execute('ROLLBACK');
-      rethrow;
-    } finally {
-      statement.close();
-    }
-  }
-}
-
-final class DriftPeer implements SqlitePeer {
-  drift_native.NativeDatabase? _db;
-  final _user = _DriftUser();
-
-  @override
-  String get name => 'drift';
-
-  @override
-  Future<void> open(String path) async {
-    _db = drift_native.NativeDatabase(File(path));
-    await _db!.ensureOpen(_user);
-  }
-
-  @override
-  Future<void> close() async {
-    await _db?.close();
-    _db = null;
-  }
-
-  @override
-  Future<void> execute(String sql, [List<Object?> parameters = const []]) {
-    return _db!.runCustom(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) {
-    return _db!.runSelect(sql, parameters);
-  }
-
-  @override
-  Future<void> executeBatch(
-    String sql,
-    List<List<Object?>> parameterSets,
-  ) async {
-    await _db!.runCustom('BEGIN');
-    try {
-      await _db!.runBatched(
-        drift_backend.BatchedStatements(
-          [sql],
-          [
-            for (final parameters in parameterSets)
-              drift_backend.ArgumentsForBatchedStatement(0, parameters),
-          ],
-        ),
-      );
-      await _db!.runCustom('COMMIT');
-    } catch (_) {
-      await _db!.runCustom('ROLLBACK');
-      rethrow;
-    }
-  }
-}
-
-final class _DriftUser implements drift_backend.QueryExecutorUser {
-  @override
-  int get schemaVersion => 1;
-
-  @override
-  Future<void> beforeOpen(
-    drift_backend.QueryExecutor executor,
-    drift.OpeningDetails details,
-  ) async {}
-}
-
-final class SqliteAsyncPeer implements SqlitePeer, ReactiveSqlitePeer {
-  sqlite_async.SqliteDatabase? _db;
-  sqlite3.Database? _raw;
-
-  @override
-  String get name => 'sqlite_async';
-
-  @override
-  Future<void> open(String path) async {
-    _raw = sqlite3.sqlite3.open(path);
-    _db = sqlite_async.SqliteDatabase.singleConnection(
-      sqlite_async.SqliteConnection.synchronousWrapper(
-        _raw!,
-        profileQueries: false,
-      ),
-    );
-    await _db!.getAll('SELECT 1');
-  }
-
-  @override
-  Future<void> close() async {
-    await _db?.close();
-    _db = null;
-    _raw = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    await _db!.execute(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) async {
-    return [
-      for (final row in await _db!.getAll(sql, parameters))
-        Map<String, Object?>.from(row),
-    ];
-  }
-
-  @override
-  Future<void> executeBatch(String sql, List<List<Object?>> parameterSets) {
-    return _db!.executeBatch(sql, parameterSets);
-  }
-
-  @override
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  }) {
-    return _db!
-        .watchUnthrottled(
-          sql,
-          parameters: parameters,
-          triggerOnTables: readsFrom.isEmpty ? null : readsFrom,
-        )
-        .map((rows) => [
-              for (final row in rows) Map<String, Object?>.from(row),
-            ]);
-  }
-}
-
-final class ResqlitePeer
-    implements SqlitePeer, ReactiveSqlitePeer, DiagnosticSqlitePeer {
-  resqlite.Database? _db;
-
-  @override
-  String get name => 'resqlite';
-
-  @override
-  Future<void> open(String path) async {
-    _db = await resqlite.Database.open(path);
-  }
-
-  @override
-  Future<void> close() async {
-    await _db?.close();
-    _db = null;
-  }
-
-  @override
-  Future<void> execute(String sql,
-      [List<Object?> parameters = const []]) async {
-    await _db!.execute(sql, parameters);
-  }
-
-  @override
-  Future<List<Map<String, Object?>>> select(
-    String sql, [
-    List<Object?> parameters = const [],
-  ]) {
-    return _db!.select(sql, parameters);
-  }
-
-  @override
-  Future<void> executeBatch(String sql, List<List<Object?>> parameterSets) {
-    return _db!.executeBatch(sql, parameterSets);
-  }
-
-  @override
-  Stream<List<Map<String, Object?>>> watch(
-    String sql, {
-    List<Object?> parameters = const [],
-    Set<String> readsFrom = const {},
-  }) {
-    return _db!.stream(sql, parameters);
-  }
-
-  @override
-  Future<SqliteDiagnosticSnapshot> snapshotDiagnostics() async {
-    final diagnostics = await _db!.diagnostics();
-    return SqliteDiagnosticSnapshot(
-      sqlitePageCacheBytes: diagnostics.sqlitePageCacheBytes,
-      sqliteSchemaBytes: diagnostics.sqliteSchemaBytes,
-      sqliteStmtBytes: diagnostics.sqliteStmtBytes,
-      walBytes: diagnostics.walBytes,
-      streamCount: diagnostics.streamLength,
-      readerBusy: diagnostics.readersBusyAtSnapshot,
-    );
-  }
-}

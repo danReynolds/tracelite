@@ -1,5 +1,9 @@
 build/
+dart_test.yaml
+doc/*.feedback.md
 libsqlite_traced.dylib
+native/test_producer.c
 pubspec_overrides.yaml
-tool/visualizer_app/
+test/
+tool/
 tools/

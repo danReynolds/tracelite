@@ -245,6 +245,39 @@ class Trace {
 
   String spanName(int spanId) => spanNames[spanId] ?? hexSpanId(spanId);
 
+  List<SqlFingerprintGroupStats> sqlFingerprintGroups() {
+    final groups = <String, List<TraceSpan>>{};
+    final labels = <String, _SqlFingerprint>{};
+    for (final span in spans.where((span) =>
+        span.isComplete &&
+        (span.spanId == BuiltinSpans.sqlite3PrepareV2 ||
+            span.spanId == BuiltinSpans.sqlite3PrepareV3))) {
+      if (span.beginArgs.length < 2) continue;
+      final sqlId = span.beginArgs[1];
+      final sql = strings[sqlId];
+      if (sql == null) continue;
+      final fingerprint = _SqlFingerprint.fromSqlTraceString(sql);
+      groups.putIfAbsent(fingerprint.id, () => <TraceSpan>[]).add(span);
+      labels[fingerprint.id] = fingerprint;
+    }
+    final result = [
+      for (final entry in groups.entries)
+        SqlFingerprintGroupStats(
+          fingerprint: entry.key,
+          normalizedSql: labels[entry.key]!.normalizedSql,
+          stats: DurationStats.fromNs(
+            entry.value.map((span) => span.durationNs),
+          ),
+        ),
+    ];
+    result.sort((a, b) {
+      final byTotal = b.stats.totalNs.compareTo(a.stats.totalNs);
+      if (byTotal != 0) return byTotal;
+      return a.fingerprint.compareTo(b.fingerprint);
+    });
+    return result;
+  }
+
   String toMarkdownReport() {
     final groups = spans
         .where((span) => span.isComplete && span.durationNs >= 0)
@@ -287,6 +320,27 @@ class Trace {
           '${formatDurationNs(stats.p90Ns)} | '
           '${formatDurationNs(stats.p99Ns)} | '
           '${formatDurationNs(stats.totalNs)} |',
+        );
+      }
+    }
+
+    final sqlGroups = sqlFingerprintGroups();
+    if (sqlGroups.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('## SQL Fingerprints')
+        ..writeln()
+        ..writeln(
+            '| fingerprint | prepares | p50 | p90 | total | normalized SQL |')
+        ..writeln('|---|---:|---:|---:|---:|---|');
+      for (final group in sqlGroups) {
+        final stats = group.stats;
+        buffer.writeln(
+          '| `${group.fingerprint}` | ${stats.count} | '
+          '${formatDurationNs(stats.p50Ns)} | '
+          '${formatDurationNs(stats.p90Ns)} | '
+          '${formatDurationNs(stats.totalNs)} | '
+          '`${_markdownCell(group.normalizedSql)}` |',
         );
       }
     }
@@ -642,6 +696,18 @@ class SpanGroupStats {
   final DurationStats stats;
 }
 
+class SqlFingerprintGroupStats {
+  SqlFingerprintGroupStats({
+    required this.fingerprint,
+    required this.normalizedSql,
+    required this.stats,
+  });
+
+  final String fingerprint;
+  final String normalizedSql;
+  final DurationStats stats;
+}
+
 class CounterGroupStats {
   CounterGroupStats({
     required this.spanId,
@@ -749,6 +815,68 @@ Map<int, String> _readSpanNames(
 String hexSpanId(int spanId) => '0x${spanId.toRadixString(16).padLeft(4, '0')}';
 
 String _markdownCell(String value) => value.replaceAll('|', '\\|');
+
+final class _SqlFingerprint {
+  const _SqlFingerprint({required this.id, required this.normalizedSql});
+
+  factory _SqlFingerprint.fromSqlTraceString(String sql) {
+    if (sql == '<sql:redacted>') {
+      return const _SqlFingerprint(
+        id: 'sqlfp:v1:redacted',
+        normalizedSql: '<redacted>',
+      );
+    }
+    final parts = sql.split(':');
+    if (parts.length >= 4 && parts[0] == 'sqlfp' && parts[1] == 'v1') {
+      return _SqlFingerprint(
+        id: 'sqlfp:v1:${parts[2]}',
+        normalizedSql: parts.sublist(3).join(':'),
+      );
+    }
+    final normalized = _normalizeSql(sql);
+    return _SqlFingerprint(
+      id: 'sqlfp:v1:${_fnv1a64Hex(normalized)}',
+      normalizedSql: normalized,
+    );
+  }
+
+  final String id;
+  final String normalizedSql;
+}
+
+String _normalizeSql(String sql) {
+  var normalized = sql
+      .replaceAll(RegExp(r'--[^\r\n]*'), ' ')
+      .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), ' ')
+      .replaceAll(RegExp(r"x'([^']|'')*'", caseSensitive: false), '?')
+      .replaceAll(RegExp(r"'([^']|'')*'"), '?')
+      .replaceAll(RegExp(r'"([^"]|"")*"'), '?')
+      .replaceAll(RegExp(r'`([^`]|``)*`'), '?')
+      .replaceAll(RegExp(r'\[[^\]]*\]'), '?')
+      .replaceAll(
+        RegExp(r'\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b', caseSensitive: false),
+        '?',
+      )
+      .replaceAll(RegExp(r'[:@$][A-Za-z_][A-Za-z0-9_]*'), '?')
+      .replaceAll(RegExp(r'\b(?:NULL|TRUE|FALSE)\b', caseSensitive: false), '?')
+      .toUpperCase()
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (normalized.length > 511) {
+    normalized = normalized.substring(0, 511);
+  }
+  return normalized;
+}
+
+String _fnv1a64Hex(String value) {
+  const mask = 0xffffffffffffffff;
+  var hash = 0xcbf29ce484222325;
+  for (final unit in value.codeUnits) {
+    hash ^= unit & 0xff;
+    hash = (hash * 0x100000001b3) & mask;
+  }
+  return hash.toRadixString(16).padLeft(16, '0');
+}
 
 String formatDurationNs(int ns) {
   if (ns < 1000) return '${ns}ns';

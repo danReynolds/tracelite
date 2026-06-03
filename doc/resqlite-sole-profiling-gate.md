@@ -1,13 +1,14 @@
 # resqlite sole-profiling acceptance gate
 
-Status: primary path credible, sole-framework acceptance still blocked,
-2026-05-31
+Status: regular workflow accepted for PR #109, legacy-profile deletion still
+requires adoption sign-off, 2026-06-02
 
-This is the merge blocker for accepting tracelite as resqlite's sole regular
-profiling and benchmarking framework. Tracelite can already replace the old
-profile artifact and dashboard pipeline for covered surfaces, but PR #109
-should stay draft until the release gate below is satisfied with current
-artifacts.
+This is the evidence gate for accepting tracelite as resqlite's regular
+profiling and benchmarking framework. Tracelite can replace the old profile
+artifact and dashboard pipeline for covered surfaces. The remaining decision is
+not whether PR #109 is credible; it is whether and when resqlite archives the
+legacy direct profile runner that is still useful as a compatibility/parity
+harness.
 
 ## Acceptance criteria
 
@@ -72,13 +73,21 @@ scope drift: `suite-history` could calibrate a scenario subset while the nested
 `suite` still ran the whole profile. That has been fixed so `suite` and
 `suite-history` both honor `--scenarios`.
 
+The highest-priority integration blocker found later was source reproducibility.
+That is now closed in PR #109: the resqlite wrappers pin Tracelite in the
+benchmark source audit, reject dirty or mismatched checkouts by default, record
+both source states in wrapper manifests, and verify that Tracelite resolves
+`resqlite` to the checkout under test.
+
 The resqlite wrapper now separates broad suite coverage from strict policy
-scope. It runs the full ten-scenario production matrix for artifacts and graph
-data, while calibrating the release gate against the five scenarios that have
-current production thresholds: `chat-sim`, `high-cardinality-fanout`,
-`many-streams-writer-throughput`, `narrow-batch-insert`, and
-`sqlite-diagnostics`. `point-select`, `feed-paging`, `sync-burst`,
-`large-working-set`, and `keyed-pk-subscriptions` remain diagnostic workloads.
+scope. The r10 production gate runs the resqlite release-policy surface with
+current production thresholds: `high-cardinality-fanout` and
+`many-streams-writer-throughput`. It also runs `sqlite-diagnostics` as
+trace-health and diagnostic coverage, but diagnostics are not a strict
+elapsed-time blocker yet. `narrow-batch-insert`, `point-select`,
+`feed-paging`, `sync-burst`, `chat-sim`, `large-working-set`, and
+`keyed-pk-subscriptions` remain diagnostic or experiment workloads unless an
+operator explicitly requests them with scenario overrides.
 
 Calibration now uses a robust within-run noise policy: p75 within-run CV,
 run-mean CV, Tukey outer-fence outlier accounting, a 10% total outlier ceiling,
@@ -89,27 +98,55 @@ ceilings.
 The strict current production gate is:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/run_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
-  --dart=/Users/dan/Coding/flutter_arm64/bin/dart \
-  --label=sole-gate-2026-05-31-resqlite-p75-ready-probe \
-  --out-dir=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe \
-  --graph-data-dir=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/graph-data \
-  --runs=5 \
-  --interfaces=resqlite
+dart run benchmark/run_tracelite.dart \
+  --preset=production \
+  --tracelite-root=/path/to/tracelite \
+  --resqlite-root="$PWD" \
+  --label=production-pin-r10-resqlite-policy-2026-06-02-r1 \
+  --out-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1 \
+  --graph-data-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1/graph-data
 ```
 
 Evidence:
 
+- Tracelite source:
+  `d058647a123df0f4af223a110564b862de2eda05`
+  (`resqlite-profiling-gate-2026-06-02-r10`).
+- Resqlite source for the production evidence:
+  `6affacd4d3b83e16d73fafa0c5232f578f25dde4`.
 - `history.json` recorded 5/5 successful production suite runs.
-- The suite executed all ten production scenarios for `resqlite`.
-- `policy-calibration.json` reported `ready`, 5/5 release-lane groups ready.
-- The calibrated policy was 48% primary threshold, 36% max regression
-  guardrail, 36% max-CV gate, and 6 recommended repetitions.
-- The release-lane groups had no findings. Observed noise ranged from 0.56%
-  (`many-streams-writer-throughput`) to 23.9% (`chat-sim`).
-- Graph-data export wrote 7,000 scenario-series rows and 50 peer-summary rows,
-  and `tracelite validate-graph-data` passed.
+- `policy-calibration.json` reported `ready` for both strict release-policy
+  groups: `high-cardinality-fanout` and
+  `many-streams-writer-throughput`.
+- Graph-data export and validation passed.
+- `tracelite explain` completed and preserved the remaining
+  harness-dominated/noisy-CV findings as operator review aids.
+- The wrapper recorded clean Tracelite and resqlite source states, arm64 Dart
+  on an arm64 host, and
+  `tracelite_resqlite_dependency.matches_requested_root=true`.
+- Observed strict-lane noise was 0.5% and 1.04%, both within the 5% max-CV
+  gate.
+- The suite-history phase remains acceptable for a pre-publish gate, but still
+  the next runtime optimization target.
+
+The current CI smoke gate is:
+
+```bash
+dart run benchmark/run_tracelite.dart \
+  --preset=ci \
+  --tracelite-root=/tmp/tracelite \
+  --resqlite-root="$PWD" \
+  --label=ci-<sha>
+```
+
+Evidence:
+
+- PR #109's `Tracelite smoke` job checks out the r10 tag, runs the `ci` preset
+  through the resqlite wrapper, uploads wrapper artifacts, and passed at PR
+  head `94529ec00dfb74d4c0093ce52d6d510964761067`.
+- The same PR head also passed generated-data freshness, raw-profile-JSON
+  hygiene, and the macOS test job with `trace_sqlite` native hook smoke
+  coverage.
 
 The resqlite PR now also has a dedicated
 `benchmark/decide_tracelite.dart` wrapper for baseline/candidate decisions. A
@@ -117,9 +154,8 @@ routine no-regression decision using real suite manifests from the gate above
 was accepted:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/decide_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
-  --dart=/Users/dan/Coding/flutter_arm64/bin/dart \
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
   --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
   --candidate=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-005-20260531T144920Z/manifest.json \
   --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
@@ -131,16 +167,15 @@ Evidence:
 - `decision.json` reported `accepted`.
 - Trace health, primary, and guardrail gates all passed.
 - The decision used `measured_elapsed_ns` for both primary and guardrail metrics
-  across the five release-lane scenarios.
+  across the then-current release-lane scenarios.
 - The exported decision graph data contained suite rows plus 1 decision-summary
   row and 10 decision-comparison rows, and validation passed.
 
 The same decision path rejected a known injected read-path regression:
 
 ```bash
-/Users/dan/Coding/flutter_arm64/bin/dart benchmark/decide_tracelite.dart \
-  --tracelite-root=/Users/dan/Coding/tracelite \
-  --dart=/Users/dan/Coding/flutter_arm64/bin/dart \
+dart run benchmark/decide_tracelite.dart \
+  --tracelite-root=/path/to/tracelite \
   --baseline=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/run-001-20260531T143352Z/manifest.json \
   --candidate=build/tracelite-decisions/known-read-delay-regression/candidate/manifest.json \
   --policy=build/tracelite-benchmarks/sole-gate-2026-05-31-resqlite-p75-ready-probe/policy-calibration.json \
@@ -156,9 +191,24 @@ Evidence:
   `sqlite-diagnostics`.
 - The rejected decision still exported graph data and validation passed.
 
-Remaining blockers before accepting tracelite as the sole framework:
+The 2026-06-01 wrapper update also adds `insights.md` and `insights.json` to
+benchmark, decision, and profile workflows by running `tracelite explain` over
+the produced artifacts. These are review aids; acceptance still comes from the
+machine policy gates above.
 
-- Pin the resqlite PR to a stable tracelite source state instead of relying on a
-  dirty local checkout.
-- Preserve or replace any old resqlite profile-only signals that are not yet
-  proven by tracelite workload summaries.
+Current acceptance position:
+
+- Criteria 1 and 2 are satisfied for the current PR: PR #109 is non-draft,
+  source-pins Tracelite in resqlite's benchmark audit, records both source
+  states in wrapper manifests, and keeps the Tracelite smoke lane green.
+- Criteria 3 and 4 are satisfied by the five-run release gate, routine
+  no-regression decision, and injected-regression rejection artifacts above.
+- Criteria 5 through 7 are satisfied for the covered resqlite profile surfaces,
+  graph-data exports, and explicit unsupported peer lanes documented above.
+
+Remaining blocker before deleting or archiving the old direct profile path:
+
+- Preserve, demote, or intentionally remove any old resqlite profile-only
+  signals that are not needed now that tracelite emits workload summaries,
+  graph data, decisions, and insight artifacts.
+- Keep the pinned PR CI green whenever the Tracelite pin changes.

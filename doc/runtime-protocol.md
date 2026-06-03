@@ -40,7 +40,7 @@ The protocol has to satisfy six properties:
 
 ## 1. Topology
 
-Tracelite uses a **single mmap'd region per trace**, owned by the harness, attached by every producer. Producers are typically all in-process (a Dart program loads the C shim via `LD_PRELOAD`, so the C code and the Dart code share a process), but the protocol works for cross-process drainage as well.
+Tracelite uses a **single mmap'd region per trace**, owned by the harness, attached by every producer. Producers are typically all in-process (a Dart program loads the C shim through the sqlite3 native-hook resolver, so the C code and the Dart code share a process), but the protocol works for cross-process drainage as well.
 
 Each *producer* (one Dart isolate, one C thread, one external process) gets its own private ring buffer within the shared region. This makes appends single-producer/single-consumer (SPSC). The hot path uses no compare-and-swap (CAS) and no inter-producer synchronization — only acquire/release atomics on the ring's `head` and `tail` to communicate with the consumer.
 
@@ -672,11 +672,39 @@ Finalize merges all ring events (sorted by timestamp), writes the canonical `.tl
 
 ```c
 // In a Dart isolate's exit handler or the C shim's atexit handler:
-my_ring->producer_state = 2;
+my_ring->producer_state = 3;
 // mmap stays attached (kernel will tear down on process exit anyway).
 ```
 
-The harness sees `producer_state = 2` on its next drain and treats the producer as ended.
+The harness sees `producer_state = 3` on its next drain and treats the producer
+as ended.
+
+### Quiescent reset
+
+Long-lived benchmark workers need to reuse one process across independent
+samples without writing every sample into the first `TRACELITE_REGION` they
+attached. The runtime exposes `tlt_reset_runtime()` for this narrow case.
+
+The reset contract is intentionally stricter than normal detach:
+
+1. The harness calls it only at a quiescent boundary, after the measured
+   workload has returned and before a new region is attached.
+2. No producer thread may be inside a traced call or concurrently appending.
+3. The runtime marks any registered/claiming tracks as ended, unmaps the
+   current region, clears thread-local track state, and returns to inactive.
+4. Harnesses for peers with asynchronous isolate or native-asset cleanup may
+   hold this inactive state briefly after reset, so late producer calls are
+   suppressed instead of landing in the next sample's region.
+5. Each successful attach advances a runtime generation. Thread-local producer
+   IDs from older generations are treated as detached, so threads reused by a
+   long-lived worker must register a fresh producer before writing again.
+6. The next sample must explicitly attach a new region or provide a new
+   `TRACELITE_REGION` before producers emit again.
+
+This is not a live-tracing control plane and it is not safe as an asynchronous
+cancel operation. Its purpose is runner retargeting for native-assets-aware
+workers, where process startup is expensive but samples still need isolated
+region artifacts.
 
 ## 13. Resource limits
 

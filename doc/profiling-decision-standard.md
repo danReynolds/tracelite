@@ -17,11 +17,18 @@ Every production-quality experiment should preserve:
 - The `tracelite calibrate-policy` artifact or the named policy values used for
   thresholds, repetitions, and noise gates.
 - The markdown decision report.
+- Optional `tracelite explain` findings for trust, noise, trace-health,
+  guardrail, and bottleneck interpretation.
 - The raw `.tlt-region` files when the run includes external workload traces
   such as resqlite profile regions.
 - The commit SHAs, package versions, device, OS, Dart/Flutter version, scenario
   parameters, warmups, repetitions, and threshold policy embedded in the
   artifacts or experiment write-up.
+
+Committed artifacts should use the default SQL fingerprinting mode. Raw SQL
+capture is for local debugging only; it requires `TRACELITE_SQL_CAPTURE=raw` or
+`TRACELITE_RAW_SQL=1` and should be treated as unsafe to publish without a
+separate review.
 
 Console output is not enough. The durable artifact is the evidence.
 

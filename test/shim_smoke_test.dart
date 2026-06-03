@@ -4,18 +4,25 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
+import 'package:tracelite/src/native_artifacts.dart' as native_artifacts;
 import 'package:tracelite/tracelite.dart';
 
 void main() {
   test('shim intercepts real sqlite3 calls from package:sqlite3', () async {
-    final shim = File('build/libsqlite_traced.dylib');
-    if (!shim.existsSync()) {
-      fail('build/libsqlite_traced.dylib not built; run:\n'
-          '  cc -dynamiclib -Inative native/tracelite_runtime.c '
-          'native/shim_sqlite3.c -Wl,-reexport-lsqlite3 '
-          '-o build/libsqlite_traced.dylib');
+    final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+    if (shimBuildCommand == null) {
+      markTestSkipped(
+        'sqlite shim smoke is not implemented for '
+        '${Platform.operatingSystem}',
+      );
+      return;
     }
-    final resolverShim = File('libsqlite_traced.dylib');
+
+    final shim = File(native_artifacts.sqliteShimLibraryPath());
+    if (!shim.existsSync()) {
+      fail('${shim.path} not built; run:\n$shimBuildCommand');
+    }
+    final resolverShim = File(native_artifacts.sqliteShimLibraryName());
     resolverShim.writeAsBytesSync(shim.readAsBytesSync());
 
     final regionPath =
@@ -87,19 +94,70 @@ void main() {
         reason: 'INSERTs / SELECT use parameter binding');
 
     final stringPool = trace.strings.values.join('\n');
-    expect(
-      stringPool.contains('CREATE TABLE') ||
-          stringPool.contains('INSERT INTO') ||
-          stringPool.contains('SELECT'),
-      isTrue,
-      reason: 'SQL text should have been interned',
-    );
+    expect(stringPool, contains('sqlfp:v1:'));
+    expect(stringPool, contains('INSERT INTO T VALUES (?, ?)'));
+    expect(stringPool, isNot(contains('alice')));
+    expect(stringPool, isNot(contains('bob')));
+    expect(stringPool, isNot(contains('carol')));
+    expect(stringPool, isNot(contains('literal_secret')));
 
     final report = trace.toMarkdownReport();
     expect(report, contains('sqlite3_step'));
     expect(report, contains('tracelite report'));
+    expect(report, contains('SQL Fingerprints'));
+    expect(report, contains('INSERT INTO T VALUES (?, ?)'));
 
     print('  ${trace.spans.length} spans paired by Trace.loadRegion');
     print('  shim intercepts real sqlite3 calls successfully');
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('raw SQL capture requires an explicit opt-in', () async {
+    final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+    if (shimBuildCommand == null) {
+      markTestSkipped(
+        'sqlite shim smoke is not implemented for '
+        '${Platform.operatingSystem}',
+      );
+      return;
+    }
+
+    final shim = File(native_artifacts.sqliteShimLibraryPath());
+    if (!shim.existsSync()) {
+      fail('${shim.path} not built; run:\n$shimBuildCommand');
+    }
+    final resolverShim = File(native_artifacts.sqliteShimLibraryName());
+    resolverShim.writeAsBytesSync(shim.readAsBytesSync());
+
+    final regionPath =
+        '${Directory.systemTemp.path}/tracelite-shim-raw-$pid.tlt-region';
+    addTearDown(() {
+      try {
+        File(regionPath).deleteSync();
+      } catch (_) {}
+    });
+
+    TraceRegion.createFile(regionPath);
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      ['run', 'example/sqlite3_user.dart'],
+      environment: {
+        'TRACELITE_REGION': regionPath,
+        'TRACELITE_SQL_CAPTURE': 'raw',
+        'DYLD_LIBRARY_PATH': shim.parent.absolute.path,
+        'LD_LIBRARY_PATH': shim.parent.absolute.path,
+      },
+    );
+
+    expect(result.exitCode, 0,
+        reason: 'sqlite3_user exited non-zero. stderr:\n${result.stderr}\n'
+            'stdout:\n${result.stdout}');
+
+    final trace = Trace.loadRegion(regionPath);
+    final stringPool = trace.strings.values.join('\n');
+    expect(stringPool, contains("SELECT 'literal_secret' AS hidden"));
+    expect(stringPool, contains('INSERT INTO t VALUES (?, ?)'));
+    expect(stringPool, contains('SELECT id, name FROM t WHERE id > ?'));
+    expect(stringPool, isNot(contains('sqlfp:v1:')));
   }, timeout: const Timeout(Duration(minutes: 2)));
 }

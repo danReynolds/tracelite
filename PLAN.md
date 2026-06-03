@@ -6,22 +6,27 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 ## TLDR
 
-**Status:** Design corpus complete (7 specs, ~4,000 LOC, first 6 reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, the peer harness, and the first desktop visualizer slice are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events when the local resqlite trace hook is available. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, recorder-overhead calibration, artifact-history policy calibration, and a development `visualize` launcher.
+**Status:** Design corpus complete (7 specs, ~4,000 LOC, first 6 reviewed and patched). Runtime + cross-language interop, Dart producer API, aggregator/reporting, wider macOS shim coverage, the peer harness, and the first desktop visualizer slice are implemented. `sqlite3`, `drift`, `sqlite_async`, and a trace-enabled local `resqlite` build validate through SQLite trace events when the local resqlite trace hook is available. The CLI now supports repeated peer runs, JSON artifacts, artifact diffs with confidence-interval plus non-parametric gates, accepted/rejected/inconclusive decision artifacts, graph-ready dashboard data export, CI/production suites, recorder-overhead calibration, artifact-history policy calibration, artifact insight interpretation, and a development `visualize` launcher.
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — reduce production workload noise until a ceiling-capped `calibrate-policy --strict=true` passes, wire resqlite's profile workflow to tracelite artifacts, then finish packaging and Linux/Windows shim validation.
+**Next bottleneck:** production benchmark replacement hardening — keep the pinned
+resqlite PR green, decide how aggressively to retire the old resqlite direct
+profile runner, run the new visualizer release workflow with signing credentials,
+then finish diagnostic-workload noise reduction, Windows SQLite shim ABI
+forwarding, and full non-macOS production-suite evidence.
 
 ---
 
 ## What tracelite is
 
 A SQLite performance-analysis toolkit for the Dart ecosystem: a benchmarking
-tool powered by a profiler. The core insight: **every Dart SQLite library
-FFI-links to the same `libsqlite3` C library**, so instrumenting `libsqlite3`
-once captures every library that uses it — drift, sqlite_async, the `sqlite3`
-package itself, Resqlite, anything future. No coordination with library authors
-needed.
+tool powered by a profiler. The core insight: **SQLite's C API is the common
+boundary**. Packages that FFI-link to the platform or bundled `libsqlite3` can
+be profiled through a dynamic shim, while embedded builds such as resqlite can
+compile the same wrapper layer around their private SQLite symbols. That gives
+one artifact and policy model for drift, sqlite_async, `package:sqlite3`, and
+trace-enabled resqlite without pretending they all use the same native library.
 
 Layered on top:
 
@@ -45,16 +50,17 @@ package:sqlite3  ←─── native hooks select source: system, name: sqlite_t
   │   resolves DynamicLibrary symbols against...
   │
   ▼
-libsqlite_traced.dylib (the tracelite shim)
+libsqlite_traced.{dylib,so} (the tracelite shim)
   │   ├── wrapped SQLite API subset:
   │   │     open/close, prepare/step/reset/finalize,
   │   │     binds, column reads, counters/errors, exec
   │   │     → emit BEGIN/END events with timing into shared mmap ring
   │   │     → call real libsqlite3 via dlsym(RTLD_NEXT, ...)
-  │   └── unwrapped functions: forwarded transparently via LC_REEXPORT_DYLIB
+  │   └── unwrapped functions: forwarded transparently via the platform link
+  │       strategy (LC_REEXPORT_DYLIB on macOS, libsqlite3 link on Linux)
   │
   ▼
-real libsqlite3.dylib or private sqlite3mc symbols in an embedded build
+real libsqlite3 or private sqlite3mc symbols in an embedded build
 
 
             ┌─── meanwhile, on the Dart side ───┐
@@ -152,9 +158,14 @@ doc/span-registry.generated.md     full per-category schemas with arg lists
   the measured library.
 - `package:tracelite/resqlite.dart` exposes the resqlite semantic vocabulary
   that resqlite can import instead of hard-coding IDs and names locally.
-- The public `tracelite` library is now core-only. Peer adapters live under
-  `bin/src/` and their dependencies are dev-only, so a library such as
-  `resqlite` can depend on tracelite's recorder without a package cycle.
+- The public `tracelite` library is now core-only. The published `bin/`
+  executable is a thin launcher over `lib/src/core_cli.dart`, which keeps core
+  artifact commands available without peer libraries. Peer adapters live under
+  `tool/src/` behind the source-checkout handoff, their dependencies are
+  dev-only, and `.pubignore` keeps the source-checkout runner out of the
+  published archive, so a library such as
+  `resqlite` can depend on tracelite's recorder without inheriting drift,
+  sqlite_async, sqlite3, or resqlite peer dependencies from tracelite itself.
   A published peer-comparison CLI should move those adapters into a companion
   package or explicit CLI package rather than reintroducing peer libraries as
   core dependencies.
@@ -191,7 +202,11 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart compare --repetitions=N --out-json=compare.json` runs
   repeated peer scenarios and writes benchmark artifacts with per-repetition
   scenario elapsed time, child process time, trace diagnostics, span groups, and
-  counter groups.
+  counter groups. Multi-repetition or multi-peer compares default to an app-JIT
+  child runner where native assets allow it; native-assets-heavy repeated runs
+  can opt into `--runner=worker`, which records worker startup separately and
+  retargets each sample to a fresh trace region. Suites reuse one prepared child
+  runner across the selected scenario matrix.
 - `bin/tracelite.dart diff --baseline=base.json --candidate=change.json`
   compares compare artifacts by summary metric with CV gates, a 95% mean-delta
   confidence interval, Mann-Whitney U repetition evidence, and outlier counts.
@@ -212,10 +227,32 @@ Run both: `dart test`. Both pass.
 - `bin/tracelite.dart validate-graph-data <dir>` checks index/dataset schemas,
   counts, files, and row shapes; `export-graph-data` runs this validation before
   reporting success.
-- `bin/tracelite.dart suite --profile=ci|production --out-dir=...` runs a
-  repeatable scenario matrix and writes a manifest plus per-scenario artifacts
-  and logs.
-- `bin/tracelite.dart suite-history --profile=production --runs=5 --out-dir=...`
+- `bin/tracelite.dart explain <artifact-or-dir>` reads compare, diff, decision,
+  suite, suite-history, and workload-summary artifacts and emits trust,
+  trace-health, noise, peer-spread, harness-overhead, and bottleneck findings
+  as Markdown plus optional `tracelite.insights.v1` JSON.
+- `bin/tracelite.dart doctor` checks source layout, generated files, Dart
+  dependency resolution, native build artifacts, compiler availability, and the
+  visualizer runtime. It prints actionable setup fixes and can write a
+  `tracelite.doctor.v1` JSON artifact for CI diagnostics.
+- `bin/tracelite.dart visualizer-check` resolves the Flutter visualizer app,
+  runs analyze/tests, and can build plus verify the current host release bundle
+  with `--build=host`.
+- `tool/publish_check.dart` validates a clean tracked-file archive with
+  `dart pub publish --dry-run`, avoiding false publish warnings from ignored
+  local overrides used for sibling-checkout validation.
+- CI writes an explicit `pubspec_overrides.yaml` that points `resqlite` at a
+  checked-out trace-enabled sibling pinned to PR #109 head
+  `94529ec00dfb74d4c0093ce52d6d510964761067`, then verifies
+  `.dart_tool/package_config.json`, the resolved git SHA, and the
+  `trace_sqlite` hook before running peer tests, so the macOS gate cannot
+  silently fall back to the pub package and lose trace hooks.
+- `bin/tracelite.dart suite --profile=ci|experiment|production --out-dir=...`
+  runs a repeatable scenario matrix and writes a manifest plus per-scenario
+  artifacts and logs. `ci` is the small PR smoke, `experiment` is the medium
+  repeated baseline/candidate workflow, and `production` is the release-gate
+  matrix.
+- `bin/tracelite.dart suite-history --profile=ci|experiment|production --runs=5 --out-dir=...`
   runs independent suites into timestamped run directories, writes a
   `tracelite.suite_history.v1` manifest, and emits policy-calibration JSON and
   markdown sidecars.
@@ -234,7 +271,7 @@ Current validation status:
 
 | Peer | Scenario status | Shim trace status | Notes |
 |---|---|---|---|
-| `sqlite3` | Pass | Pass | Uses sqlite3 native hooks with `source: system`, `name: sqlite_traced`; the harness provides `libsqlite_traced.dylib` in cwd. |
+| `sqlite3` | Pass | Pass | Uses sqlite3 native hooks with `source: system`, `name: sqlite_traced`; the harness provides the platform resolver library (`libsqlite_traced.dylib` on macOS, `libsqlite_traced.so` on Linux) in cwd. |
 | `drift` | Pass | Pass | Uses `NativeDatabase`, which routes through `package:sqlite3`. |
 | `sqlite_async` | Pass | Pass | Uses the documented `singleConnection` wrapper over a traced `package:sqlite3` connection for the narrow common-interface scenario. The default native pool bypasses the shim. |
 | `resqlite` | Pass | Pass | Uses the local `resqlite` checkout's `trace_sqlite` build mode, which compiles sqlite3mc under private symbols and embeds tracelite's SQLite wrappers inside `libresqlite`. |
@@ -251,17 +288,29 @@ tracelite/
 ├── PLAN.md                      this file (audience: contributors / future-self)
 ├── LICENSE                      MIT
 ├── .gitignore
-├── pubspec.yaml                 package metadata + peer dependencies
+├── pubspec.yaml                 core package metadata + dev-only peer deps
 ├── doc/                         design specs + per-spec feedback
-├── tool/                       spans.yaml + generator
+├── bin/                         thin launcher + source-checkout handoff
+├── tool/                       spans.yaml + generator + development CLI
 ├── native/                      C runtime + shim + generated header
-├── lib/src/                     trace decoder, peer harness, generated Dart constants
+├── lib/src/                     trace decoder, recorder, decisions, graph export
 ├── example/                     example consumer programs
 ├── test/                        smoke tests
 └── build/                       compiled artifacts (.gitignored)
 ```
 
-No git remote yet — design and prototype live locally pending a public push.
+The published `bin/tracelite.dart` stays small and routes core artifact commands
+to `lib/src/core_cli.dart`: `report`, `diff`, `decision`, `calibrate-policy`,
+`export-graph-data`, `validate-graph-data`, `workload-summary`, and
+`create-region`. In a source checkout it hands peer benchmark commands to
+`tool/tracelite_dev.dart`, where the peer-heavy implementation can use dev-only
+dependencies. The published library dependency graph stays core-only until the
+peer benchmark CLI becomes a companion package.
+
+The pub archive intentionally excludes the checkout-only peer runner surface:
+`tool/tracelite_dev.dart`, `tool/peer_runner.dart`, and `tool/src/peer*.dart`.
+`tool/publish_check.dart` fails if those source-checkout-only peer files appear
+in the dry-run archive listing.
 
 ---
 
@@ -281,17 +330,21 @@ A clear-eyed accounting. Designed ≠ proven.
 | Current wrapped SQLite API subset is sufficient for non-trivial sqlite3/drift/sqlite_async/resqlite workloads | ✓ proven | full INSERT + SELECT cycle and peer scenarios work |
 | Aggregator skeleton loads region traces and reports stats | ✓ proven | `Trace.loadRegion`, report CLI, runtime/shim/CLI tests |
 | Repeated peer runs produce durable JSON artifacts | ✓ proven | `compare --repetitions --out-json`, compare artifact test |
+| Benchmark presets cover smoke, experiment, and release-gate workflows | ✓ proven | `suite --profile=ci|experiment|production` emits the same manifest shape with profile-scaled rows/repetitions; `test/suite_command_test.dart` validates the experiment preset |
 | Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
 | Benchmark decisions are machine-gated | ✓ proven | `tracelite decision` over compare JSON and suite manifests, command tests for accepted/rejected/inconclusive outcomes |
 | Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader workload noise | `tracelite calibrate-policy` produces policy artifacts and strict history validation; a ceiling-capped resqlite measured-elapsed release scope passes on the 5-run history, while broader diagnostic metrics and two micro workloads remain too noisy |
 | Benchmark artifacts can power downstream dashboards without tracelite UI | ✓ proven | `tracelite export-graph-data` emits graphable datasets from suite, decision, and workload-summary inputs |
+| Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
+| Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `.pubignore` and `tool/publish_check.dart` exclude source-checkout peer runner files from the archive; `test/package_boundary_test.dart` forces core CLI mode and verifies core artifact commands including `diff` still run |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
-| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; `flutter test`, `flutter analyze`, and `flutter build macos` pass |
+| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; it now includes workspace, trace, compare, Decision Review, workload, graph-data, and artifact views; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; the `Visualizer Release` workflow packages macOS/Linux/Windows archives and manifests with optional macOS signing/notarization |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
-| Linux LD_PRELOAD shim works | ✗ designed only | macOS-only validation today |
+| Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
+| Windows core artifact surface works | △ CI-configured | `.github/workflows/ci.yml` runs generated-output, analysis, and platform-independent core artifact tests on Windows; native runtime/shim tracing remains unsupported until the runtime is ported off POSIX-only mmap/open/clock APIs |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
-| resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario |
+| resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the pinned trace-enabled sibling checkout before peer tests |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
 
 Things validated by build but not runtime:
@@ -300,10 +353,12 @@ Things validated by build but not runtime:
 - The schema generator's `--check` mode catches drift between `spans.yaml` and
   any of its 4 outputs. `.github/workflows/ci.yml` runs that check, builds the
   macOS runtime/shim, runs analysis/tests, and runs
-  `tracelite suite --profile=ci` against the four-peer matrix. The workflow
-  assumes a sibling `${{ github.repository_owner }}/resqlite` repository because
-  local validation uses `dependency_overrides: resqlite: ../resqlite`; private
-  installs should provide `CROSS_REPO_READ_TOKEN`.
+  `tracelite suite --profile=ci` against the four-peer matrix. The Linux lane
+  builds the `.so` runtime/shim, runs native smoke tests, and runs the same
+  pinned four-peer `ci` suite. The workflow assumes a sibling
+  `${{ github.repository_owner }}/resqlite` repository because local validation
+  uses `dependency_overrides: resqlite: ../resqlite`; private installs should
+  provide `CROSS_REPO_READ_TOKEN`.
 
 ---
 
@@ -451,6 +506,10 @@ Delivered:
   elapsed time, trace diagnostics, span groups, and counter groups.
 - Scenario elapsed time is measured inside the child process, so benchmark
   timings exclude `dart run` startup and native-asset build-hook overhead.
+- Multi-repetition or multi-peer compares default to an app-JIT child runner
+  where native assets allow it. `--runner=worker` keeps one process alive for
+  repeated native-assets-heavy runs and records startup in runner metadata
+  without changing the per-repetition artifact shape.
 - `tracelite diff --baseline=base.json --candidate=change.json` compares
   artifacts by summary metric with a percent threshold and coefficient-of-
   variation noise gate.
@@ -498,6 +557,10 @@ Work:
     bytes, stream counts, reader busy state.
 - Add side-by-side parity tests between current resqlite profile output and
   tracelite artifacts for a small initial matrix.
+- Done in the resqlite integration PR: benchmark, decision, and profile wrappers
+  pin Tracelite to `resqlite-profiling-gate-2026-06-01-r2`, record both source
+  states, verify the resqlite dependency binding, and preserve `insights.md` /
+  `insights.json` from `tracelite explain`.
 
 Acceptance gates:
 
@@ -529,9 +592,8 @@ Work:
   each peer's advertised capabilities.
 - Done in the peer harness: initial reactive scenarios cover keyed primary-key
   subscriptions, high-cardinality fan-out, and many-stream writer throughput
-  for peers with a stream/watch API. The current `sqlite_async` and `resqlite`
-  adapters implement this lane; `sqlite3` and the current raw-SQL `drift`
-  adapter report unsupported.
+  for peers with a stream/watch API. The current `drift`, `sqlite_async`, and
+  `resqlite` adapters implement this lane; `sqlite3` reports unsupported.
 - Done in the resqlite vocabulary: `recordResqliteDiagnostics` records
   `Database.diagnostics()` snapshots as tracelite gauges, and the
   `sqlite-diagnostics` scenario validates the path through resqlite.
@@ -551,14 +613,21 @@ Work:
 - Document each peer's traced mode. In particular, `sqlite_async` currently
   validates through a traced `singleConnection` wrapper; default native-pool
   coverage needs separate validation or explicit exclusion.
-- Add a real drift reactive adapter backed by generated/table-registry-aware
-  drift queries before claiming drift support for the optional reactive lane.
-  The current raw `NativeDatabase` adapter cannot honestly model drift's stream
-  invalidation semantics.
+- Done first slice: the `drift` adapter now uses a small generated-database
+  harness with explicit table registry entries so reactive workloads flow
+  through Drift's `customSelect(..., readsFrom: ...).watch()` stream-query
+  invalidation instead of pretending raw `NativeDatabase` SQL is reactive.
 - Scale ring sizing from expected event volume and fail loudly if any producer
   drops events.
-- Consider a compiled/snapshotted child or long-lived worker to reduce suite
-  wall time once region reset semantics are formalized.
+- Done first slice: source-checkout compare uses direct script launches for
+  single-shot runs and app-JIT child launches for repeated or multi-peer runs
+  where native assets allow it.
+- Done follow-up: source-checkout suites now reuse one prepared runner across
+  the selected scenario matrix while still launching an isolated child process
+  for each peer repetition.
+- Done native-assets slice: `--runner=worker` reuses one process across repeated
+  samples, retargets each sample to a fresh trace region with quiescent native
+  reset, and records worker startup separately from repetition timings.
 
 Acceptance gates:
 
@@ -599,8 +668,11 @@ Acceptance gates:
 
 Work:
 
-- Add SQL fingerprinting and redaction. Raw SQL capture must be explicit and
-  unsafe/detail-gated; grouping should default to normalized fingerprints.
+- Done first slice: SQLite prepare calls default to normalized `sqlfp:v1`
+  fingerprints in the string pool, raw SQL capture requires
+  `TRACELITE_SQL_CAPTURE=raw` or `TRACELITE_RAW_SQL=1`, and compare samples now
+  include `sql_fingerprint_groups` for prepare-cost attribution without
+  committing literal values.
 - Add causal-chain reporting from public Dart operation to reader/writer
   dispatch, worker handling, stream invalidation, decode, and SQLite C spans.
 - Improve counter/gauge reports for semantic resqlite signals.
@@ -609,7 +681,12 @@ Work:
   opens raw `.tlt-region` traces, compare artifacts, suite manifests, decision
   artifacts, workload summaries, and graph-data directories. It renders a
   workspace browser, trace timeline, span aggregation table, peer-comparison
-  table, graph-data validation rows, and workload tables.
+  table, Decision Review page, graph-data validation rows, and workload tables.
+  The timeline now has explicit zoom controls, scroll/double-click zoom,
+  keyboard navigation, larger dense-span bars, wider hit targets,
+  nearest-span picking, selected-span outlines, and a linked span index.
+  Workspace, compare, and decision screens now surface shared artifact insights
+  from the core interpretation layer.
 - Add true visible-range query reaggregation after the initial custom timeline
   and table views have settled.
 - Consider stack sampling for CPU attribution only after wall/span attribution
@@ -630,11 +707,18 @@ prototype.
 Work:
 
 - Package the CLI and runtime build outputs cleanly.
-- Validate Linux shim loading (`LD_PRELOAD` or equivalent native-asset path).
+- Keep the desktop visualizer on a repeatable release-check path:
+  `tracelite visualizer-check --build=host` for local bundle evidence and the
+  `Visualizer Release` workflow for macOS/Linux/Windows archive manifests,
+  optional macOS signing/notarization, and release asset publishing.
+- Validate Linux shim loading through the sqlite3 native-hook resolver path.
+- Validate Windows core artifact commands in CI while keeping native tracing
+  explicitly unsupported until the runtime and SQLite shim have real Windows
+  implementations.
 - Validate Windows substitution/loading strategy.
 - Add CI for:
   - generator freshness;
-  - runtime/shim tests;
+  - runtime/shim tests (macOS full suite plus Linux package:sqlite3 shim smoke);
   - benchmark artifact tests;
   - resqlite `trace_sqlite` native-asset smoke;
   - four-peer compare smoke where dependencies are available.
@@ -660,9 +744,9 @@ The non-obvious choices a future maintainer needs to know.
 
 ### 1. Reexport-and-override, not LD_PRELOAD
 
-Initial design assumed LD_PRELOAD-style symbol interposition. The actual implementation uses a different mechanism: build the shim as a libsqlite3-compatible dylib that re-exports the real libsqlite3 plus overrides the traced SQLite API subset. Consumer programs load the shim via sqlite3 native hooks. No global env var manipulation is required for the `package:sqlite3` path.
+Initial design assumed LD_PRELOAD-style symbol interposition. The actual implementation uses a different mechanism: build the shim as a libsqlite3-compatible dynamic library that forwards to the real libsqlite3 plus overrides the traced SQLite API subset. Consumer programs load the shim via sqlite3 native hooks. No global env var manipulation is required for the `package:sqlite3` path.
 
-This is *better* than LD_PRELOAD because it works on macOS without DYLD_INSERT_LIBRARIES restrictions, doesn't rely on global symbol resolution order, and doesn't surprise users who didn't expect their environment to be intercepted.
+This is *better* than LD_PRELOAD because it works on macOS without DYLD_INSERT_LIBRARIES restrictions, can use the same native-hook resolver name on Linux, and doesn't surprise users who didn't expect their environment to be intercepted.
 
 ### 2. BEGIN/END/INSTANT phase schemas, not single-phase args
 
@@ -730,6 +814,12 @@ cc -dynamiclib -O2 -Inative \
   -Wl,-reexport-lsqlite3 \
   -o build/libsqlite_traced.dylib
 
+# Build the libsqlite3 shim (Linux)
+cc -shared -fPIC -O2 -Inative \
+  native/tracelite_runtime.c native/shim_sqlite3.c \
+  -Wl,--no-as-needed -lsqlite3 \
+  -o build/libsqlite_traced.so
+
 # Run all tests
 dart test
 
@@ -738,6 +828,12 @@ dart run bin/tracelite.dart suite \
   --profile=ci \
   --interfaces=sqlite3,drift,sqlite_async,resqlite \
   --out-dir=build/tracelite-ci-suite
+
+# Run the day-to-day experiment matrix
+dart run bin/tracelite.dart suite \
+  --profile=experiment \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --out-dir=build/tracelite-experiment-suite
 
 # Run the production-oriented replacement matrix
 dart run bin/tracelite.dart suite \
