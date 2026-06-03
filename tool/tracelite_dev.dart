@@ -77,6 +77,10 @@ Future<void> _doctor(List<String> args) async {
   final root = Directory(_canonicalDirectoryPath(options['root'] ?? '.'));
   final strict = _boolOption(options, 'strict', false);
   final jsonOut = options['json'];
+  final sqliteAmalgamationPath = options['sqlite-amalgamation'];
+  final sqliteAmalgamation = sqliteAmalgamationPath == null
+      ? null
+      : File(_resolveRootedPath(root.path, sqliteAmalgamationPath));
   final visualizerReleasePaths = _csvOption(options['visualizer-release']);
   final requiredReleasePlatforms =
       _csvOption(options['require-visualizer-release-platforms']).toSet();
@@ -123,6 +127,8 @@ Future<void> _doctor(List<String> args) async {
 
   requiredFile('pubspec.yaml');
   requiredFile('bin/tracelite.dart');
+  requiredFile('tool/build_sqlite_shim.dart');
+  requiredFile('tool/sqlite_shim_smoke.dart');
   requiredFile('tool/tracelite_dev.dart');
   requiredFile('tool/peer_runner.dart');
   requiredFile('tool/src/peer.dart');
@@ -196,7 +202,22 @@ Future<void> _doctor(List<String> args) async {
     );
   }
 
-  final shimCommand = native_artifacts.sqliteShimBuildCommand();
+  if (sqliteAmalgamation != null) {
+    checks.add(
+      sqliteAmalgamation.existsSync()
+          ? _DoctorCheck.ok('sqlite amalgamation', sqliteAmalgamation.path)
+          : _DoctorCheck.warn(
+              'sqlite amalgamation',
+              'missing ${sqliteAmalgamation.path}',
+              action: 'Download the SQLite amalgamation and pass the path to '
+                  '--sqlite-amalgamation=...',
+            ),
+    );
+  }
+
+  final shimCommand = native_artifacts.sqliteShimBuildCommand(
+    embeddedSqliteSourcePath: sqliteAmalgamation?.path,
+  );
   if (shimCommand != null) {
     final shim = File(
       _joinPath(root.path, native_artifacts.sqliteShimLibraryPath()),
@@ -218,8 +239,9 @@ Future<void> _doctor(List<String> args) async {
       _DoctorCheck.warn(
         'sqlite shim',
         reason,
-        action: 'Use macOS or Linux for native shim evidence until Windows '
-            'ships full sqlite3 ABI forwarding or embedded-shim support.',
+        action: 'Use macOS or Linux for native shim evidence, or pass '
+            '--sqlite-amalgamation=/path/to/sqlite3.c on Windows to build '
+            'the embedded sqlite_traced.dll variant.',
       ),
     );
   }
@@ -695,6 +717,10 @@ bool _isAbsolutePath(String path) {
   return path.startsWith('/') ||
       path.startsWith(r'\\') ||
       RegExp(r'^[A-Za-z]:[\\/]').hasMatch(path);
+}
+
+String _resolveRootedPath(String root, String path) {
+  return _isAbsolutePath(path) ? path : _joinPath(root, path);
 }
 
 Future<void> _suite(List<String> args) async {
@@ -3748,6 +3774,7 @@ Never _usage({int exitCode = 64}) {
   output.writeln('usage:');
   output.writeln('  dart run bin/tracelite.dart doctor '
       '[--root=/path/to/tracelite] [--strict=true] [--json=doctor.json] '
+      '[--sqlite-amalgamation=/path/to/sqlite3.c] '
       '[--visualizer-release=manifest-or-dir] '
       '[--require-visualizer-release-platforms=macos,linux,windows] '
       '[--require-signed-macos-release=true]');

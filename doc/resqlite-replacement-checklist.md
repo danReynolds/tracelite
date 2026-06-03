@@ -76,10 +76,10 @@ the same workload parameters.
 
 - Ready to replace first: generic report generation, repetition artifact
   storage, workload-scoped span summaries, low-value wall-time wrappers, and
-  Timeline-style worker markers. PR #109 now routes the regular benchmark and
-  profile-diagnostic workflows through tracelite wrappers; the remaining
-  deletion decision is whether resqlite wants to archive or keep the old direct
-  profile runner as a compatibility/parity harness.
+  Timeline-style worker markers. Merged PR #109 now routes the regular
+  benchmark and profile-diagnostic workflows through tracelite wrappers; the
+  remaining deletion decision is whether resqlite wants to archive or keep the
+  old direct profile runner as a compatibility/parity harness.
 - Not ready to delete yet without a final migration PR: old profile JSON/diff
   call sites, `ProfiledDatabase` sample storage, custom many-streams
   fanout-delta JSON, and RSS memory capture. Tracelite now captures and exports
@@ -124,7 +124,7 @@ Summary:
 ## Current deletion position
 
 The parity gate is satisfied for the current resqlite profile surfaces, and
-PR #109 has the current integration evidence: it is non-draft, source-pins the
+merged PR #109 has the current integration evidence: it source-pins the
 Tracelite checkout, records both Tracelite and resqlite source states in the
 wrapper manifest, and keeps the Tracelite smoke lane green. That is enough for
 tracelite to own resqlite's regular profiling and benchmarking workflow. It is

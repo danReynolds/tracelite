@@ -22,9 +22,10 @@ the calibrated production path. Linux has native shim smoke coverage and a
 pinned four-peer `ci` suite for the same Dart SQLite lanes, but production
 profile history is still macOS-validated. Windows now validates the
 platform-independent Dart artifact surface, native runtime attach, and
-visualizer package in CI, but SQLite shim tracing is intentionally unsupported
-until Tracelite ships and validates full `sqlite3` ABI export/forwarding or an
-embedded-shim build.
+visualizer package in CI. Windows SQLite shim tracing has an embedded
+`sqlite_traced.dll` build and package:sqlite3 smoke lane using a pinned SQLite
+amalgamation, but peer-suite production history on Windows is still pending
+real runner evidence.
 
 ## What It Does
 
@@ -53,7 +54,10 @@ On macOS and Linux, unwrapped SQLite symbols are supplied by the platform link
 strategy while the shim times the wrapped calls. Windows needs a different
 contract: Dart resolves symbols from `sqlite_traced.dll` itself, so a production
 Windows shim must export or forward the full `sqlite3` ABI instead of only
-loading a real SQLite DLL internally.
+loading a real SQLite DLL internally. Tracelite's Windows path is the embedded
+variant: compile the SQLite amalgamation with the wrapped entry points renamed
+to `tlt_sqlite3_*`, then link it with the exported wrapper layer so
+`sqlite_traced.dll` supplies both traced and untraced SQLite symbols.
 
 Native events and Dart `TraceRecorder` events write into one shared-memory
 region on the same monotonic clock. After a workload finishes, tracelite reads
@@ -76,6 +80,17 @@ are represented explicitly instead of hidden behind incomparable numbers.
 # Complete CLI usage; command-level help works too, for example
 # `dart run bin/tracelite.dart doctor --help`.
 dart run bin/tracelite.dart help
+
+# Source-checkout setup check. On Windows, pass sqlite3.c to print the
+# embedded sqlite_traced.dll build plan.
+dart run bin/tracelite.dart doctor --sqlite-amalgamation=third_party/sqlite3.c
+
+# Source-checkout SQLite shim build helper.
+dart --packages=.dart_tool/package_config.json tool/build_sqlite_shim.dart \
+  --sqlite-amalgamation=third_party/sqlite3.c
+
+# Source-checkout SQLite shim smoke without invoking package:test hooks.
+dart --packages=.dart_tool/package_config.json tool/sqlite_shim_smoke.dart
 
 # Published/core command: inspect an existing trace.
 dart run bin/tracelite.dart report build/example.tlt-region

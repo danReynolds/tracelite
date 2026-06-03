@@ -17,8 +17,8 @@
  *   - Defining TRACELITE_SQLITE3_EMBEDDED builds the same wrappers into a
  *     library that also contains SQLite itself. The SQLite amalgamation must
  *     be compiled with wrapped public symbols renamed to tlt_sqlite3_*.
- *   - In that mode wrappers resolve tlt_sqlite3_* via RTLD_DEFAULT instead
- *     of resolving the next libsqlite3 image.
+ *   - In that mode wrappers call the renamed tlt_sqlite3_* functions directly
+ *     instead of resolving the next libsqlite3 image.
  *
  * Build (macOS):
  *   cc -dynamiclib -flat_namespace ... -o libsqlite_traced.dylib
@@ -31,27 +31,41 @@
  * Windows note:
  *   A LoadLibrary/GetProcAddress resolver is not enough on its own.
  *   package:sqlite3 resolves SQLite symbols from sqlite_traced.dll, and
- *   Windows does not re-export dependency symbols from that handle. A Windows
- *   shim needs full sqlite3 ABI forwarding or an embedded SQLite build before
- *   it can support peer-suite tracing.
+ *   Windows does not re-export dependency symbols from that handle. Use the
+ *   embedded build plan so sqlite_traced.dll exports the full sqlite3 ABI from
+ *   a SQLite amalgamation, or ship a full forwarding DLL.
  *
  * Loading from Dart:
  *   package:sqlite3 native hooks can be configured with
  *   `source: system, name: sqlite_traced`, and this repo copies the shim
- *   to the platform resolver name (`libsqlite_traced.dylib` on macOS or
- *   `libsqlite_traced.so` on Linux) before traced peer runs.
+ *   to the platform resolver name (`libsqlite_traced.dylib` on macOS,
+ *   `libsqlite_traced.so` on Linux, or `sqlite_traced.dll` on Windows) before
+ *   traced peer runs.
  */
 
 #include "tracelite_runtime.h"
 #include "builtin_spans.g.h"
 
-#include <dlfcn.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+
+#ifndef TRACELITE_SQLITE3_EMBEDDED
+#include <dlfcn.h>
+#endif
+
+#if defined(_WIN32)
+#define TLT_SQLITE_API __declspec(dllexport)
+#else
+#define TLT_SQLITE_API
+#endif
+
+/* Forward declare types as opaque pointers, matching the SQLite ABI. */
+typedef void sqlite3;
+typedef void sqlite3_stmt;
 
 /* ---------------------------------------------------------------------------
  * Real libsqlite3 symbol resolver.
@@ -67,16 +81,55 @@
  * the cached pointer.
  * ------------------------------------------------------------------------- */
 
+#ifndef TRACELITE_SQLITE_PRODUCER_NAME
 #ifdef TRACELITE_SQLITE3_EMBEDDED
-#define REAL_SYMBOL_NAME(SYM) "tlt_" #SYM
-#define REAL_SYMBOL_SCOPE RTLD_DEFAULT
 #define TRACELITE_SQLITE_PRODUCER_NAME "libresqlite"
 #else
-#define REAL_SYMBOL_NAME(SYM) #SYM
-#define REAL_SYMBOL_SCOPE RTLD_NEXT
 #define TRACELITE_SQLITE_PRODUCER_NAME "libsqlite_traced"
 #endif
+#endif
 
+#ifndef TRACELITE_SQLITE3_EMBEDDED
+#define REAL_SYMBOL_NAME(SYM) #SYM
+#define REAL_SYMBOL_SCOPE RTLD_NEXT
+#endif
+
+#ifdef TRACELITE_SQLITE3_EMBEDDED
+int tlt_sqlite3_open(const char*, sqlite3**);
+int tlt_sqlite3_open_v2(const char*, sqlite3**, int, const char*);
+int tlt_sqlite3_close(sqlite3*);
+int tlt_sqlite3_close_v2(sqlite3*);
+int tlt_sqlite3_prepare_v3(sqlite3*, const char*, int, unsigned int,
+                           sqlite3_stmt**, const char**);
+int tlt_sqlite3_prepare_v2(sqlite3*, const char*, int, sqlite3_stmt**,
+                           const char**);
+int tlt_sqlite3_step(sqlite3_stmt*);
+int tlt_sqlite3_reset(sqlite3_stmt*);
+int tlt_sqlite3_finalize(sqlite3_stmt*);
+int tlt_sqlite3_bind_int64(sqlite3_stmt*, int, long long);
+int tlt_sqlite3_bind_int(sqlite3_stmt*, int, int);
+int tlt_sqlite3_bind_null(sqlite3_stmt*, int);
+int tlt_sqlite3_bind_double(sqlite3_stmt*, int, double);
+int tlt_sqlite3_bind_text(sqlite3_stmt*, int, const char*, int, void*);
+int tlt_sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int, void*);
+int tlt_sqlite3_bind_blob64(sqlite3_stmt*, int, const void*, uint64_t, void*);
+int tlt_sqlite3_clear_bindings(sqlite3_stmt*);
+int tlt_sqlite3_column_count(sqlite3_stmt*);
+int tlt_sqlite3_column_int(sqlite3_stmt*, int);
+long long tlt_sqlite3_column_int64(sqlite3_stmt*, int);
+double tlt_sqlite3_column_double(sqlite3_stmt*, int);
+const unsigned char* tlt_sqlite3_column_text(sqlite3_stmt*, int);
+const void* tlt_sqlite3_column_blob(sqlite3_stmt*, int);
+int tlt_sqlite3_column_bytes(sqlite3_stmt*, int);
+int tlt_sqlite3_exec(sqlite3*, const char*, void*, void*, char**);
+int tlt_sqlite3_changes(sqlite3*);
+int tlt_sqlite3_total_changes(sqlite3*);
+long long tlt_sqlite3_last_insert_rowid(sqlite3*);
+int tlt_sqlite3_errcode(sqlite3*);
+const char* tlt_sqlite3_errmsg(sqlite3*);
+
+#define RESOLVE_REAL(SYM, TYPE) TYPE _real = (TYPE)tlt_##SYM
+#else
 #define RESOLVE_REAL(SYM, TYPE)                                             \
   static TYPE _real = NULL;                                                 \
   if (!_real) {                                                             \
@@ -87,6 +140,7 @@
               REAL_SYMBOL_NAME(SYM), dlerror());                            \
     }                                                                       \
   }
+#endif
 
 /* ---------------------------------------------------------------------------
  * Self-attach to TRACELITE_REGION on first call.
@@ -110,10 +164,6 @@ static void ensure_attached(void) {
  * here; we just forward them. We use void* as their type since we don't
  * need the real sqlite3.h to forward-declare structs.
  * ------------------------------------------------------------------------- */
-
-/* Forward declare types as opaque pointers, matching the SQLite ABI. */
-typedef void sqlite3;
-typedef void sqlite3_stmt;
 
 static uint64_t pack_f64(double value) {
   uint64_t bits = 0;
@@ -343,7 +393,7 @@ static uint32_t intern_fingerprinted_sql(const char* sql, int nByte) {
 
 /* sqlite3_open(filename, ppDb) */
 typedef int (*open_t)(const char*, sqlite3**);
-int sqlite3_open(const char* filename, sqlite3** ppDb) {
+TLT_SQLITE_API int sqlite3_open(const char* filename, sqlite3** ppDb) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_open, open_t);
   if (!_real) return -1;
@@ -364,8 +414,8 @@ int sqlite3_open(const char* filename, sqlite3** ppDb) {
 
 /* sqlite3_open_v2(filename, ppDb, flags, vfs) */
 typedef int (*open_v2_t)(const char*, sqlite3**, int, const char*);
-int sqlite3_open_v2(const char* filename, sqlite3** ppDb, int flags,
-                    const char* vfs) {
+TLT_SQLITE_API int sqlite3_open_v2(const char* filename, sqlite3** ppDb,
+                                   int flags, const char* vfs) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_open_v2, open_v2_t);
   if (!_real) return -1;
@@ -387,7 +437,7 @@ int sqlite3_open_v2(const char* filename, sqlite3** ppDb, int flags,
 
 /* sqlite3_close / sqlite3_close_v2 */
 typedef int (*close_t)(sqlite3*);
-int sqlite3_close(sqlite3* db) {
+TLT_SQLITE_API int sqlite3_close(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_close, close_t);
   if (!_real) return -1;
@@ -400,7 +450,7 @@ int sqlite3_close(sqlite3* db) {
   return rc;
 }
 
-int sqlite3_close_v2(sqlite3* db) {
+TLT_SQLITE_API int sqlite3_close_v2(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_close_v2, close_t);
   if (!_real) return -1;
@@ -416,9 +466,10 @@ int sqlite3_close_v2(sqlite3* db) {
 /* sqlite3_prepare_v3(db, zSql, nByte, prepFlags, ppStmt, pzTail) */
 typedef int (*prepare_v3_t)(sqlite3*, const char*, int, unsigned int,
                              sqlite3_stmt**, const char**);
-int sqlite3_prepare_v3(sqlite3* db, const char* zSql, int nByte,
-                        unsigned int prepFlags, sqlite3_stmt** ppStmt,
-                        const char** pzTail) {
+TLT_SQLITE_API int sqlite3_prepare_v3(sqlite3* db, const char* zSql,
+                                      int nByte, unsigned int prepFlags,
+                                      sqlite3_stmt** ppStmt,
+                                      const char** pzTail) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_prepare_v3, prepare_v3_t);
   if (!_real) return -1;
@@ -442,8 +493,9 @@ int sqlite3_prepare_v3(sqlite3* db, const char* zSql, int nByte,
 /* sqlite3_prepare_v2(db, zSql, nByte, ppStmt, pzTail) */
 typedef int (*prepare_v2_t)(sqlite3*, const char*, int, sqlite3_stmt**,
                              const char**);
-int sqlite3_prepare_v2(sqlite3* db, const char* zSql, int nByte,
-                        sqlite3_stmt** ppStmt, const char** pzTail) {
+TLT_SQLITE_API int sqlite3_prepare_v2(sqlite3* db, const char* zSql,
+                                      int nByte, sqlite3_stmt** ppStmt,
+                                      const char** pzTail) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_prepare_v2, prepare_v2_t);
   if (!_real) return -1;
@@ -465,7 +517,7 @@ int sqlite3_prepare_v2(sqlite3* db, const char* zSql, int nByte,
 
 /* sqlite3_step(stmt) */
 typedef int (*step_t)(sqlite3_stmt*);
-int sqlite3_step(sqlite3_stmt* stmt) {
+TLT_SQLITE_API int sqlite3_step(sqlite3_stmt* stmt) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_step, step_t);
   if (!_real) return -1;
@@ -480,7 +532,7 @@ int sqlite3_step(sqlite3_stmt* stmt) {
 
 /* sqlite3_reset(stmt) */
 typedef int (*reset_t)(sqlite3_stmt*);
-int sqlite3_reset(sqlite3_stmt* stmt) {
+TLT_SQLITE_API int sqlite3_reset(sqlite3_stmt* stmt) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_reset, reset_t);
   if (!_real) return -1;
@@ -495,7 +547,7 @@ int sqlite3_reset(sqlite3_stmt* stmt) {
 
 /* sqlite3_finalize(stmt) */
 typedef int (*finalize_t)(sqlite3_stmt*);
-int sqlite3_finalize(sqlite3_stmt* stmt) {
+TLT_SQLITE_API int sqlite3_finalize(sqlite3_stmt* stmt) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_finalize, finalize_t);
   if (!_real) return -1;
@@ -510,7 +562,8 @@ int sqlite3_finalize(sqlite3_stmt* stmt) {
 
 /* sqlite3_bind_int64(stmt, idx, value) */
 typedef int (*bind_int64_t)(sqlite3_stmt*, int, long long);
-int sqlite3_bind_int64(sqlite3_stmt* stmt, int idx, long long value) {
+TLT_SQLITE_API int sqlite3_bind_int64(sqlite3_stmt* stmt, int idx,
+                                      long long value) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_int64, bind_int64_t);
   if (!_real) return -1;
@@ -526,7 +579,7 @@ int sqlite3_bind_int64(sqlite3_stmt* stmt, int idx, long long value) {
 
 /* sqlite3_bind_int(stmt, idx, value) */
 typedef int (*bind_int_t)(sqlite3_stmt*, int, int);
-int sqlite3_bind_int(sqlite3_stmt* stmt, int idx, int value) {
+TLT_SQLITE_API int sqlite3_bind_int(sqlite3_stmt* stmt, int idx, int value) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_int, bind_int_t);
   if (!_real) return -1;
@@ -542,7 +595,7 @@ int sqlite3_bind_int(sqlite3_stmt* stmt, int idx, int value) {
 
 /* sqlite3_bind_null(stmt, idx) */
 typedef int (*bind_null_t)(sqlite3_stmt*, int);
-int sqlite3_bind_null(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API int sqlite3_bind_null(sqlite3_stmt* stmt, int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_null, bind_null_t);
   if (!_real) return -1;
@@ -557,7 +610,8 @@ int sqlite3_bind_null(sqlite3_stmt* stmt, int idx) {
 
 /* sqlite3_bind_double(stmt, idx, value) */
 typedef int (*bind_double_t)(sqlite3_stmt*, int, double);
-int sqlite3_bind_double(sqlite3_stmt* stmt, int idx, double value) {
+TLT_SQLITE_API int sqlite3_bind_double(sqlite3_stmt* stmt, int idx,
+                                       double value) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_double, bind_double_t);
   if (!_real) return -1;
@@ -573,8 +627,9 @@ int sqlite3_bind_double(sqlite3_stmt* stmt, int idx, double value) {
 
 /* sqlite3_bind_text(stmt, idx, text, nByte, destructor) */
 typedef int (*bind_text_t)(sqlite3_stmt*, int, const char*, int, void*);
-int sqlite3_bind_text(sqlite3_stmt* stmt, int idx, const char* text,
-                       int nByte, void* destructor) {
+TLT_SQLITE_API int sqlite3_bind_text(sqlite3_stmt* stmt, int idx,
+                                     const char* text, int nByte,
+                                     void* destructor) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_text, bind_text_t);
   if (!_real) return -1;
@@ -591,8 +646,9 @@ int sqlite3_bind_text(sqlite3_stmt* stmt, int idx, const char* text,
 
 /* sqlite3_bind_blob / sqlite3_bind_blob64 */
 typedef int (*bind_blob_t)(sqlite3_stmt*, int, const void*, int, void*);
-int sqlite3_bind_blob(sqlite3_stmt* stmt, int idx, const void* blob,
-                       int nByte, void* destructor) {
+TLT_SQLITE_API int sqlite3_bind_blob(sqlite3_stmt* stmt, int idx,
+                                     const void* blob, int nByte,
+                                     void* destructor) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_blob, bind_blob_t);
   if (!_real) return -1;
@@ -607,8 +663,9 @@ int sqlite3_bind_blob(sqlite3_stmt* stmt, int idx, const void* blob,
 }
 
 typedef int (*bind_blob64_t)(sqlite3_stmt*, int, const void*, uint64_t, void*);
-int sqlite3_bind_blob64(sqlite3_stmt* stmt, int idx, const void* blob,
-                         uint64_t nByte, void* destructor) {
+TLT_SQLITE_API int sqlite3_bind_blob64(sqlite3_stmt* stmt, int idx,
+                                       const void* blob, uint64_t nByte,
+                                       void* destructor) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_bind_blob64, bind_blob64_t);
   if (!_real) return -1;
@@ -624,7 +681,7 @@ int sqlite3_bind_blob64(sqlite3_stmt* stmt, int idx, const void* blob,
 
 /* sqlite3_clear_bindings(stmt) */
 typedef int (*clear_bindings_t)(sqlite3_stmt*);
-int sqlite3_clear_bindings(sqlite3_stmt* stmt) {
+TLT_SQLITE_API int sqlite3_clear_bindings(sqlite3_stmt* stmt) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_clear_bindings, clear_bindings_t);
   if (!_real) return -1;
@@ -639,7 +696,7 @@ int sqlite3_clear_bindings(sqlite3_stmt* stmt) {
 
 /* Column accessors */
 typedef int (*column_count_t)(sqlite3_stmt*);
-int sqlite3_column_count(sqlite3_stmt* stmt) {
+TLT_SQLITE_API int sqlite3_column_count(sqlite3_stmt* stmt) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_count, column_count_t);
   if (!_real) return 0;
@@ -653,7 +710,7 @@ int sqlite3_column_count(sqlite3_stmt* stmt) {
 }
 
 typedef int (*column_int_t)(sqlite3_stmt*, int);
-int sqlite3_column_int(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API int sqlite3_column_int(sqlite3_stmt* stmt, int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_int, column_int_t);
   if (!_real) return 0;
@@ -667,7 +724,7 @@ int sqlite3_column_int(sqlite3_stmt* stmt, int idx) {
 }
 
 typedef long long (*column_int64_t)(sqlite3_stmt*, int);
-long long sqlite3_column_int64(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API long long sqlite3_column_int64(sqlite3_stmt* stmt, int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_int64, column_int64_t);
   if (!_real) return 0;
@@ -681,7 +738,7 @@ long long sqlite3_column_int64(sqlite3_stmt* stmt, int idx) {
 }
 
 typedef double (*column_double_t)(sqlite3_stmt*, int);
-double sqlite3_column_double(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API double sqlite3_column_double(sqlite3_stmt* stmt, int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_double, column_double_t);
   if (!_real) return 0.0;
@@ -695,7 +752,8 @@ double sqlite3_column_double(sqlite3_stmt* stmt, int idx) {
 }
 
 typedef const unsigned char* (*column_text_t)(sqlite3_stmt*, int);
-const unsigned char* sqlite3_column_text(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API const unsigned char* sqlite3_column_text(sqlite3_stmt* stmt,
+                                                        int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_text, column_text_t);
   if (!_real) return NULL;
@@ -710,7 +768,7 @@ const unsigned char* sqlite3_column_text(sqlite3_stmt* stmt, int idx) {
 }
 
 typedef const void* (*column_blob_t)(sqlite3_stmt*, int);
-const void* sqlite3_column_blob(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API const void* sqlite3_column_blob(sqlite3_stmt* stmt, int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_blob, column_blob_t);
   if (!_real) return NULL;
@@ -724,7 +782,7 @@ const void* sqlite3_column_blob(sqlite3_stmt* stmt, int idx) {
 }
 
 typedef int (*column_bytes_t)(sqlite3_stmt*, int);
-int sqlite3_column_bytes(sqlite3_stmt* stmt, int idx) {
+TLT_SQLITE_API int sqlite3_column_bytes(sqlite3_stmt* stmt, int idx) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_column_bytes, column_bytes_t);
   if (!_real) return 0;
@@ -739,8 +797,8 @@ int sqlite3_column_bytes(sqlite3_stmt* stmt, int idx) {
 
 /* sqlite3_exec(db, sql, callback, ctx, errmsg) */
 typedef int (*exec_t)(sqlite3*, const char*, void*, void*, char**);
-int sqlite3_exec(sqlite3* db, const char* sql, void* callback, void* ctx,
-                  char** errmsg) {
+TLT_SQLITE_API int sqlite3_exec(sqlite3* db, const char* sql, void* callback,
+                                void* ctx, char** errmsg) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_exec, exec_t);
   if (!_real) return -1;
@@ -755,7 +813,7 @@ int sqlite3_exec(sqlite3* db, const char* sql, void* callback, void* ctx,
 }
 
 typedef int (*changes_t)(sqlite3*);
-int sqlite3_changes(sqlite3* db) {
+TLT_SQLITE_API int sqlite3_changes(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_changes, changes_t);
   if (!_real) return 0;
@@ -768,7 +826,7 @@ int sqlite3_changes(sqlite3* db) {
   return result;
 }
 
-int sqlite3_total_changes(sqlite3* db) {
+TLT_SQLITE_API int sqlite3_total_changes(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_total_changes, changes_t);
   if (!_real) return 0;
@@ -782,7 +840,7 @@ int sqlite3_total_changes(sqlite3* db) {
 }
 
 typedef long long (*last_insert_rowid_t)(sqlite3*);
-long long sqlite3_last_insert_rowid(sqlite3* db) {
+TLT_SQLITE_API long long sqlite3_last_insert_rowid(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_last_insert_rowid, last_insert_rowid_t);
   if (!_real) return 0;
@@ -796,7 +854,7 @@ long long sqlite3_last_insert_rowid(sqlite3* db) {
 }
 
 typedef int (*errcode_t)(sqlite3*);
-int sqlite3_errcode(sqlite3* db) {
+TLT_SQLITE_API int sqlite3_errcode(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_errcode, errcode_t);
   if (!_real) return 0;
@@ -810,7 +868,7 @@ int sqlite3_errcode(sqlite3* db) {
 }
 
 typedef const char* (*errmsg_t)(sqlite3*);
-const char* sqlite3_errmsg(sqlite3* db) {
+TLT_SQLITE_API const char* sqlite3_errmsg(sqlite3* db) {
   ensure_attached();
   RESOLVE_REAL(sqlite3_errmsg, errmsg_t);
   if (!_real) return NULL;
