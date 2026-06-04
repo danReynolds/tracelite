@@ -10,11 +10,11 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — keep the
-pinned resqlite merge green, decide how aggressively to retire the old resqlite
-direct profile runner, run the new visualizer release workflow with signing
-credentials, then promote the newly calibrated workload lanes downstream and
-collect full non-macOS production-suite evidence.
+**Next bottleneck:** production benchmark replacement hardening — run the
+credentialed visualizer release workflow with macOS signing/notarization, keep
+the downstream resqlite policy pin green after the r12 point/keyed promotion,
+and collect full non-macOS production-suite evidence before promoting the
+remaining diagnostic lanes.
 
 ---
 
@@ -339,7 +339,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
 | Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `.pubignore` and `tool/publish_check.dart` exclude source-checkout peer runner files from the archive; `test/package_boundary_test.dart` forces core CLI mode and verifies core artifact commands including `diff` still run |
 | Dart recorder overhead is small enough for profile-mode spans | ✓ measured | 10K spans × 5 reps: active-minus-disabled mean 109ns/span, p90 259ns/span |
-| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; it now includes workspace, trace, compare, Decision Review, workload, graph-data, and artifact views; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; the `Visualizer Release` workflow packages macOS/Linux/Windows archives and manifests with optional macOS signing/notarization |
+| Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; it now includes workspace, trace, compare, Decision Review, workload, graph-data, and artifact views; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; unsigned `Visualizer Release` workflow run `26966109795` packaged and audited macOS/Linux/Windows archives from clean source `b92ec4fa8410b074f77bea840c2fa53cfdf759b4`; macOS signing/notarization still needs the credentialed workflow path |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
@@ -558,10 +558,12 @@ Work:
     bytes, stream counts, reader busy state.
 - Add side-by-side parity tests between current resqlite profile output and
   tracelite artifacts for a small initial matrix.
-- Done in the merged resqlite integration PR: benchmark, decision, and profile
-  wrappers pin Tracelite to `resqlite-profiling-gate-2026-06-03-r11`, record
-  both source states, verify the resqlite dependency binding, and preserve
-  `insights.md` / `insights.json` from `tracelite explain`.
+- Done in the merged resqlite integration and r12 policy follow-up PRs:
+  benchmark, decision, and profile wrappers pin Tracelite source, record source
+  states, verify the resqlite dependency binding, preserve `insights.md` /
+  `insights.json` from `tracelite explain`, and keep the retuned
+  `point-select` / `keyed-pk-subscriptions` lanes in the strict downstream
+  release policy.
 
 Acceptance gates:
 
