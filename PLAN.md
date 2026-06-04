@@ -615,9 +615,11 @@ Work:
   validates through a traced `singleConnection` wrapper; default native-pool
   coverage needs separate validation or explicit exclusion.
 - Done first slice: the `drift` adapter now uses a small generated-database
-  harness with explicit table registry entries so reactive workloads flow
-  through Drift's `customSelect(..., readsFrom: ...).watch()` stream-query
-  invalidation instead of pretending raw `NativeDatabase` SQL is reactive.
+  harness with explicit table registry entries, generated-column metadata,
+  primary-key metadata, and focused `--rows=16` stress coverage so reactive
+  workloads flow through Drift's
+  `customSelect(..., readsFrom: ...).watch()` stream-query invalidation instead
+  of pretending raw `NativeDatabase` SQL is reactive.
 - Scale ring sizing from expected event volume and fail loudly if any producer
   drops events.
 - Done first slice: source-checkout compare uses direct script launches for

@@ -3,7 +3,25 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import '../tool/src/peer_drift.dart'
+    show
+        driftReactiveTableColumnsForTesting,
+        driftReactiveTablePrimaryKeysForTesting;
+
 void main() {
+  test('drift reactive table metadata matches workload schemas', () {
+    expect(driftReactiveTableColumnsForTesting(), {
+      'tracelite_keyed_items': ['id', 'body', 'updated_at'],
+      'tracelite_fanout_items': ['id', 'owner_id', 'value'],
+      'tracelite_wide_items': ['id', 'partition_id', 'a', 'b', 'c'],
+    });
+    expect(driftReactiveTablePrimaryKeysForTesting(), {
+      'tracelite_keyed_items': ['id'],
+      'tracelite_fanout_items': ['id'],
+      'tracelite_wide_items': ['id'],
+    });
+  });
+
   for (final scenario in [
     'keyed-pk-subscriptions',
     'high-cardinality-fanout',
@@ -51,6 +69,78 @@ void main() {
         );
       }
     }, timeout: const Timeout(Duration(minutes: 3)));
+  }
+
+  for (final scenario in [
+    'keyed-pk-subscriptions',
+    'high-cardinality-fanout',
+    'many-streams-writer-throughput',
+  ]) {
+    test('drift handles larger generated-table reactive stress for $scenario',
+        () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'tracelite-drift-reactive-stress-test-',
+      );
+      addTearDown(() {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+      final artifactPath = '${tempDir.path}/$scenario.json';
+
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        [
+          'run',
+          'bin/tracelite.dart',
+          'compare',
+          '--scenario=$scenario',
+          '--interfaces=drift',
+          '--rows=16',
+          '--out-json=$artifactPath',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+
+      expect(
+        result.exitCode,
+        0,
+        reason: 'drift stress compare exited non-zero.\n'
+            'stdout:\n${result.stdout}\nstderr:\n${result.stderr}',
+      );
+
+      final artifact = jsonDecode(File(artifactPath).readAsStringSync())
+          as Map<String, Object?>;
+      final workload = artifact['workload']! as Map<String, Object?>;
+      expect(workload['required_capabilities'], ['sql', 'reactive']);
+      expect(workload['stream_count'] as int, greaterThan(4));
+      expect(workload['write_count'] as int, greaterThan(10));
+
+      final peers = artifact['peers']! as List<Object?>;
+      final drift = _peerByName(peers, 'drift');
+      expect(drift['status'], 'ok');
+      expect(drift['capabilities'], contains('reactive'));
+
+      final samples = drift['samples']! as List<Object?>;
+      final sample = samples.single as Map<String, Object?>;
+      expect(sample['status'], 'ok');
+      final diagnostics = sample['diagnostics']! as Map<String, Object?>;
+      expect(diagnostics['dropped_events'], 0);
+      expect(diagnostics['unmatched_begin_events'], 0);
+      expect(diagnostics['unmatched_end_events'], 0);
+      expect(sample['span_groups'] as List<Object?>, isNotEmpty);
+      expect(sample['sql_fingerprint_groups'] as List<Object?>, isNotEmpty);
+
+      final measurements = sample['measurements']! as Map<String, Object?>;
+      expect(measurements['stream_count'], workload['stream_count']);
+      expect(measurements['write_count'], workload['write_count']);
+      if (scenario == 'many-streams-writer-throughput') {
+        expect(measurements['disjoint_emissions'], isA<int>());
+        expect(measurements['overlap_emissions'], isA<int>());
+      } else {
+        expect(measurements['post_baseline_emissions'], isA<int>());
+      }
+    }, timeout: const Timeout(Duration(minutes: 5)));
   }
 
   test('diagnostic scenario records resqlite gauges and unsupported peers',

@@ -661,9 +661,9 @@ Readers see what they're comparing. "sqlite_async is 3x slower" is contextualize
 For optional capability lanes, the harness should prefer `unsupported` over a
 fallback that changes the feature being measured. For example, the `drift`
 reactive adapter uses explicit table registry entries and
-`customSelect(..., readsFrom: ...).watch()` so it exercises Drift's stream-query
-invalidation path. A raw `NativeDatabase` watch or polling wrapper would make
-the benchmark misleading.
+generated-column metadata with `customSelect(..., readsFrom: ...).watch()` so
+it exercises Drift's stream-query invalidation path. A raw `NativeDatabase`
+watch or polling wrapper would make the benchmark misleading.
 
 ### Fixed-version requirement
 
