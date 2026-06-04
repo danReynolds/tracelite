@@ -423,9 +423,12 @@ dart run bin/tracelite.dart compare \
 Result: reactive scenarios report `sqlite3` as `unsupported`, while `drift`,
 `sqlite_async`, and `resqlite` complete with non-empty traces and `0/0/0`
 diagnostics. The `drift` lane uses Drift's table-registry-aware
-`customSelect(..., readsFrom: ...).watch()` path rather than raw
-`NativeDatabase` polling. The diagnostics scenario reports `sqlite3`, `drift`,
-and `sqlite_async` as unsupported and records resqlite
+`customSelect(..., readsFrom: ...).watch()` path with generated-table-style
+column and primary-key metadata rather than raw `NativeDatabase` polling. A
+focused Drift-only stress pass now covers the three reactive scenarios at
+`--rows=16`, which raises the stream count above the four-peer smoke lane while
+still keeping it in edit-time test territory. The diagnostics scenario reports
+`sqlite3`, `drift`, and `sqlite_async` as unsupported and records resqlite
 gauges for page-cache bytes, schema bytes, statement bytes, WAL bytes, stream
 count, and reader-busy state.
 
@@ -477,10 +480,13 @@ parity against the current resqlite profiler outputs.
 
 The former drift reactive gap is now closed for tracelite's benchmark workload
 tables: the adapter wraps `NativeDatabase` in a small generated-database
-harness with explicit table registry entries and manual update notifications
-for raw writes. That is enough to exercise Drift's stream-query invalidation
-semantics for these scenarios. It should not be generalized into "any arbitrary
-app Drift query is covered" without adding table metadata for that app's schema.
+harness with explicit table registry entries, generated-column metadata,
+primary-key metadata, and manual update notifications for raw writes. That is
+enough to exercise Drift's stream-query invalidation semantics for these
+scenarios, and the focused `--rows=16` stress coverage proves the path beyond
+the minimal four-peer smoke size. It should not be generalized into "any
+arbitrary app Drift query is covered" without adding table metadata for that
+app's schema.
 
 ### 3. Runner startup is separated, not eliminated
 
@@ -547,8 +553,9 @@ can be called production-quality across every Dart target.
    secrets configured and `sign_macos=true`; the workflow audit should pass with
    `--require-signed-macos-release=true` before attaching archives/manifests to
    the release.
-3. Add a focused stress pass for the new drift reactive adapter, including
-   larger stream counts and generated-app-style table metadata.
+3. Use the new drift reactive metadata and stress coverage as the edit-time
+   floor, then add repeated production-scale reactive artifacts before raising
+   any reactive lane to a blocking release gate.
 4. Retune or resize `point-select` and `keyed-pk-subscriptions` until they can
    join the ceiling-capped release gate without raising the 50% threshold
    ceiling.

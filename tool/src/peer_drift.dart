@@ -93,12 +93,8 @@ final class _TraceliteDriftDatabase extends drift.GeneratedDatabase {
   _TraceliteDriftDatabase(super.executor);
 
   late final _tablesByName = {
-    for (final name in const [
-      'tracelite_keyed_items',
-      'tracelite_fanout_items',
-      'tracelite_wide_items',
-    ])
-      name: _TraceliteDriftTable(name, this),
+    for (final schema in _traceliteDriftTableSchemas)
+      schema.name: _TraceliteDriftTable(schema, this),
   };
 
   @override
@@ -144,21 +140,32 @@ final class _TraceliteDriftDatabase extends drift.GeneratedDatabase {
 final class _TraceliteDriftTable extends drift.Table
     with drift.TableInfo<_TraceliteDriftTable, Map<String, Object?>> {
   _TraceliteDriftTable(
-    this.actualTableName,
+    this._schema,
     this.attachedDatabase, [
     this._alias,
   ]);
 
-  @override
-  final String actualTableName;
+  final _TraceliteDriftTableSchema _schema;
 
   @override
   final drift.DatabaseConnectionUser attachedDatabase;
 
   final String? _alias;
 
+  late final List<drift.GeneratedColumn> _columns = [
+    for (final column in _schema.columns) column.build(aliasedName),
+  ];
+
+  late final Set<drift.GeneratedColumn> _primaryKey = _primaryKeyColumns();
+
   @override
-  List<drift.GeneratedColumn> get $columns => const [];
+  String get actualTableName => _schema.name;
+
+  @override
+  List<drift.GeneratedColumn> get $columns => _columns;
+
+  @override
+  Set<drift.GeneratedColumn> get $primaryKey => _primaryKey;
 
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -173,7 +180,125 @@ final class _TraceliteDriftTable extends drift.Table
 
   @override
   _TraceliteDriftTable createAlias(String alias) {
-    return _TraceliteDriftTable(actualTableName, attachedDatabase, alias);
+    return _TraceliteDriftTable(_schema, attachedDatabase, alias);
+  }
+
+  Set<drift.GeneratedColumn> _primaryKeyColumns() {
+    final primaryKey = <drift.GeneratedColumn>{};
+    for (var i = 0; i < _schema.columns.length; i++) {
+      if (_schema.columns[i].primaryKey) {
+        primaryKey.add(_columns[i]);
+      }
+    }
+    return primaryKey;
+  }
+}
+
+const _traceliteDriftTableSchemas = [
+  _TraceliteDriftTableSchema(
+    'tracelite_keyed_items',
+    [
+      _TraceliteDriftColumnSpec.integer(
+        'id',
+        primaryKey: true,
+        requiredDuringInsert: false,
+      ),
+      _TraceliteDriftColumnSpec.text('body'),
+      _TraceliteDriftColumnSpec.integer('updated_at'),
+    ],
+  ),
+  _TraceliteDriftTableSchema(
+    'tracelite_fanout_items',
+    [
+      _TraceliteDriftColumnSpec.integer(
+        'id',
+        primaryKey: true,
+        requiredDuringInsert: false,
+      ),
+      _TraceliteDriftColumnSpec.integer('owner_id'),
+      _TraceliteDriftColumnSpec.text('value'),
+    ],
+  ),
+  _TraceliteDriftTableSchema(
+    'tracelite_wide_items',
+    [
+      _TraceliteDriftColumnSpec.integer(
+        'id',
+        primaryKey: true,
+        requiredDuringInsert: false,
+      ),
+      _TraceliteDriftColumnSpec.integer('partition_id'),
+      _TraceliteDriftColumnSpec.text('a'),
+      _TraceliteDriftColumnSpec.text('b'),
+      _TraceliteDriftColumnSpec.text('c'),
+    ],
+  ),
+];
+
+/// Exposes internal Drift registry metadata to tests without opening private
+/// table implementation types.
+Map<String, List<String>> driftReactiveTableColumnsForTesting() => {
+      for (final schema in _traceliteDriftTableSchemas)
+        schema.name: [for (final column in schema.columns) column.name],
+    };
+
+Map<String, List<String>> driftReactiveTablePrimaryKeysForTesting() => {
+      for (final schema in _traceliteDriftTableSchemas)
+        schema.name: [
+          for (final column in schema.columns)
+            if (column.primaryKey) column.name,
+        ],
+    };
+
+final class _TraceliteDriftTableSchema {
+  const _TraceliteDriftTableSchema(this.name, this.columns);
+
+  final String name;
+  final List<_TraceliteDriftColumnSpec> columns;
+}
+
+enum _TraceliteDriftColumnType { integer, text }
+
+final class _TraceliteDriftColumnSpec {
+  const _TraceliteDriftColumnSpec.integer(
+    this.name, {
+    this.primaryKey = false,
+    this.requiredDuringInsert = true,
+  }) : type = _TraceliteDriftColumnType.integer;
+
+  const _TraceliteDriftColumnSpec.text(this.name)
+      : type = _TraceliteDriftColumnType.text,
+        primaryKey = false,
+        requiredDuringInsert = true;
+
+  final String name;
+  final _TraceliteDriftColumnType type;
+  final bool primaryKey;
+  final bool requiredDuringInsert;
+
+  drift.GeneratedColumn build(String tableName) {
+    return switch (type) {
+      _TraceliteDriftColumnType.integer => drift.GeneratedColumn<int>(
+          name,
+          tableName,
+          false,
+          defaultConstraints: primaryKey
+              ? drift.GeneratedColumn.constraintIsAlways('PRIMARY KEY')
+              : null,
+          requiredDuringInsert: requiredDuringInsert,
+          type: drift.DriftSqlType.int,
+        ),
+      _TraceliteDriftColumnType.text => drift.GeneratedColumn<String>(
+          name,
+          tableName,
+          false,
+          defaultConstraints: primaryKey
+              ? drift.GeneratedColumn.constraintIsAlways('PRIMARY KEY')
+              : null,
+          requiredDuringInsert: requiredDuringInsert,
+          type: drift.DriftSqlType.string,
+        ),
+    };
   }
 }
 
