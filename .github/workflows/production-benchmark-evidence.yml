@@ -100,6 +100,20 @@ jobs:
         working-directory: tracelite
         run: dart pub get
 
+      - name: Prepare production evidence directory
+        working-directory: tracelite
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_dir="build/production-evidence/${{ matrix.label }}"
+          mkdir -p "$out_dir"
+          {
+            echo "label=${{ matrix.label }}"
+            echo "runner_os=${{ runner.os }}"
+            echo "head_sha=${{ github.sha }}"
+            echo "resqlite_revision=${{ inputs.resqlite_revision }}"
+          } > "$out_dir/setup.txt"
+
       - name: Verify resqlite source override
         working-directory: tracelite
         run: >-
@@ -109,7 +123,9 @@ jobs:
 
       - name: Verify generated span outputs
         working-directory: tracelite
-        run: dart run tool/generate.dart --check
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/generate.dart --check
 
       - name: Build and smoke native runtime
         working-directory: tracelite
@@ -161,7 +177,7 @@ jobs:
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
           mkdir -p "$out_dir"
-          dart run bin/tracelite.dart suite-history \
+          dart --packages=.dart_tool/package_config.json tool/tracelite_dev.dart suite-history \
             --profile=production \
             --interfaces=sqlite3,drift,sqlite_async,resqlite \
             --scenarios="${{ inputs.scenarios }}" \
@@ -186,10 +202,10 @@ jobs:
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
           if [[ -f "$out_dir/history.json" ]]; then
-            if dart run bin/tracelite.dart export-graph-data \
+            if dart --packages=.dart_tool/package_config.json tool/tracelite_dev.dart export-graph-data \
               --suite-history="$out_dir/history.json" \
               --out="$out_dir/graph-data"; then
-              dart run bin/tracelite.dart validate-graph-data "$out_dir/graph-data"
+              dart --packages=.dart_tool/package_config.json tool/tracelite_dev.dart validate-graph-data "$out_dir/graph-data"
               echo "graph-data: ok" > "$out_dir/graph-data-status.txt"
             else
               echo "graph-data: failed" > "$out_dir/graph-data-status.txt"
@@ -205,7 +221,7 @@ jobs:
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
           if [[ -f "$out_dir/history.json" ]]; then
-            dart run bin/tracelite.dart explain "$out_dir/history.json" \
+            dart --packages=.dart_tool/package_config.json tool/tracelite_dev.dart explain "$out_dir/history.json" \
               > "$out_dir/insights.md" || \
               echo "tracelite explain failed" > "$out_dir/insights.md"
           else
