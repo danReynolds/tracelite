@@ -40,7 +40,8 @@ a credentialed signed run and published release artifact. Tracelite's own
 macOS and Linux CI pin and verify a merged trace-enabled resqlite checkout
 before peer tests, so this repo's gate cannot accidentally benchmark the pub
 package or an obsolete integration snapshot. The source pin is now the
-downstream r12 policy merge `aabcce733240b8586216f8c32bcc1a16f806586f`. Linux
+Windows trace-hook fix merge `ae0af4d5bf32b7be3f363ee56a0a85ca237bde21`,
+which includes the downstream r12 policy merge. Linux
 has a focused package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite
 in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
 repeatable way to collect macOS, Linux, and Windows
