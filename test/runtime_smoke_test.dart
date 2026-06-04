@@ -8,14 +8,11 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:tracelite/tracelite.dart';
 
+import 'src/test_producer.dart';
+
 void main() {
   test('runtime round-trip: C producer writes, Dart reader parses', () async {
-    final producer = File('build/test_producer');
-    if (!await producer.exists()) {
-      fail('build/test_producer not built; run:\n'
-          '  cc -std=c11 -O2 -Inative native/tracelite_runtime.c '
-          'native/test_producer.c -o build/test_producer');
-    }
+    final producer = await ensureTestProducerBuilt();
 
     final regionPath =
         '${Directory.systemTemp.path}/tracelite-smoke-$pid.tlt-region';
