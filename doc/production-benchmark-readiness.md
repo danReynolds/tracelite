@@ -43,18 +43,21 @@ package or an obsolete integration snapshot. The source pin is now the
 downstream r12 policy merge `aabcce733240b8586216f8c32bcc1a16f806586f`. Linux
 has a focused package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite
 in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
-repeatable way to collect macOS and Linux `suite-history --profile=production`
-artifacts, policy calibration, graph data, and `tracelite explain` output from a
-clean Tracelite checkout and the same source-audited resqlite sibling pin. It
-uploads the evidence bundle even when the final policy verdict is not ready, so
-hosted-runner failures can be inspected instead of losing the per-scenario logs.
+repeatable way to collect macOS, Linux, and Windows
+`suite-history --profile=production` artifacts, policy calibration, graph data,
+and `tracelite explain` output from a clean Tracelite checkout and the same
+source-audited resqlite sibling pin. It uploads the evidence bundle even when
+the final policy verdict is not ready, so hosted-runner failures can be
+inspected instead of losing the per-scenario logs.
 Windows validates the platform-independent Dart artifact surface, native runtime
 attach, core CLI surface, and embedded package:sqlite3 shim smoke in CI. The
 Windows shim lane downloads a pinned SQLite amalgamation, builds
 `sqlite_traced.dll` with the traced entry points renamed behind exported
 wrappers so the DLL provides the full `sqlite3` ABI, and verifies the same
-`package:sqlite3` workload as the macOS/Linux shim smoke. Full Windows
-production-profile peer history remains outside the current evidence set.
+`package:sqlite3` workload as the macOS/Linux shim smoke. The production
+workflow now reuses that embedded shim path for Windows peer-suite history, but
+full Windows production-profile artifacts still need to be collected before
+Windows is treated as calibrated.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -678,25 +681,25 @@ The 2026-05-10 parity run added that export path. The existing resqlite
 summaries, RSS deltas, SQLite diagnostics, noop floors, and many-streams
 fanout medians.
 
-### 5. Portability is still macOS-first for the production suite
+### 5. Portability still needs hosted production artifacts
 
-The repeated production peer suite is still macOS-oriented. The shim path now
-has a platform-aware resolver name, a Linux package:sqlite3 smoke job, and a
-Linux four-peer `ci` suite, which proves the native-hook loading strategy and
-source-pinned peer harness outside macOS at CI scale. Windows now has a
-core-artifact CI lane for dependency resolution, generated-output freshness,
-analysis, native runtime attach, platform-independent
-diff/insight/package-boundary tests, and a package:sqlite3 embedded-shim smoke
-run. The manual production-evidence workflow makes macOS/Linux production
-history repeatable and reviewable, but full Windows production-profile history
-is still required before this can be called production-quality across every Dart
-target.
+The repeated production peer suite is no longer macOS-only at the workflow
+level. The shim path has a platform-aware resolver name, a Linux
+package:sqlite3 smoke job, and a Linux four-peer `ci` suite, which proves the
+native-hook loading strategy and source-pinned peer harness outside macOS at CI
+scale. Windows now has a core-artifact CI lane for dependency resolution,
+generated-output freshness, analysis, native runtime attach,
+platform-independent diff/insight/package-boundary tests, a package:sqlite3
+embedded-shim smoke run, and a manual production-evidence lane that downloads a
+pinned SQLite amalgamation for the embedded `sqlite_traced.dll` shim. Full
+Windows production-profile history is still required before this can be called
+production-quality across every Dart target.
 
 ## Recommended next iteration
 
 1. Dispatch the manual `Production Benchmark Evidence` workflow on `main` and
-   archive the macOS/Linux production-history artifacts before promoting any
-   more diagnostic workloads into downstream release policy.
+   archive the macOS/Linux/Windows production-history artifacts before
+   promoting any more diagnostic workloads into downstream release policy.
 2. Run the `Visualizer Release` workflow from a release tag with macOS signing
    secrets configured and `sign_macos=true`; the workflow audit should pass with
    `--require-signed-macos-release=true` before attaching archives/manifests to

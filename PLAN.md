@@ -343,7 +343,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; the manual `Production Benchmark Evidence` workflow can collect Linux production suite-history artifacts |
-| Windows core and embedded shim smoke work | ✓ CI-proven | `.github/workflows/ci.yml` runs generated-output, analysis, platform-independent core artifact tests, native runtime attach, embedded `sqlite_traced.dll` build from a pinned SQLite amalgamation, and package:sqlite3 shim smoke on Windows; full Windows production-profile peer history remains separate from the macOS/Linux production-evidence workflow |
+| Windows core and embedded shim smoke work | ✓ CI-proven | `.github/workflows/ci.yml` runs generated-output, analysis, platform-independent core artifact tests, native runtime attach, embedded `sqlite_traced.dll` build from a pinned SQLite amalgamation, and package:sqlite3 shim smoke on Windows; the manual production-evidence workflow can now collect Windows production-profile peer history through the embedded shim path, but real hosted artifacts are still pending |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
 | resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the pinned trace-enabled sibling checkout before peer tests |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
@@ -720,8 +720,8 @@ Work:
 - Keep Windows core artifact commands, native runtime attach, and embedded
   package:sqlite3 shim smoke green in CI.
 - Keep production-history evidence repeatable with the manual `Production
-  Benchmark Evidence` workflow for macOS/Linux source-checkout suite-history
-  artifacts.
+  Benchmark Evidence` workflow for macOS/Linux/Windows source-checkout
+  suite-history artifacts.
 - Add CI for:
   - generator freshness;
   - runtime/shim tests (macOS full suite plus Linux package:sqlite3 shim smoke);
