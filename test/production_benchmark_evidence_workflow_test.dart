@@ -3,8 +3,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
-  test('production benchmark evidence workflow records macOS and Linux history',
-      () {
+  test('production benchmark evidence workflow records desktop history', () {
     final workflow = File(
       '.github/workflows/production-benchmark-evidence.yml',
     ).readAsStringSync();
@@ -16,7 +15,13 @@ void main() {
     expect(workflow, contains('default: auto'));
     expect(workflow, contains('os: macos-14'));
     expect(workflow, contains('os: ubuntu-24.04'));
-    expect(workflow, isNot(contains('os: windows-2025')));
+    expect(workflow, contains('os: windows-2025'));
+    expect(workflow, contains('SQLITE_AMALGAMATION_VERSION'));
+    expect(workflow, contains('Download Windows SQLite amalgamation'));
+    expect(workflow, contains('Build Windows embedded SQLite shim'));
+    expect(workflow, contains('TRACELITE_SQLITE_AMALGAMATION'));
+    expect(workflow, contains('cat > pubspec_overrides.yaml'));
+    expect(workflow, contains('python_cmd=python3'));
     expect(workflow, contains('tool/verify_resqlite_source.dart'));
     expect(workflow, contains('tool/native_runtime_smoke.dart'));
     expect(workflow, contains('tool/build_sqlite_shim.dart'));
@@ -43,5 +48,16 @@ void main() {
     expect(workflow, contains('Evaluate production evidence'));
     expect(workflow, contains('calibration_status'));
     expect(workflow, contains('successful_runs'));
+  });
+
+  test('source checkout peer suites can use the Windows embedded shim', () {
+    final devCli = File('tool/tracelite_dev.dart').readAsStringSync();
+
+    expect(devCli, contains('TRACELITE_SQLITE_AMALGAMATION'));
+    expect(devCli, contains('embedded sqlite_traced.dll shim'));
+    expect(
+      devCli,
+      contains('embeddedSqliteSourcePath: sqliteAmalgamation'),
+    );
   });
 }

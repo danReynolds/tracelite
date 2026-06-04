@@ -1297,7 +1297,10 @@ void _deleteFileIfExists(String path) {
 }
 
 void _ensurePeerShimAvailable() {
-  final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+  final sqliteAmalgamation = _sqliteAmalgamationPath();
+  final shimBuildCommand = native_artifacts.sqliteShimBuildCommand(
+    embeddedSqliteSourcePath: sqliteAmalgamation,
+  );
   if (shimBuildCommand == null) {
     final reason = native_artifacts.sqliteShimUnsupportedReason() ??
         'sqlite shim comparison is not implemented for '
@@ -1306,8 +1309,9 @@ void _ensurePeerShimAvailable() {
       reason,
     );
     stderr.writeln(
-      'Use macOS or Linux for peer-suite evidence until Windows ships full '
-      'sqlite3 ABI forwarding or embedded-shim support.',
+      'Use macOS/Linux for default peer-suite evidence, or set '
+      'TRACELITE_SQLITE_AMALGAMATION=/path/to/sqlite3.c on Windows to use '
+      'the embedded sqlite_traced.dll shim.',
     );
     exit(66);
   }
@@ -1321,6 +1325,11 @@ void _ensurePeerShimAvailable() {
   _ensureSqliteNativeAssetUsesShim(shim.absolute.path);
   final resolverShim = File(native_artifacts.sqliteShimLibraryName());
   resolverShim.writeAsBytesSync(shim.readAsBytesSync());
+}
+
+String? _sqliteAmalgamationPath() {
+  final path = Platform.environment['TRACELITE_SQLITE_AMALGAMATION'];
+  return path == null || path.isEmpty ? null : path;
 }
 
 void _ensureSqliteNativeAssetUsesShim(String absoluteShimPath) {

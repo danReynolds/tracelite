@@ -46,6 +46,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   RESQLITE_TRACE_REVISION: aabcce733240b8586216f8c32bcc1a16f806586f
+  SQLITE_AMALGAMATION_VERSION: '3530100'
 
 jobs:
   production-history:
@@ -59,6 +60,8 @@ jobs:
             os: macos-14
           - label: linux-x64
             os: ubuntu-24.04
+          - label: windows-x64
+            os: windows-2025
 
     steps:
       - name: Check out tracelite
@@ -85,6 +88,7 @@ jobs:
 
       - name: Pin resqlite sibling dependency
         working-directory: tracelite
+        shell: bash
         run: |
           cat > pubspec_overrides.yaml <<YAML
           dependency_overrides:
@@ -113,14 +117,37 @@ jobs:
           dart --packages=.dart_tool/package_config.json
           tool/native_runtime_smoke.dart
 
+      - name: Download Windows SQLite amalgamation
+        if: runner.os == 'Windows'
+        working-directory: tracelite
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          $version = "${{ env.SQLITE_AMALGAMATION_VERSION }}"
+          $url = "https://sqlite.org/2026/sqlite-amalgamation-$version.zip"
+          $zip = "build/sqlite-amalgamation.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath build/sqlite-amalgamation -Force
+
       - name: Build SQLite shim
+        if: runner.os != 'Windows'
         working-directory: tracelite
         run: >-
           dart --packages=.dart_tool/package_config.json
           tool/build_sqlite_shim.dart
 
+      - name: Build Windows embedded SQLite shim
+        if: runner.os == 'Windows'
+        working-directory: tracelite
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/build_sqlite_shim.dart
+          --sqlite-amalgamation=build/sqlite-amalgamation/sqlite-amalgamation-${{ env.SQLITE_AMALGAMATION_VERSION }}/sqlite3.c
+
       - name: Smoke SQLite shim
         working-directory: tracelite
+        env:
+          TRACELITE_SQLITE_AMALGAMATION: build/sqlite-amalgamation/sqlite-amalgamation-${{ env.SQLITE_AMALGAMATION_VERSION }}/sqlite3.c
         run: >-
           dart --packages=.dart_tool/package_config.json
           tool/sqlite_shim_smoke.dart
@@ -128,6 +155,8 @@ jobs:
       - name: Run production suite history
         working-directory: tracelite
         shell: bash
+        env:
+          TRACELITE_SQLITE_AMALGAMATION: build/sqlite-amalgamation/sqlite-amalgamation-${{ env.SQLITE_AMALGAMATION_VERSION }}/sqlite3.c
         run: |
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
@@ -196,7 +225,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
+          python_cmd=python3
+          if ! command -v "$python_cmd" >/dev/null 2>&1; then
+            python_cmd=python
+          fi
+          "$python_cmd" - <<'PY'
           import json
           import pathlib
           import sys
