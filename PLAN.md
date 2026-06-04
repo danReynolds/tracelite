@@ -13,8 +13,8 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 **Next bottleneck:** production benchmark replacement hardening — keep the
 pinned resqlite merge green, decide how aggressively to retire the old resqlite
 direct profile runner, run the new visualizer release workflow with signing
-credentials, then finish diagnostic-workload noise reduction and full
-non-macOS production-suite evidence.
+credentials, then promote the newly calibrated workload lanes downstream and
+collect full non-macOS production-suite evidence.
 
 ---
 
@@ -334,7 +334,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Benchmark presets cover smoke, experiment, and release-gate workflows | ✓ proven | `suite --profile=ci|experiment|production` emits the same manifest shape with profile-scaled rows/repetitions; `test/suite_command_test.dart` validates the experiment preset |
 | Artifact diff can compare two benchmark outputs | ✓ proven | `tracelite diff` over compare JSON with threshold, CV gate, 95% mean-delta CI, Mann-Whitney U repetition evidence, and outlier counts |
 | Benchmark decisions are machine-gated | ✓ proven | `tracelite decision` over compare JSON and suite manifests, command tests for accepted/rejected/inconclusive outcomes |
-| Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader workload noise | `tracelite calibrate-policy` produces policy artifacts and strict history validation; ceiling-capped resqlite measured-elapsed release scopes pass on 5-run histories, including the retuned `point-select` and `keyed-pk-subscriptions` lanes, while broader diagnostic metrics remain too noisy |
+| Benchmark decision policy can be calibrated from artifact history | ✓ scoped release gate / △ broader diagnostic metrics | `tracelite calibrate-policy` produces policy artifacts and strict history validation; ceiling-capped resqlite measured-elapsed release scopes pass on 5-run histories, including the retuned `point-select`/`keyed-pk-subscriptions` lanes and the `feed-paging`/`large-working-set`/`sync-burst` diagnostic lanes; lower-level diagnostic metrics remain separate evidence |
 | Benchmark artifacts can power downstream dashboards without tracelite UI | ✓ proven | `tracelite export-graph-data` emits graphable datasets from suite, decision, and workload-summary inputs |
 | Clean archive passes pub publish dry-run | ✓ proven | `dart run tool/publish_check.dart` exits 0 with 0 pub warnings from a tracked-file archive |
 | Core package avoids peer-library dependency cycles | ✓ proven | `pubspec.yaml` keeps `drift`, `sqlite_async`, `sqlite3`, and `resqlite` in `dev_dependencies`; runtime deps are only `ffi` and `yaml`; `bin/tracelite.dart` is a thin launcher over `lib/src/core_cli.dart`; `.pubignore` and `tool/publish_check.dart` exclude source-checkout peer runner files from the archive; `test/package_boundary_test.dart` forces core CLI mode and verifies core artifact commands including `diff` still run |
