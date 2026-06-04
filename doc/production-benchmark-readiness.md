@@ -45,7 +45,9 @@ has a focused package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite
 in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
 repeatable way to collect macOS and Linux `suite-history --profile=production`
 artifacts, policy calibration, graph data, and `tracelite explain` output from a
-clean Tracelite checkout and the same source-audited resqlite sibling pin.
+clean Tracelite checkout and the same source-audited resqlite sibling pin. It
+uploads the evidence bundle even when the final policy verdict is not ready, so
+hosted-runner failures can be inspected instead of losing the per-scenario logs.
 Windows validates the platform-independent Dart artifact surface, native runtime
 attach, core CLI surface, and embedded package:sqlite3 shim smoke in CI. The
 Windows shim lane downloads a pinned SQLite amalgamation, builds

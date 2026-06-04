@@ -31,12 +31,12 @@ on:
       runner:
         description: Peer child runner mode for repeated production suites.
         required: true
-        default: worker
+        default: auto
         type: choice
         options:
-          - worker
           - auto
           - script
+          - worker
       resqlite_revision:
         description: Trace-enabled resqlite revision to use as the sibling checkout.
         required: true
@@ -131,6 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
+          mkdir -p "$out_dir"
           dart run bin/tracelite.dart suite-history \
             --profile=production \
             --interfaces=sqlite3,drift,sqlite_async,resqlite \
@@ -146,6 +147,7 @@ jobs:
             --guardrail-ceiling-percent=50 \
             --noise-gate-ceiling-percent=50 \
             --require-clean-source=true \
+            --strict=false \
             --out-dir="$out_dir"
 
       - name: Export production graph data
@@ -154,10 +156,18 @@ jobs:
         run: |
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
-          dart run bin/tracelite.dart export-graph-data \
-            --suite-history="$out_dir/history.json" \
-            --out="$out_dir/graph-data"
-          dart run bin/tracelite.dart validate-graph-data "$out_dir/graph-data"
+          if [[ -f "$out_dir/history.json" ]]; then
+            if dart run bin/tracelite.dart export-graph-data \
+              --suite-history="$out_dir/history.json" \
+              --out="$out_dir/graph-data"; then
+              dart run bin/tracelite.dart validate-graph-data "$out_dir/graph-data"
+              echo "graph-data: ok" > "$out_dir/graph-data-status.txt"
+            else
+              echo "graph-data: failed" > "$out_dir/graph-data-status.txt"
+            fi
+          else
+            echo "graph-data: missing history.json" > "$out_dir/graph-data-status.txt"
+          fi
 
       - name: Explain production evidence
         working-directory: tracelite
@@ -165,12 +175,56 @@ jobs:
         run: |
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
-          dart run bin/tracelite.dart explain "$out_dir/history.json" \
-            > "$out_dir/insights.md"
+          if [[ -f "$out_dir/history.json" ]]; then
+            dart run bin/tracelite.dart explain "$out_dir/history.json" \
+              > "$out_dir/insights.md" || \
+              echo "tracelite explain failed" > "$out_dir/insights.md"
+          else
+            echo "missing history.json" > "$out_dir/insights.md"
+          fi
 
       - name: Upload production evidence
+        if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: tracelite-production-history-${{ matrix.label }}
           path: tracelite/build/production-evidence/${{ matrix.label }}/
           if-no-files-found: error
+
+      - name: Evaluate production evidence
+        working-directory: tracelite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path("build/production-evidence/${{ matrix.label }}")
+          history_path = root / "history.json"
+          if not history_path.exists():
+              print(f"missing {history_path}")
+              sys.exit(65)
+
+          history = json.loads(history_path.read_text())
+          problems = []
+          requested = history.get("requested_runs")
+          successful = history.get("successful_runs")
+          if requested != successful:
+              problems.append(
+                  f"successful_runs={successful} requested_runs={requested}"
+              )
+          status = history.get("calibration_status")
+          if status != "ready":
+              problems.append(f"calibration_status={status}")
+
+          if problems:
+              print("production evidence is not ready:")
+              for problem in problems:
+                  print(f"- {problem}")
+              print(f"uploaded evidence root: {root}")
+              sys.exit(65)
+
+          print("production evidence is ready")
+          PY
