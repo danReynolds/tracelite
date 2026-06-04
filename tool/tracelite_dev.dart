@@ -988,6 +988,8 @@ Future<void> _suiteHistory(List<String> args) async {
       ],
       workingDirectory: Directory.current.path,
       timeout: suiteRunTimeout,
+      onStdout: stderr.write,
+      onStderr: stderr.write,
     );
     final logPath = '${runDir.path}/suite.log';
     File(logPath).writeAsStringSync(
@@ -2738,6 +2740,8 @@ Future<_TimedProcessResult> _runProcessWithTimeout(
   required String workingDirectory,
   required Duration timeout,
   Map<String, String>? environment,
+  void Function(String chunk)? onStdout,
+  void Function(String chunk)? onStderr,
 }) async {
   final process = await Process.start(
     executable,
@@ -2750,15 +2754,21 @@ Future<_TimedProcessResult> _runProcessWithTimeout(
   final stdoutDone = Completer<void>();
   final stderrDone = Completer<void>();
   final stdoutSubscription = process.stdout.transform(utf8.decoder).listen(
-        stdoutBuffer.write,
-        onDone: () => _completeIfPending(stdoutDone),
-        onError: (_) => _completeIfPending(stdoutDone),
-      );
+    (chunk) {
+      stdoutBuffer.write(chunk);
+      onStdout?.call(chunk);
+    },
+    onDone: () => _completeIfPending(stdoutDone),
+    onError: (_) => _completeIfPending(stdoutDone),
+  );
   final stderrSubscription = process.stderr.transform(utf8.decoder).listen(
-        stderrBuffer.write,
-        onDone: () => _completeIfPending(stderrDone),
-        onError: (_) => _completeIfPending(stderrDone),
-      );
+    (chunk) {
+      stderrBuffer.write(chunk);
+      onStderr?.call(chunk);
+    },
+    onDone: () => _completeIfPending(stderrDone),
+    onError: (_) => _completeIfPending(stderrDone),
+  );
 
   final stopwatch = Stopwatch()..start();
   var timedOut = false;
