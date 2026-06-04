@@ -206,13 +206,19 @@ void main() {
         (manifest['runs']! as List<Object?>).cast<Map<String, Object?>>();
     expect(
       runs.singleWhere((run) => run['scenario'] == 'point-select'),
-      containsPair('rows', 1000),
+      containsPair('rows', 10000),
     );
     expect(
       runs.singleWhere(
         (run) => run['scenario'] == 'keyed-pk-subscriptions',
       ),
       containsPair('rows', 20),
+    );
+    expect(
+      runs.singleWhere(
+        (run) => run['scenario'] == 'keyed-pk-subscriptions',
+      ),
+      containsPair('repetitions', 11),
     );
     expect(reactiveWriteCount(20), 200);
   }, timeout: const Timeout(Duration(minutes: 3)));
