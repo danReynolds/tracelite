@@ -10,11 +10,11 @@ This is the canonical orientation doc for the tracelite project. It captures wha
 
 **Killer claim — proven:** A real Dart program using `package:sqlite3` was profiled with zero changes to `package:sqlite3`. 74 events captured from `CREATE TABLE / INSERT × 3 / SELECT` against a real SQLite, all flowing through tracelite's mmap'd ring buffer.
 
-**Next bottleneck:** production benchmark replacement hardening — keep the pinned
-resqlite PR green, decide how aggressively to retire the old resqlite direct
-profile runner, run the new visualizer release workflow with signing credentials,
-then finish diagnostic-workload noise reduction, Windows SQLite shim ABI
-forwarding, and full non-macOS production-suite evidence.
+**Next bottleneck:** production benchmark replacement hardening — keep the
+pinned resqlite merge green, decide how aggressively to retire the old resqlite
+direct profile runner, run the new visualizer release workflow with signing
+credentials, then finish diagnostic-workload noise reduction and full
+non-macOS production-suite evidence.
 
 ---
 
@@ -50,14 +50,15 @@ package:sqlite3  ←─── native hooks select source: system, name: sqlite_t
   │   resolves DynamicLibrary symbols against...
   │
   ▼
-libsqlite_traced.{dylib,so} (the tracelite shim)
+libsqlite_traced.{dylib,so} / sqlite_traced.dll (the tracelite shim)
   │   ├── wrapped SQLite API subset:
   │   │     open/close, prepare/step/reset/finalize,
   │   │     binds, column reads, counters/errors, exec
   │   │     → emit BEGIN/END events with timing into shared mmap ring
   │   │     → call real libsqlite3 via dlsym(RTLD_NEXT, ...)
   │   └── unwrapped functions: forwarded transparently via the platform link
-  │       strategy (LC_REEXPORT_DYLIB on macOS, libsqlite3 link on Linux)
+  │       strategy (LC_REEXPORT_DYLIB on macOS, libsqlite3 link on Linux) or
+  │       exported from an embedded SQLite amalgamation on Windows
   │
   ▼
 real libsqlite3 or private sqlite3mc symbols in an embedded build
@@ -242,8 +243,8 @@ Run both: `dart test`. Both pass.
   `dart pub publish --dry-run`, avoiding false publish warnings from ignored
   local overrides used for sibling-checkout validation.
 - CI writes an explicit `pubspec_overrides.yaml` that points `resqlite` at a
-  checked-out trace-enabled sibling pinned to PR #109 head
-  `94529ec00dfb74d4c0093ce52d6d510964761067`, then verifies
+  checked-out trace-enabled sibling pinned to merged PR #109 commit
+  `afd0f0ff7bf7704fd63cdad1b299d768bb8f785a`, then verifies
   `.dart_tool/package_config.json`, the resolved git SHA, and the
   `trace_sqlite` hook before running peer tests, so the macOS gate cannot
   silently fall back to the pub package and lose trace hooks.
@@ -342,7 +343,7 @@ A clear-eyed accounting. Designed ≠ proven.
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
 | Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
-| Windows core artifact surface works | △ CI-configured | `.github/workflows/ci.yml` runs generated-output, analysis, and platform-independent core artifact tests on Windows; native runtime/shim tracing remains unsupported until the runtime is ported off POSIX-only mmap/open/clock APIs |
+| Windows core and embedded shim smoke work | ✓ CI-proven | `.github/workflows/ci.yml` runs generated-output, analysis, platform-independent core artifact tests, native runtime attach, embedded `sqlite_traced.dll` build from a pinned SQLite amalgamation, and package:sqlite3 shim smoke on Windows; repeated production-profile history remains macOS-only |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
 | resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the pinned trace-enabled sibling checkout before peer tests |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
@@ -557,10 +558,10 @@ Work:
     bytes, stream counts, reader busy state.
 - Add side-by-side parity tests between current resqlite profile output and
   tracelite artifacts for a small initial matrix.
-- Done in the resqlite integration PR: benchmark, decision, and profile wrappers
-  pin Tracelite to `resqlite-profiling-gate-2026-06-01-r2`, record both source
-  states, verify the resqlite dependency binding, and preserve `insights.md` /
-  `insights.json` from `tracelite explain`.
+- Done in the merged resqlite integration PR: benchmark, decision, and profile
+  wrappers pin Tracelite to `resqlite-profiling-gate-2026-06-03-r11`, record
+  both source states, verify the resqlite dependency binding, and preserve
+  `insights.md` / `insights.json` from `tracelite explain`.
 
 Acceptance gates:
 
@@ -712,10 +713,8 @@ Work:
   `Visualizer Release` workflow for macOS/Linux/Windows archive manifests,
   optional macOS signing/notarization, and release asset publishing.
 - Validate Linux shim loading through the sqlite3 native-hook resolver path.
-- Validate Windows core artifact commands in CI while keeping native tracing
-  explicitly unsupported until the runtime and SQLite shim have real Windows
-  implementations.
-- Validate Windows substitution/loading strategy.
+- Keep Windows core artifact commands, native runtime attach, and embedded
+  package:sqlite3 shim smoke green in CI.
 - Add CI for:
   - generator freshness;
   - runtime/shim tests (macOS full suite plus Linux package:sqlite3 shim smoke);

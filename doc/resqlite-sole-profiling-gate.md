@@ -1,14 +1,14 @@
 # resqlite sole-profiling acceptance gate
 
-Status: regular workflow accepted for PR #109, legacy-profile deletion still
-requires adoption sign-off, 2026-06-02
+Status: regular workflow accepted in merged PR #109, legacy-profile deletion
+still requires adoption sign-off, 2026-06-03
 
 This is the evidence gate for accepting tracelite as resqlite's regular
 profiling and benchmarking framework. Tracelite can replace the old profile
 artifact and dashboard pipeline for covered surfaces. The remaining decision is
-not whether PR #109 is credible; it is whether and when resqlite archives the
-legacy direct profile runner that is still useful as a compatibility/parity
-harness.
+not whether the merged PR #109 integration is credible; it is whether and when
+resqlite archives the legacy direct profile runner that is still useful as a
+compatibility/parity harness.
 
 ## Acceptance criteria
 
@@ -74,13 +74,13 @@ scope drift: `suite-history` could calibrate a scenario subset while the nested
 `suite-history` both honor `--scenarios`.
 
 The highest-priority integration blocker found later was source reproducibility.
-That is now closed in PR #109: the resqlite wrappers pin Tracelite in the
-benchmark source audit, reject dirty or mismatched checkouts by default, record
-both source states in wrapper manifests, and verify that Tracelite resolves
-`resqlite` to the checkout under test.
+That is now closed in merged PR #109: the resqlite wrappers pin Tracelite in
+the benchmark source audit, reject dirty or mismatched checkouts by default,
+record both source states in wrapper manifests, and verify that Tracelite
+resolves `resqlite` to the checkout under test.
 
 The resqlite wrapper now separates broad suite coverage from strict policy
-scope. The r10 production gate runs the resqlite release-policy surface with
+scope. The r11 production gate runs the resqlite release-policy surface with
 current production thresholds: `high-cardinality-fanout` and
 `many-streams-writer-throughput`. It also runs `sqlite-diagnostics` as
 trace-health and diagnostic coverage, but diagnostics are not a strict
@@ -102,18 +102,18 @@ dart run benchmark/run_tracelite.dart \
   --preset=production \
   --tracelite-root=/path/to/tracelite \
   --resqlite-root="$PWD" \
-  --label=production-pin-r10-resqlite-policy-2026-06-02-r1 \
-  --out-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1 \
-  --graph-data-dir=build/tracelite-benchmarks/production-pin-r10-resqlite-policy-2026-06-02-r1/graph-data
+  --label=production-pin-r11-resqlite-policy-2026-06-03-r1 \
+  --out-dir=build/tracelite-benchmarks/production-pin-r11-resqlite-policy-2026-06-03-r1 \
+  --graph-data-dir=build/tracelite-benchmarks/production-pin-r11-resqlite-policy-2026-06-03-r1/graph-data
 ```
 
 Evidence:
 
 - Tracelite source:
-  `d058647a123df0f4af223a110564b862de2eda05`
-  (`resqlite-profiling-gate-2026-06-02-r10`).
+  `e562d94237de9805398c584268704ab2c2b2f85b`
+  (`resqlite-profiling-gate-2026-06-03-r11`).
 - Resqlite source for the production evidence:
-  `6affacd4d3b83e16d73fafa0c5232f578f25dde4`.
+  `387ebd1ec0fe3d876859194c7f36835298233ec1`.
 - `history.json` recorded 5/5 successful production suite runs.
 - `policy-calibration.json` reported `ready` for both strict release-policy
   groups: `high-cardinality-fanout` and
@@ -124,8 +124,8 @@ Evidence:
 - The wrapper recorded clean Tracelite and resqlite source states, arm64 Dart
   on an arm64 host, and
   `tracelite_resqlite_dependency.matches_requested_root=true`.
-- Observed strict-lane noise was 0.5% and 1.04%, both within the 5% max-CV
-  gate.
+- Observed strict-lane noise was 0.71% and 0.73%, both within the 5% max-CV
+  gate; the many-streams lane had 5.71% run outliers, within policy.
 - The suite-history phase remains acceptable for a pre-publish gate, but still
   the next runtime optimization target.
 
@@ -141,12 +141,13 @@ dart run benchmark/run_tracelite.dart \
 
 Evidence:
 
-- PR #109's `Tracelite smoke` job checks out the r10 tag, runs the `ci` preset
+- PR #109's `Tracelite smoke` job checks out the r11 tag, runs the `ci` preset
   through the resqlite wrapper, uploads wrapper artifacts, and passed at PR
-  head `94529ec00dfb74d4c0093ce52d6d510964761067`.
-- The same PR head also passed generated-data freshness, raw-profile-JSON
-  hygiene, and the macOS test job with `trace_sqlite` native hook smoke
-  coverage.
+  head `7e4b30d74ec48fbed9e7f4f813254b8d46cb0548`.
+- The merged main commit `afd0f0ff7bf7704fd63cdad1b299d768bb8f785a` passed
+  generated-data freshness, raw-profile-JSON hygiene, macOS tests with
+  `trace_sqlite` native hook smoke coverage, Tracelite smoke, and the main
+  benchmark workflow.
 
 The resqlite PR now also has a dedicated
 `benchmark/decide_tracelite.dart` wrapper for baseline/candidate decisions. A
@@ -198,9 +199,9 @@ machine policy gates above.
 
 Current acceptance position:
 
-- Criteria 1 and 2 are satisfied for the current PR: PR #109 is non-draft,
-  source-pins Tracelite in resqlite's benchmark audit, records both source
-  states in wrapper manifests, and keeps the Tracelite smoke lane green.
+- Criteria 1 and 2 are satisfied by merged PR #109: it source-pins Tracelite in
+  resqlite's benchmark audit, records both source states in wrapper manifests,
+  and keeps the Tracelite smoke lane green.
 - Criteria 3 and 4 are satisfied by the five-run release gate, routine
   no-regression decision, and injected-regression rejection artifacts above.
 - Criteria 5 through 7 are satisfied for the covered resqlite profile surfaces,

@@ -24,6 +24,8 @@ void main() {
       expect(text, isNot(contains('resqlite-profiling-gate-2026-05-31')));
       expect(text, isNot(contains('resqlite-profiling-gate-2026-06-01-r2')));
       expect(text, isNot(contains('resqlite-profiling-gate-2026-06-01`')));
+      expect(text, isNot(contains('resqlite-profiling-gate-2026-06-02-r10')));
+      expect(text, isNot(contains('94529ec00dfb74d4c0093ce52d6d510964761067')));
       expect(
         text,
         isNot(contains('bcb3f3f419a09aa682948595fdb8ab002af637dc')),
@@ -92,10 +94,13 @@ void main() {
     expect(doctor, contains('--package=host --require-clean-source=true'));
     expect(doctor, contains('--visualizer-release=build/visualizer-release'));
     expect(doctor, contains('--require-signed-macos-release=true'));
+    expect(doctor, contains('--sqlite-amalgamation=third_party/sqlite3.c'));
+    expect(doctor, contains('tool/build_sqlite_shim.dart'));
     expect(doctor, contains('heavyweight dense-trace'));
     expect(devCli, contains('--package=none|host'));
     expect(devCli, contains('--require-clean-source=true'));
     expect(devCli, contains('--visualizer-release=manifest-or-dir'));
+    expect(devCli, contains('--sqlite-amalgamation=/path/to/sqlite3.c'));
     expect(devCli, contains('--require-signed-macos-release=true'));
     expect(devCli, contains('--skip-heavy-visualizer-tests=true'));
     expect(devCli, contains('--skip-native-visualizer-tests=true'));
@@ -111,6 +116,10 @@ void main() {
 
     expect(workflow, contains('Linux CI benchmark suite'));
     expect(workflow, contains('RESQLITE_TRACE_REVISION'));
+    expect(workflow, contains('SQLITE_AMALGAMATION_VERSION'));
+    expect(workflow, contains('Windows SQLite shim smoke'));
+    expect(workflow, contains('tool/build_sqlite_shim.dart'));
+    expect(workflow, contains('tool/sqlite_shim_smoke.dart'));
     expect(
         workflow, isNot(contains('a2e684c6861980e2fbbbc437dd7a4797ae984f2f')));
     expect(workflow, contains('Publish archive smoke'));
@@ -123,6 +132,7 @@ void main() {
     for (final text in [readme, doctor, productionReadiness]) {
       expect(text, contains('full `sqlite3` ABI'));
       expect(text, contains('sqlite_traced.dll'));
+      expect(text, contains('SQLite amalgamation'));
     }
   });
 

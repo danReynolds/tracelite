@@ -8,7 +8,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  RESQLITE_TRACE_REVISION: '94529ec00dfb74d4c0093ce52d6d510964761067'
+  RESQLITE_TRACE_REVISION: 'afd0f0ff7bf7704fd63cdad1b299d768bb8f785a'
+  SQLITE_AMALGAMATION_VERSION: '3530100'
 
 jobs:
   macos:
@@ -196,6 +197,8 @@ jobs:
           dart analyze
           lib
           bin
+          tool/build_sqlite_shim.dart
+          tool/sqlite_shim_smoke.dart
           tool/platform_core_smoke.dart
           test/native_artifacts_test.dart
           test/package_boundary_test.dart
@@ -209,3 +212,26 @@ jobs:
         run: >-
           dart --packages=.dart_tool/package_config.json
           tool/native_runtime_smoke.dart
+
+      - name: Download SQLite amalgamation
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          $version = "${{ env.SQLITE_AMALGAMATION_VERSION }}"
+          $url = "https://sqlite.org/2026/sqlite-amalgamation-$version.zip"
+          $zip = "build/sqlite-amalgamation.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath build/sqlite-amalgamation -Force
+
+      - name: Build Windows embedded SQLite shim
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/build_sqlite_shim.dart
+          --sqlite-amalgamation=build/sqlite-amalgamation/sqlite-amalgamation-${{ env.SQLITE_AMALGAMATION_VERSION }}/sqlite3.c
+
+      - name: Windows SQLite shim smoke
+        env:
+          TRACELITE_SQLITE_AMALGAMATION: build/sqlite-amalgamation/sqlite-amalgamation-${{ env.SQLITE_AMALGAMATION_VERSION }}/sqlite3.c
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/sqlite_shim_smoke.dart

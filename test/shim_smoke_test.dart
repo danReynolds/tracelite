@@ -9,7 +9,7 @@ import 'package:tracelite/tracelite.dart';
 
 void main() {
   test('shim intercepts real sqlite3 calls from package:sqlite3', () async {
-    final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+    final shimBuildCommand = _sqliteShimBuildCommand();
     if (shimBuildCommand == null) {
       markTestSkipped(
         'sqlite shim smoke is not implemented for '
@@ -38,11 +38,10 @@ void main() {
     final result = await Process.run(
       Platform.resolvedExecutable,
       ['run', 'example/sqlite3_user.dart'],
-      environment: {
-        'TRACELITE_REGION': regionPath,
-        'DYLD_LIBRARY_PATH': shim.parent.absolute.path,
-        'LD_LIBRARY_PATH': shim.parent.absolute.path,
-      },
+      environment: _sqliteUserEnvironment(
+        regionPath: regionPath,
+        shimDirectory: shim.parent,
+      ),
     );
 
     expect(result.exitCode, 0,
@@ -55,6 +54,12 @@ void main() {
     final registered = trace.tracks.where((track) => track.state >= 2).toList();
     expect(registered.length, greaterThanOrEqualTo(1),
         reason: 'shim should register as a producer');
+    expect(
+      registered.map((track) => track.processName),
+      contains('libsqlite_traced'),
+      reason:
+          'standalone sqlite_traced shim should keep a stable producer name',
+    );
 
     final spanCounts = <int, int>{};
     for (final event in trace.events) {
@@ -112,7 +117,7 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('raw SQL capture requires an explicit opt-in', () async {
-    final shimBuildCommand = native_artifacts.sqliteShimBuildCommand();
+    final shimBuildCommand = _sqliteShimBuildCommand();
     if (shimBuildCommand == null) {
       markTestSkipped(
         'sqlite shim smoke is not implemented for '
@@ -141,12 +146,11 @@ void main() {
     final result = await Process.run(
       Platform.resolvedExecutable,
       ['run', 'example/sqlite3_user.dart'],
-      environment: {
-        'TRACELITE_REGION': regionPath,
-        'TRACELITE_SQL_CAPTURE': 'raw',
-        'DYLD_LIBRARY_PATH': shim.parent.absolute.path,
-        'LD_LIBRARY_PATH': shim.parent.absolute.path,
-      },
+      environment: _sqliteUserEnvironment(
+        regionPath: regionPath,
+        shimDirectory: shim.parent,
+        sqlCapture: 'raw',
+      ),
     );
 
     expect(result.exitCode, 0,
@@ -160,4 +164,34 @@ void main() {
     expect(stringPool, contains('SELECT id, name FROM t WHERE id > ?'));
     expect(stringPool, isNot(contains('sqlfp:v1:')));
   }, timeout: const Timeout(Duration(minutes: 2)));
+}
+
+String? _sqliteShimBuildCommand() {
+  final sqliteAmalgamation =
+      Platform.environment['TRACELITE_SQLITE_AMALGAMATION'];
+  return native_artifacts.sqliteShimBuildCommand(
+    embeddedSqliteSourcePath:
+        sqliteAmalgamation == null || sqliteAmalgamation.isEmpty
+            ? null
+            : sqliteAmalgamation,
+  );
+}
+
+Map<String, String> _sqliteUserEnvironment({
+  required String regionPath,
+  required Directory shimDirectory,
+  String? sqlCapture,
+}) {
+  final shimPath = shimDirectory.absolute.path;
+  final inheritedPath =
+      Platform.environment['PATH'] ?? Platform.environment['Path'] ?? '';
+  return {
+    'TRACELITE_REGION': regionPath,
+    if (sqlCapture != null) 'TRACELITE_SQL_CAPTURE': sqlCapture,
+    'DYLD_LIBRARY_PATH': shimPath,
+    'LD_LIBRARY_PATH': shimPath,
+    'PATH': inheritedPath.isEmpty
+        ? shimPath
+        : '$shimPath${Platform.pathSeparator}$inheritedPath',
+  };
 }

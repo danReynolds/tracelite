@@ -57,7 +57,7 @@
 
 /* ---- Globals ---- */
 
-volatile int tlt_active = 0;
+TLT_API volatile int tlt_active = 0;
 
 #ifdef _WIN32
 static HANDLE g_region_file = INVALID_HANDLE_VALUE;
@@ -106,13 +106,13 @@ static uint64_t monotonic_ns(void) {
 #endif
 }
 
-uint64_t tlt_now_ns(void) {
+TLT_API uint64_t tlt_now_ns(void) {
   return monotonic_ns() - g_start_monotonic_ns;
 }
 
 /* ---- Attach ---- */
 
-int tlt_attach(const char* explicit_path) {
+TLT_API int tlt_attach(const char* explicit_path) {
   if (tlt_active) return 0;
 
   const char* path = explicit_path;
@@ -204,7 +204,7 @@ int tlt_attach(const char* explicit_path) {
   return 0;
 }
 
-void tlt_detach(void) {
+TLT_API void tlt_detach(void) {
   int track_id = tlt_current_track_id();
   if (track_id >= 0) {
     tlt_detach_track((uint8_t)track_id);
@@ -214,12 +214,12 @@ void tlt_detach(void) {
   tlt_my_generation = 0;
 }
 
-int tlt_current_track_id(void) {
+TLT_API int tlt_current_track_id(void) {
   if (tlt_my_generation != current_runtime_generation()) return -1;
   return tlt_my_track_id;
 }
 
-void tlt_reset_runtime(void) {
+TLT_API void tlt_reset_runtime(void) {
   if (!tlt_active) return;
 
   if (g_region && g_registry) {
@@ -264,7 +264,7 @@ static void reset_mapping_state(void) {
   tlt_active = 0;
 }
 
-void tlt_detach_track(uint8_t track_id) {
+TLT_API void tlt_detach_track(uint8_t track_id) {
   if (!tlt_active || !valid_track_id(track_id)) return;
   g_registry[track_id].state = 3;  /* ended */
   ring_for_track(track_id)->producer_state = 3;
@@ -275,7 +275,8 @@ void tlt_detach_track(uint8_t track_id) {
 
 /* ---- Producer registry ---- */
 
-int tlt_register_producer(uint8_t kind, const char* process_name, const char* thread_name) {
+TLT_API int tlt_register_producer(uint8_t kind, const char* process_name,
+                                  const char* thread_name) {
   if (!tlt_active) return -1;
 
   /* Find an empty slot via CAS. */
@@ -338,7 +339,7 @@ static int has_active_tracks(void) {
 
 /* ---- String pool (CAS allocator) ---- */
 
-uint32_t tlt_intern_string(const char* s, uint32_t len) {
+TLT_API uint32_t tlt_intern_string(const char* s, uint32_t len) {
   if (!tlt_active) return 0xFFFFFFFFu;
   uint32_t needed = 4 + len;
   uint32_t pool_size = g_region->string_pool_size;
@@ -452,135 +453,146 @@ static void write_event(uint8_t tag, uint16_t span_id,
   write_event_with_correlation(tag, span_id, 0, 0, args, arg_count);
 }
 
-void tlt_begin(uint16_t span_id, const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_begin(uint16_t span_id, const uint64_t* args,
+                       uint8_t arg_count) {
   write_event(TLT_TAG_BEGIN, span_id, args, arg_count);
 }
 
-void tlt_end(uint16_t span_id, const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_end(uint16_t span_id, const uint64_t* args,
+                     uint8_t arg_count) {
   write_event(TLT_TAG_END, span_id, args, arg_count);
 }
 
-void tlt_instant(uint16_t span_id, const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_instant(uint16_t span_id, const uint64_t* args,
+                         uint8_t arg_count) {
   write_event(TLT_TAG_INSTANT, span_id, args, arg_count);
 }
 
-void tlt_begin_correlated(uint16_t span_id, uint64_t correlation_id,
-                          const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_begin_correlated(uint16_t span_id, uint64_t correlation_id,
+                                  const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation(TLT_TAG_BEGIN, span_id, correlation_id, 1,
                                args, arg_count);
 }
 
-void tlt_end_correlated(uint16_t span_id, uint64_t correlation_id,
-                        const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_end_correlated(uint16_t span_id, uint64_t correlation_id,
+                                const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation(TLT_TAG_END, span_id, correlation_id, 1,
                                args, arg_count);
 }
 
-void tlt_instant_correlated(uint16_t span_id, uint64_t correlation_id,
-                            const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_instant_correlated(uint16_t span_id, uint64_t correlation_id,
+                                    const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation(TLT_TAG_INSTANT, span_id, correlation_id, 1,
                                args, arg_count);
 }
 
-void tlt_async_begin(uint16_t span_id, uint64_t correlation_id,
-                     const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_async_begin(uint16_t span_id, uint64_t correlation_id,
+                             const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation(TLT_TAG_ASYNC_BEGIN, span_id, correlation_id, 1,
                                args, arg_count);
 }
 
-void tlt_async_end(uint16_t span_id, uint64_t correlation_id,
-                   const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_async_end(uint16_t span_id, uint64_t correlation_id,
+                           const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation(TLT_TAG_ASYNC_END, span_id, correlation_id, 1,
                                args, arg_count);
 }
 
-void tlt_begin_on_track(uint8_t track_id, uint16_t span_id,
-                        const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_begin_on_track(uint8_t track_id, uint16_t span_id,
+                                const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_BEGIN, span_id, 0,
                                            0, args, arg_count);
 }
 
-void tlt_end_on_track(uint8_t track_id, uint16_t span_id,
-                      const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_end_on_track(uint8_t track_id, uint16_t span_id,
+                              const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_END, span_id, 0,
                                            0, args, arg_count);
 }
 
-void tlt_instant_on_track(uint8_t track_id, uint16_t span_id,
-                          const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_instant_on_track(uint8_t track_id, uint16_t span_id,
+                                  const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_INSTANT, span_id,
                                            0, 0, args, arg_count);
 }
 
-void tlt_begin_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                   uint64_t correlation_id,
-                                   const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_begin_correlated_on_track(uint8_t track_id, uint16_t span_id,
+                                           uint64_t correlation_id,
+                                           const uint64_t* args,
+                                           uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_BEGIN, span_id,
                                            correlation_id, 1, args, arg_count);
 }
 
-void tlt_end_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                 uint64_t correlation_id,
-                                 const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_end_correlated_on_track(uint8_t track_id, uint16_t span_id,
+                                         uint64_t correlation_id,
+                                         const uint64_t* args,
+                                         uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_END, span_id,
                                            correlation_id, 1, args, arg_count);
 }
 
-void tlt_instant_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                     uint64_t correlation_id,
-                                     const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_instant_correlated_on_track(uint8_t track_id,
+                                             uint16_t span_id,
+                                             uint64_t correlation_id,
+                                             const uint64_t* args,
+                                             uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_INSTANT, span_id,
                                            correlation_id, 1, args, arg_count);
 }
 
-void tlt_async_begin_on_track(uint8_t track_id, uint16_t span_id,
-                              uint64_t correlation_id,
-                              const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_async_begin_on_track(uint8_t track_id, uint16_t span_id,
+                                      uint64_t correlation_id,
+                                      const uint64_t* args,
+                                      uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_ASYNC_BEGIN,
                                            span_id, correlation_id, 1, args,
                                            arg_count);
 }
 
-void tlt_async_end_on_track(uint8_t track_id, uint16_t span_id,
-                            uint64_t correlation_id,
-                            const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_async_end_on_track(uint8_t track_id, uint16_t span_id,
+                                    uint64_t correlation_id,
+                                    const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_ASYNC_END,
                                            span_id, correlation_id, 1, args,
                                            arg_count);
 }
 
-void tlt_counter(uint16_t span_id, int64_t value) {
+TLT_API void tlt_counter(uint16_t span_id, int64_t value) {
   uint64_t args[1] = { (uint64_t)value };
   write_event(TLT_TAG_COUNTER, span_id, args, 1);
 }
 
-void tlt_counter_correlated(uint16_t span_id, uint64_t correlation_id,
-                            int64_t value) {
+TLT_API void tlt_counter_correlated(uint16_t span_id, uint64_t correlation_id,
+                                    int64_t value) {
   uint64_t args[1] = { (uint64_t)value };
   write_event_with_correlation(TLT_TAG_COUNTER, span_id, correlation_id, 1,
                                args, 1);
 }
 
-void tlt_counter_on_track(uint8_t track_id, uint16_t span_id, int64_t value) {
+TLT_API void tlt_counter_on_track(uint8_t track_id, uint16_t span_id,
+                                  int64_t value) {
   uint64_t args[1] = { (uint64_t)value };
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_COUNTER, span_id,
                                            0, 0, args, 1);
 }
 
-void tlt_counter_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                     uint64_t correlation_id, int64_t value) {
+TLT_API void tlt_counter_correlated_on_track(uint8_t track_id,
+                                             uint16_t span_id,
+                                             uint64_t correlation_id,
+                                             int64_t value) {
   uint64_t args[1] = { (uint64_t)value };
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_COUNTER, span_id,
                                            correlation_id, 1, args, 1);
 }
 
-void tlt_metadata(uint16_t metadata_kind, const uint64_t* args,
-                  uint8_t arg_count) {
+TLT_API void tlt_metadata(uint16_t metadata_kind, const uint64_t* args,
+                          uint8_t arg_count) {
   write_event(TLT_TAG_METADATA, metadata_kind, args, arg_count);
 }
 
-void tlt_metadata_on_track(uint8_t track_id, uint16_t metadata_kind,
-                           const uint64_t* args, uint8_t arg_count) {
+TLT_API void tlt_metadata_on_track(uint8_t track_id, uint16_t metadata_kind,
+                                   const uint64_t* args, uint8_t arg_count) {
   write_event_with_correlation_on_track_id(track_id, TLT_TAG_METADATA,
                                            metadata_kind, 0, 0, args,
                                            arg_count);

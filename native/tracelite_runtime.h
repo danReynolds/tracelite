@@ -19,6 +19,12 @@
 extern "C" {
 #endif
 
+#if defined(_WIN32)
+#define TLT_API __declspec(dllexport)
+#else
+#define TLT_API
+#endif
+
 /* ---- Region magic and version ---- */
 
 #define TRACELITE_REGION_MAGIC 0x52544c54  /* "TLTR" little-endian */
@@ -123,12 +129,12 @@ _Static_assert(sizeof(tlt_ring_header_t) == 64, "ring header size");
  * Returns 0 on success, -1 if the region is not present (in which case
  * tracing is silently disabled).
  */
-int tlt_attach(const char* explicit_path);
+TLT_API int tlt_attach(const char* explicit_path);
 
 /* Return this thread's registered track ID, or -1 when this thread is not
  * currently registered against an active region.
  */
-int tlt_current_track_id(void);
+TLT_API int tlt_current_track_id(void);
 
 /* Force-reset the active runtime mapping at a quiescent harness boundary.
  *
@@ -137,101 +143,113 @@ int tlt_current_track_id(void);
  * concurrently writing. Registered tracks are marked ended before the mapping
  * is unmapped so the just-finished region remains readable.
  */
-void tlt_reset_runtime(void);
+TLT_API void tlt_reset_runtime(void);
 
 /* Reserve a track ID and register this thread as a producer.
  * Returns track ID (0..255) or -1 on failure.
  */
-int tlt_register_producer(uint8_t kind, const char* process_name, const char* thread_name);
+TLT_API int tlt_register_producer(uint8_t kind, const char* process_name,
+                                  const char* thread_name);
 
 /* Read the runtime monotonic clock (ns since trace start).
  * Producers MUST use this clock for all event timestamps.
  */
-uint64_t tlt_now_ns(void);
+TLT_API uint64_t tlt_now_ns(void);
 
 /* Intern a string in the shared pool. Returns string_id (an offset into
  * the pool) on success, or 0xFFFFFFFF on overflow (the sentinel).
  */
-uint32_t tlt_intern_string(const char* s, uint32_t len);
+TLT_API uint32_t tlt_intern_string(const char* s, uint32_t len);
 
 /* Write a BEGIN event with begin_args.
  * The args array length must match the span's begin_args schema.
  */
-void tlt_begin(uint16_t span_id, const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_begin(uint16_t span_id, const uint64_t* args,
+                       uint8_t arg_count);
 
 /* Write an END event with end_args. */
-void tlt_end(uint16_t span_id, const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_end(uint16_t span_id, const uint64_t* args,
+                     uint8_t arg_count);
 
 /* Write an INSTANT event. */
-void tlt_instant(uint16_t span_id, const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_instant(uint16_t span_id, const uint64_t* args,
+                         uint8_t arg_count);
 
 /* Correlated sync events. These use the same BEGIN/END/INSTANT tags as the
  * uncorrelated calls but carry a correlation ID word after the timestamp.
  */
-void tlt_begin_correlated(uint16_t span_id, uint64_t correlation_id,
-                          const uint64_t* args, uint8_t arg_count);
-void tlt_end_correlated(uint16_t span_id, uint64_t correlation_id,
-                        const uint64_t* args, uint8_t arg_count);
-void tlt_instant_correlated(uint16_t span_id, uint64_t correlation_id,
-                            const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_begin_correlated(uint16_t span_id, uint64_t correlation_id,
+                                  const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_end_correlated(uint16_t span_id, uint64_t correlation_id,
+                                const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_instant_correlated(uint16_t span_id, uint64_t correlation_id,
+                                    const uint64_t* args, uint8_t arg_count);
 
 /* Cross-track async span events paired by (span_id, correlation_id). */
-void tlt_async_begin(uint16_t span_id, uint64_t correlation_id,
-                     const uint64_t* args, uint8_t arg_count);
-void tlt_async_end(uint16_t span_id, uint64_t correlation_id,
-                   const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_async_begin(uint16_t span_id, uint64_t correlation_id,
+                             const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_async_end(uint16_t span_id, uint64_t correlation_id,
+                           const uint64_t* args, uint8_t arg_count);
 
 /* Explicit-track variants for logical producers whose event emission can move
  * across OS threads (notably Dart async continuations). These write to the
  * ring owned by track_id instead of the calling thread's TLS producer.
  */
-void tlt_begin_on_track(uint8_t track_id, uint16_t span_id,
-                        const uint64_t* args, uint8_t arg_count);
-void tlt_end_on_track(uint8_t track_id, uint16_t span_id,
-                      const uint64_t* args, uint8_t arg_count);
-void tlt_instant_on_track(uint8_t track_id, uint16_t span_id,
-                          const uint64_t* args, uint8_t arg_count);
-void tlt_begin_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                   uint64_t correlation_id,
-                                   const uint64_t* args, uint8_t arg_count);
-void tlt_end_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                 uint64_t correlation_id,
-                                 const uint64_t* args, uint8_t arg_count);
-void tlt_instant_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                     uint64_t correlation_id,
-                                     const uint64_t* args, uint8_t arg_count);
-void tlt_async_begin_on_track(uint8_t track_id, uint16_t span_id,
-                              uint64_t correlation_id,
+TLT_API void tlt_begin_on_track(uint8_t track_id, uint16_t span_id,
+                                const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_end_on_track(uint8_t track_id, uint16_t span_id,
                               const uint64_t* args, uint8_t arg_count);
-void tlt_async_end_on_track(uint8_t track_id, uint16_t span_id,
-                            uint64_t correlation_id,
-                            const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_instant_on_track(uint8_t track_id, uint16_t span_id,
+                                  const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_begin_correlated_on_track(uint8_t track_id, uint16_t span_id,
+                                           uint64_t correlation_id,
+                                           const uint64_t* args,
+                                           uint8_t arg_count);
+TLT_API void tlt_end_correlated_on_track(uint8_t track_id, uint16_t span_id,
+                                         uint64_t correlation_id,
+                                         const uint64_t* args,
+                                         uint8_t arg_count);
+TLT_API void tlt_instant_correlated_on_track(uint8_t track_id,
+                                             uint16_t span_id,
+                                             uint64_t correlation_id,
+                                             const uint64_t* args,
+                                             uint8_t arg_count);
+TLT_API void tlt_async_begin_on_track(uint8_t track_id, uint16_t span_id,
+                                      uint64_t correlation_id,
+                                      const uint64_t* args,
+                                      uint8_t arg_count);
+TLT_API void tlt_async_end_on_track(uint8_t track_id, uint16_t span_id,
+                                    uint64_t correlation_id,
+                                    const uint64_t* args, uint8_t arg_count);
 
 /* Numeric samples. The first arg is the sampled value. Additional args are
  * producer-defined dimensions.
  */
-void tlt_counter(uint16_t span_id, int64_t value);
-void tlt_counter_correlated(uint16_t span_id, uint64_t correlation_id,
-                            int64_t value);
-void tlt_counter_on_track(uint8_t track_id, uint16_t span_id, int64_t value);
-void tlt_counter_correlated_on_track(uint8_t track_id, uint16_t span_id,
-                                     uint64_t correlation_id, int64_t value);
+TLT_API void tlt_counter(uint16_t span_id, int64_t value);
+TLT_API void tlt_counter_correlated(uint16_t span_id, uint64_t correlation_id,
+                                    int64_t value);
+TLT_API void tlt_counter_on_track(uint8_t track_id, uint16_t span_id,
+                                  int64_t value);
+TLT_API void tlt_counter_correlated_on_track(uint8_t track_id,
+                                             uint16_t span_id,
+                                             uint64_t correlation_id,
+                                             int64_t value);
 
 /* Metadata events reuse span_id as metadata_kind. */
-void tlt_metadata(uint16_t metadata_kind, const uint64_t* args,
-                  uint8_t arg_count);
-void tlt_metadata_on_track(uint8_t track_id, uint16_t metadata_kind,
-                           const uint64_t* args, uint8_t arg_count);
+TLT_API void tlt_metadata(uint16_t metadata_kind, const uint64_t* args,
+                          uint8_t arg_count);
+TLT_API void tlt_metadata_on_track(uint8_t track_id, uint16_t metadata_kind,
+                                   const uint64_t* args, uint8_t arg_count);
 
 /* Detach this producer (sets registry state to ended). */
-void tlt_detach(void);
-void tlt_detach_track(uint8_t track_id);
+TLT_API void tlt_detach(void);
+TLT_API void tlt_detach_track(uint8_t track_id);
 
 /* Whether tracing is currently active.
  * Producers wrap their record-call sites with `if (tlt_active())` so the
  * cost when not tracing is one byte-load + branch (~1 ns).
  */
-extern volatile int tlt_active;
+TLT_API extern volatile int tlt_active;
 
 #ifdef __cplusplus
 }

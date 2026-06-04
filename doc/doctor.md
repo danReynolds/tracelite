@@ -14,6 +14,10 @@ Useful options:
 dart run bin/tracelite.dart doctor --root=/path/to/tracelite
 dart run bin/tracelite.dart doctor --strict=true
 dart run bin/tracelite.dart doctor --json=build/tracelite-doctor.json
+dart run bin/tracelite.dart doctor --sqlite-amalgamation=third_party/sqlite3.c
+dart --packages=.dart_tool/package_config.json tool/build_sqlite_shim.dart \
+  --sqlite-amalgamation=third_party/sqlite3.c
+dart --packages=.dart_tool/package_config.json tool/sqlite_shim_smoke.dart
 dart run bin/tracelite.dart doctor \
   --visualizer-release=build/visualizer-release \
   --require-visualizer-release-platforms=macos,linux,windows \
@@ -24,10 +28,16 @@ Default mode fails only on broken checkout state, such as missing source or
 generated files. Missing build outputs are warnings with exact build commands,
 because a fresh clone can be healthy before native artifacts have been built.
 The native commands are platform-specific: macOS builds `*.dylib`, Linux builds
-`*.so`, and Windows reports the SQLite shim as unsupported until Tracelite has a
-full `sqlite3` ABI export/forwarding strategy or an embedded-shim build. A
-Windows DLL that only calls `LoadLibrary` for the real SQLite library is not
-enough, because Dart resolves SQLite symbols from `sqlite_traced.dll` itself.
+`*.so`, and Windows requires `sqlite_traced.dll` to provide the
+full `sqlite3` ABI through an embedded SQLite amalgamation build or a
+forwarding DLL. Pass `--sqlite-amalgamation=/path/to/sqlite3.c` to make doctor
+record the source input and print the exact compile/link steps for the embedded
+shim variant. A Windows DLL that only calls `LoadLibrary` for the real SQLite
+library is not enough, because Dart resolves SQLite symbols from
+`sqlite_traced.dll` itself.
+To execute the same build plan from CI, run `tool/build_sqlite_shim.dart` with
+the same `--sqlite-amalgamation` path. To smoke-test the resulting shim without
+triggering `package:test` native build hooks, run `tool/sqlite_shim_smoke.dart`.
 
 Strict mode treats warnings as failures. Use it for release images and benchmark
 hosts where the native runtime, SQLite shim, and dependency graph should already

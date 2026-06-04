@@ -78,6 +78,57 @@ void main() {
     expect(result.stdout.toString(), contains('missing pubspec.yaml'));
   });
 
+  test('doctor reports an explicit sqlite amalgamation input', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-doctor-sqlite-amalgamation-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+    _writeFixtureCheckout(tempDir);
+    File('${tempDir.path}/third_party/sqlite3.c')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('\n');
+    final jsonPath = '${tempDir.path}/doctor.json';
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'doctor',
+        '--root=${tempDir.path}',
+        '--sqlite-amalgamation=third_party/sqlite3.c',
+        '--json=$jsonPath',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'doctor failed.\nstdout:\n${result.stdout}\n'
+          'stderr:\n${result.stderr}',
+    );
+    expect(result.stdout.toString(), contains('sqlite amalgamation'));
+
+    final artifact =
+        jsonDecode(File(jsonPath).readAsStringSync()) as Map<String, Object?>;
+    final checks = artifact['checks']! as List<Object?>;
+    expect(
+      checks,
+      contains(
+        allOf(
+          containsPair('name', 'sqlite amalgamation'),
+          containsPair('status', 'ok'),
+          containsPair('detail', endsWith('/third_party/sqlite3.c')),
+        ),
+      ),
+    );
+  });
+
   test('doctor validates visualizer release manifest evidence', () async {
     final tempDir = await Directory.systemTemp.createTemp(
       'tracelite-doctor-release-test-',
@@ -264,6 +315,8 @@ void _writeFixtureCheckout(Directory root) {
   for (final file in const [
     'pubspec.yaml',
     'bin/tracelite.dart',
+    'tool/build_sqlite_shim.dart',
+    'tool/sqlite_shim_smoke.dart',
     'tool/tracelite_dev.dart',
     'tool/peer_runner.dart',
     'tool/src/peer.dart',

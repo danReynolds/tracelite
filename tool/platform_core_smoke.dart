@@ -25,8 +25,17 @@ void _checkNativeSupportBoundary() {
   );
   _expect(
     native_artifacts.sqliteShimBuildCommand(operatingSystem: 'windows') == null,
-    'Windows SQLite shim build must stay explicitly unsupported until the shim '
-    'has a full sqlite3 ABI export/forwarding strategy.',
+    'Windows SQLite shim build must require an explicit embedded SQLite '
+    'amalgamation path.',
+  );
+  _expect(
+    native_artifacts.sqliteShimBuildCommand(
+          operatingSystem: 'windows',
+          embeddedSqliteSourcePath: 'third_party/sqlite3.c',
+        ) !=
+        null,
+    'Windows SQLite shim build command missing for the embedded SQLite ABI '
+    'strategy.',
   );
   _expect(
     native_artifacts
