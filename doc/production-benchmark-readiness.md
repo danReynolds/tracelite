@@ -1,6 +1,6 @@
 # Production benchmark replacement readiness
 
-Status: resqlite pre-publish integration merged, updated 2026-06-03
+Status: resqlite pre-publish integration merged, updated 2026-06-04
 
 ## Verdict
 
@@ -10,27 +10,34 @@ top-level `benchmark/run_tracelite.dart` gate, a baseline/candidate
 `benchmark/decide_tracelite.dart` decision wrapper, trace-enabled profile
 capture, graph-data export for the dashboard, build-hook smoke coverage for the
 native SQLite shim path, and Tracelite insight artifacts for operator review.
-Merged resqlite PR #109 pins the exact Tracelite source state in resqlite's
-benchmark source audit, records both Tracelite and resqlite source states in
-wrapper manifests, and keeps the Tracelite smoke lane green. The remaining
-adoption decision is whether to delete, archive, or keep the old direct
-resqlite profile runner as a legacy compatibility/parity harness.
+Merged resqlite PR #109 established the source-pinned wrapper path, and the
+later r12 downstream pin keeps the Tracelite smoke lane green while promoting
+the retuned `point-select` and `keyed-pk-subscriptions` lanes into the strict
+resqlite policy. The old direct resqlite profile runner is retained as a legacy
+compatibility/parity harness because `run_tracelite_profile.dart` still uses it
+to emit the old `profile.json` shape alongside trace-backed artifacts.
 
 The core direction held up: one trace format can capture sqlite3, drift,
 sqlite_async, and trace-enabled resqlite under the same SQLite call model, and
 the recorder overhead is small enough for profile-mode instrumentation. The
-remaining gap before using tracelite as resqlite's regular workflow is no longer
-basic production-gate viability, source reproducibility, or PR CI. The current
-resqlite-specific gap is adoption cleanup: resqlite needs to decide which old
-profile-only signals are archived versus kept for parity. Tracelite now has a
+remaining gap before using tracelite as resqlite's regular workflow is no
+longer basic production-gate viability, source reproducibility, PR CI, or
+downstream point/keyed policy promotion. Tracelite now has a
 manual/tagged `Visualizer Release` workflow for macOS, Linux, and Windows
 archive/manifest evidence, optional macOS signing/notarization, and release
 asset publishing. `tracelite doctor --visualizer-release=...` can now audit
 downloaded release manifests against archive size, SHA-256, clean source,
 required platform coverage, and macOS signing/notarization evidence, and the
 `Visualizer Release` workflow runs that audit before publishing release assets.
-The remaining distribution gap is a credentialed signed run and published
-release artifact. Tracelite's own macOS and Linux CI pin and verify the merged
+Unsigned distribution evidence now exists: workflow-dispatch run
+`26966109795` on `main` at `b92ec4fa8410b074f77bea840c2fa53cfdf759b4`
+packaged macOS arm64, Linux x64, and Windows x64 visualizer archives, then
+audited the combined release evidence. The audit found all required platforms,
+clean source, archive sizes, and SHA-256 checksums. Its doctor status was
+`warning` only because the run intentionally used `sign_macos=false`, so macOS
+signing and notarization were not requested. The remaining distribution gap is
+a credentialed signed run and published release artifact. Tracelite's own
+macOS and Linux CI pin and verify the merged
 trace-enabled resqlite checkout at
 `afd0f0ff7bf7704fd63cdad1b299d768bb8f785a` before peer tests, so this repo's
 gate cannot accidentally benchmark the pub package or an obsolete integration
@@ -179,7 +186,7 @@ The detailed policy is documented in
 
 ## Evidence from this pass
 
-### Current r11 resqlite production gate, 2026-06-03
+### Current r12 resqlite production gate, 2026-06-04
 
 Command:
 
@@ -188,30 +195,35 @@ dart run benchmark/run_tracelite.dart \
   --preset=production \
   --tracelite-root=/path/to/tracelite \
   --resqlite-root="$PWD" \
-  --label=production-pin-r11-resqlite-policy-2026-06-03-r1 \
-  --out-dir=build/tracelite-benchmarks/production-pin-r11-resqlite-policy-2026-06-03-r1 \
-  --graph-data-dir=build/tracelite-benchmarks/production-pin-r11-resqlite-policy-2026-06-03-r1/graph-data
+  --label=production-pin-r12-point-keyed-policy-2026-06-04-r1 \
+  --out-dir=build/tracelite-benchmarks/production-pin-r12-point-keyed-policy-2026-06-04-r1 \
+  --graph-data-dir=build/tracelite-benchmarks/production-pin-r12-point-keyed-policy-2026-06-04-r1/graph-data
 ```
 
 Result: every production suite-history run completed with `ok` status and
 strict policy calibration passed. The wrapper recorded Tracelite source
-`e562d94237de9805398c584268704ab2c2b2f85b`
-(`resqlite-profiling-gate-2026-06-03-r11`) and clean resqlite source
-`387ebd1ec0fe3d876859194c7f36835298233ec1`. `policy-calibration.json`
-reported `ready` for both strict release-policy groups:
-`high-cardinality-fanout` and `many-streams-writer-throughput`.
-`sqlite-diagnostics` ran as trace-health and diagnostic coverage, but is not a
-strict elapsed-time blocker yet. Graph-data export and validation passed, and
-`tracelite explain` completed. The wrapper also recorded arm64 Dart on an arm64
-host and `tracelite_resqlite_dependency.matches_requested_root=true`.
+`b92ec4fa8410b074f77bea840c2fa53cfdf759b4`
+(`resqlite-profiling-gate-2026-06-04-r12`) and
+`tracelite_resqlite_dependency.matches_requested_root=true`. The downstream
+resqlite PR #120 pin/policy update merged at
+`aabcce733240b8586216f8c32bcc1a16f806586f` with green Tracelite smoke.
+`policy-calibration.json` reported `ready` for all four strict release-policy
+groups: `high-cardinality-fanout`, `many-streams-writer-throughput`,
+`point-select`, and `keyed-pk-subscriptions`. The policy recommended 7
+repetitions, a 13% primary threshold, a 10% guardrail threshold, and 10% max CV
+for the combined strict release surface. `sqlite-diagnostics` ran as
+trace-health and diagnostic coverage, but is not a strict elapsed-time blocker
+yet. Graph-data export and validation passed, and `tracelite explain`
+completed.
 
-Observed strict-lane noise was 0.71% and 0.73%, both within the 5% max-CV gate;
-the many-streams lane had 5.71% run outliers, within policy. The full wrapper
-remains a pre-publish gate rather than a routine edit-compile-test command, so
-worker/suite reuse is still the next runtime optimization target. `tracelite
-explain` still reports direct script peer runs as harness-dominated for small
-smoke artifacts, so the gate is production ready for scoped release decisions
-without pretending every diagnostic workload is ready to block a release.
+Observed strict-lane noise was 3.05% for `high-cardinality-fanout`, 2.14% for
+`many-streams-writer-throughput`, 6.35% for `point-select`, and 4.87% for
+`keyed-pk-subscriptions`. The full wrapper remains a pre-publish gate rather
+than a routine edit-compile-test command, so worker/suite reuse is still the
+next runtime optimization target. `tracelite explain` still reports direct
+script peer runs as harness-dominated for small smoke artifacts, so the gate is
+production ready for scoped release decisions without pretending every
+diagnostic workload is ready to block a release.
 
 Earlier failed calibrations remain useful history. The original broad gate
 completed every suite run but produced `not_ready` calibration because some
@@ -613,20 +625,13 @@ can be called production-quality across every Dart target.
 
 ## Recommended next iteration
 
-1. Decide whether to delete, archive, or demote resqlite's old direct profile
-   runner now that tracelite emits workload summaries, graph data, decisions,
-   and insight artifacts.
-2. Run the `Visualizer Release` workflow from a release tag with macOS signing
+1. Run the `Visualizer Release` workflow from a release tag with macOS signing
    secrets configured and `sign_macos=true`; the workflow audit should pass with
    `--require-signed-macos-release=true` before attaching archives/manifests to
    the release.
-3. Use the new drift reactive metadata and stress coverage as the edit-time
+2. Use the new drift reactive metadata and stress coverage as the edit-time
    floor, then add repeated production-scale reactive artifacts before raising
    any reactive lane to a blocking release gate.
-4. Promote the retuned `point-select` and `keyed-pk-subscriptions` lanes into
-   the downstream resqlite wrapper policy only after a pin bump carries this
-   production-profile sizing and the release decision uses the calibrated
-   repetition recommendation.
-5. Promote `feed-paging`, `large-working-set`, and `sync-burst` into the
+3. Promote `feed-paging`, `large-working-set`, and `sync-burst` into the
    downstream resqlite wrapper policy only after a pin bump carries this
    production-history evidence and non-macOS production history is collected.
