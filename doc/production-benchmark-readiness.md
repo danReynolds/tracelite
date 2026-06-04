@@ -37,19 +37,22 @@ clean source, archive sizes, and SHA-256 checksums. Its doctor status was
 `warning` only because the run intentionally used `sign_macos=false`, so macOS
 signing and notarization were not requested. The remaining distribution gap is
 a credentialed signed run and published release artifact. Tracelite's own
-macOS and Linux CI pin and verify the merged
-trace-enabled resqlite checkout at
-`afd0f0ff7bf7704fd63cdad1b299d768bb8f785a` before peer tests, so this repo's
-gate cannot accidentally benchmark the pub package or an obsolete integration
-snapshot. Linux now has a focused package:sqlite3 shim smoke lane and a pinned
-four-peer `ci` suite in CI. Windows now validates the platform-independent Dart
-artifact surface, native runtime attach, core CLI surface, and embedded
-package:sqlite3 shim smoke in CI. The Windows shim lane downloads a pinned
-SQLite amalgamation, builds `sqlite_traced.dll` with the traced entry points
-renamed behind exported wrappers so the DLL provides the full `sqlite3` ABI,
-and verifies the same `package:sqlite3` workload as the macOS/Linux shim smoke.
-Repeated production-profile history and full peer-suite evidence on Windows
-remain outside the current evidence set.
+macOS and Linux CI pin and verify a merged trace-enabled resqlite checkout
+before peer tests, so this repo's gate cannot accidentally benchmark the pub
+package or an obsolete integration snapshot. The source pin is now the
+downstream r12 policy merge `aabcce733240b8586216f8c32bcc1a16f806586f`. Linux
+has a focused package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite
+in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
+repeatable way to collect macOS and Linux `suite-history --profile=production`
+artifacts, policy calibration, graph data, and `tracelite explain` output from a
+clean Tracelite checkout and the same source-audited resqlite sibling pin.
+Windows validates the platform-independent Dart artifact surface, native runtime
+attach, core CLI surface, and embedded package:sqlite3 shim smoke in CI. The
+Windows shim lane downloads a pinned SQLite amalgamation, builds
+`sqlite_traced.dll` with the traced entry points renamed behind exported
+wrappers so the DLL provides the full `sqlite3` ABI, and verifies the same
+`package:sqlite3` workload as the macOS/Linux shim smoke. Full Windows
+production-profile peer history remains outside the current evidence set.
 
 The explicit resqlite merge gate is documented in
 [`resqlite-sole-profiling-gate.md`](resqlite-sole-profiling-gate.md).
@@ -620,18 +623,23 @@ source-pinned peer harness outside macOS at CI scale. Windows now has a
 core-artifact CI lane for dependency resolution, generated-output freshness,
 analysis, native runtime attach, platform-independent
 diff/insight/package-boundary tests, and a package:sqlite3 embedded-shim smoke
-run. Full non-macOS production-profile history is still required before this
-can be called production-quality across every Dart target.
+run. The manual production-evidence workflow makes macOS/Linux production
+history repeatable and reviewable, but full Windows production-profile history
+is still required before this can be called production-quality across every Dart
+target.
 
 ## Recommended next iteration
 
-1. Run the `Visualizer Release` workflow from a release tag with macOS signing
+1. Dispatch the manual `Production Benchmark Evidence` workflow on `main` and
+   archive the macOS/Linux production-history artifacts before promoting any
+   more diagnostic workloads into downstream release policy.
+2. Run the `Visualizer Release` workflow from a release tag with macOS signing
    secrets configured and `sign_macos=true`; the workflow audit should pass with
    `--require-signed-macos-release=true` before attaching archives/manifests to
    the release.
-2. Use the new drift reactive metadata and stress coverage as the edit-time
+3. Use the new drift reactive metadata and stress coverage as the edit-time
    floor, then add repeated production-scale reactive artifacts before raising
    any reactive lane to a blocking release gate.
-3. Promote `feed-paging`, `large-working-set`, and `sync-burst` into the
+4. Promote `feed-paging`, `large-working-set`, and `sync-burst` into the
    downstream resqlite wrapper policy only after a pin bump carries this
    production-history evidence and non-macOS production history is collected.

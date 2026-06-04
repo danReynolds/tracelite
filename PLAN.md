@@ -342,8 +342,8 @@ A clear-eyed accounting. Designed ≠ proven.
 | Visualizer first slice is usable | ✓ proven | `tool/visualizer_app` opens raw traces, compare artifacts, graph-data directories, workload summaries, and suite/decision JSON; it now includes workspace, trace, compare, Decision Review, workload, graph-data, and artifact views; `tracelite visualizer-check --build=host` runs Flutter dependency resolution, analyze, tests, host release build, and bundle existence verification; unsigned `Visualizer Release` workflow run `26966109795` packaged and audited macOS/Linux/Windows archives from clean source `b92ec4fa8410b074f77bea840c2fa53cfdf759b4`; macOS signing/notarization still needs the credentialed workflow path |
 | Diff over repetitions produces meaningful significance | △ partial | mean CI, non-parametric repetition test, outlier reporting, and scoped policy calibration exist; strict production history now exposes which workloads/metrics are too noisy for release gates |
 | Live queries hit sub-frame requery | ✗ designed only | needs visualizer first |
-| Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; repeated production-profile history remains macOS-only |
-| Windows core and embedded shim smoke work | ✓ CI-proven | `.github/workflows/ci.yml` runs generated-output, analysis, platform-independent core artifact tests, native runtime attach, embedded `sqlite_traced.dll` build from a pinned SQLite amalgamation, and package:sqlite3 shim smoke on Windows; repeated production-profile history remains macOS-only |
+| Linux native-hook shim and CI peer suite work | ✓ proven | platform-aware shim naming/build commands exist; `.github/workflows/ci.yml` runs an Ubuntu package:sqlite3 shim smoke lane plus the pinned four-peer `ci` suite; the manual `Production Benchmark Evidence` workflow can collect Linux production suite-history artifacts |
+| Windows core and embedded shim smoke work | ✓ CI-proven | `.github/workflows/ci.yml` runs generated-output, analysis, platform-independent core artifact tests, native runtime attach, embedded `sqlite_traced.dll` build from a pinned SQLite amalgamation, and package:sqlite3 shim smoke on Windows; full Windows production-profile peer history remains separate from the macOS/Linux production-evidence workflow |
 | Peer adapters for sqlite3 / drift / sqlite_async / resqlite work | ✓ proven | `tracelite compare --interfaces=sqlite3,drift,sqlite_async,resqlite` emits non-empty SQLite traces |
 | resqlite scenario runs through the harness | ✓ proven | compare command completes the resqlite scenario; CI verifies `resqlite` resolves to the pinned trace-enabled sibling checkout before peer tests |
 | resqlite SQLite internals are traced | ✓ proven | local `trace_sqlite` native-asset mode emits non-empty SQLite spans from `libresqlite` |
@@ -719,6 +719,9 @@ Work:
 - Validate Linux shim loading through the sqlite3 native-hook resolver path.
 - Keep Windows core artifact commands, native runtime attach, and embedded
   package:sqlite3 shim smoke green in CI.
+- Keep production-history evidence repeatable with the manual `Production
+  Benchmark Evidence` workflow for macOS/Linux source-checkout suite-history
+  artifacts.
 - Add CI for:
   - generator freshness;
   - runtime/shim tests (macOS full suite plus Linux package:sqlite3 shim smoke);

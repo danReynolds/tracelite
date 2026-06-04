@@ -1,0 +1,176 @@
+name: Production Benchmark Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Whole production suite-history runs to record.
+        required: true
+        default: 5
+        type: number
+      scenarios:
+        description: Comma-separated production scenarios to execute.
+        required: true
+        default: high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions
+        type: string
+      policy_scenarios:
+        description: Comma-separated scenarios used for strict calibration.
+        required: true
+        default: high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions
+        type: string
+      min_repetitions:
+        description: Minimum repetitions forwarded into each suite run.
+        required: true
+        default: 5
+        type: number
+      suite_timeout_seconds:
+        description: Timeout for each whole suite run.
+        required: true
+        default: 1200
+        type: number
+      runner:
+        description: Peer child runner mode for repeated production suites.
+        required: true
+        default: worker
+        type: choice
+        options:
+          - worker
+          - auto
+          - script
+      resqlite_revision:
+        description: Trace-enabled resqlite revision to use as the sibling checkout.
+        required: true
+        default: aabcce733240b8586216f8c32bcc1a16f806586f
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  RESQLITE_TRACE_REVISION: aabcce733240b8586216f8c32bcc1a16f806586f
+
+jobs:
+  production-history:
+    name: Production history (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            os: macos-14
+          - label: linux-x64
+            os: ubuntu-24.04
+
+    steps:
+      - name: Check out tracelite
+        uses: actions/checkout@v6.0.2
+        with:
+          path: tracelite
+
+      - name: Check out resqlite sibling
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/resqlite
+          ref: ${{ inputs.resqlite_revision }}
+          path: resqlite
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN || github.token }}
+
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Pin resqlite sibling dependency
+        working-directory: tracelite
+        run: |
+          cat > pubspec_overrides.yaml <<YAML
+          dependency_overrides:
+            resqlite:
+              path: $GITHUB_WORKSPACE/resqlite
+          YAML
+
+      - name: Install dependencies
+        working-directory: tracelite
+        run: dart pub get
+
+      - name: Verify resqlite source override
+        working-directory: tracelite
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/verify_resqlite_source.dart
+          --revision=${{ inputs.resqlite_revision }}
+
+      - name: Verify generated span outputs
+        working-directory: tracelite
+        run: dart run tool/generate.dart --check
+
+      - name: Build and smoke native runtime
+        working-directory: tracelite
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/native_runtime_smoke.dart
+
+      - name: Build SQLite shim
+        working-directory: tracelite
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/build_sqlite_shim.dart
+
+      - name: Smoke SQLite shim
+        working-directory: tracelite
+        run: >-
+          dart --packages=.dart_tool/package_config.json
+          tool/sqlite_shim_smoke.dart
+
+      - name: Run production suite history
+        working-directory: tracelite
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_dir="build/production-evidence/${{ matrix.label }}"
+          dart run bin/tracelite.dart suite-history \
+            --profile=production \
+            --interfaces=sqlite3,drift,sqlite_async,resqlite \
+            --scenarios="${{ inputs.scenarios }}" \
+            --policy-scenarios="${{ inputs.policy_scenarios }}" \
+            --policy-peers=resqlite \
+            --metrics=measured_elapsed_ns \
+            --runs=${{ inputs.runs }} \
+            --min-repetitions=${{ inputs.min_repetitions }} \
+            --runner=${{ inputs.runner }} \
+            --suite-run-timeout-seconds=${{ inputs.suite_timeout_seconds }} \
+            --threshold-ceiling-percent=50 \
+            --guardrail-ceiling-percent=50 \
+            --noise-gate-ceiling-percent=50 \
+            --require-clean-source=true \
+            --out-dir="$out_dir"
+
+      - name: Export production graph data
+        working-directory: tracelite
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_dir="build/production-evidence/${{ matrix.label }}"
+          dart run bin/tracelite.dart export-graph-data \
+            --suite-history="$out_dir/history.json" \
+            --out="$out_dir/graph-data"
+          dart run bin/tracelite.dart validate-graph-data "$out_dir/graph-data"
+
+      - name: Explain production evidence
+        working-directory: tracelite
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_dir="build/production-evidence/${{ matrix.label }}"
+          dart run bin/tracelite.dart explain "$out_dir/history.json" \
+            > "$out_dir/insights.md"
+
+      - name: Upload production evidence
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: tracelite-production-history-${{ matrix.label }}
+          path: tracelite/build/production-evidence/${{ matrix.label }}/
+          if-no-files-found: error
