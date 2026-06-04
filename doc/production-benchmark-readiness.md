@@ -367,6 +367,42 @@ Result:
 | sqlite_async | ok | 3/3 | 734 | 367 | 68 | 54.3ms | 6.94% | 2.49ms | 0/0/0 |
 | resqlite | ok | 3/3 | 648 | 324 | 66 | 312ms | 4.85% | 4.34ms | 0/0/0 |
 
+### Retuned point-select and keyed-PK release-lane probe, 2026-06-04
+
+Command:
+
+```bash
+dart run bin/tracelite.dart suite-history \
+  --profile=production \
+  --interfaces=resqlite \
+  --scenarios=point-select,keyed-pk-subscriptions \
+  --policy-peers=resqlite \
+  --policy-scenarios=point-select,keyed-pk-subscriptions \
+  --metrics=measured_elapsed_ns \
+  --threshold-ceiling-percent=50 \
+  --guardrail-ceiling-percent=50 \
+  --noise-gate-ceiling-percent=50 \
+  --runs=5 \
+  --out-dir=build/tracelite-noisy-lane-retuned-2026-06-04
+```
+
+Result: all five selected production-suite runs completed with `ok` status and
+strict policy calibration reported `ready` for both covered groups. The retune
+uses 1,000-row `point-select` production samples and keeps
+`keyed-pk-subscriptions` at the existing 20 production rows while raising that
+scenario's write count from 100 to 200. The ready policy reported 13.35%
+observed noise for `point-select`, with a 27% primary threshold and 20.5% max
+CV, and 4.77% observed noise for `keyed-pk-subscriptions`, with a 10% primary
+threshold and 7.5% max CV. The aggregate policy recommends 29 repetitions when
+these lanes are promoted into a release decision; the current evidence proves
+the lanes can fit under the 50% ceiling, not that the downstream resqlite
+wrapper already includes them as blocking release-policy scenarios.
+
+The pre-retune probe over the same two scenarios completed all five runs but
+reported `not_ready`: both groups were `too_noisy` under the 50% ceiling, with
+about 17-18% observed noise and estimated repetition counts above the default
+30-repetition cap.
+
 The resqlite runs above use the current local `../resqlite` override. The
 fuller Dart-level resqlite span/counter vocabulary depends on the PR that adds
 the tracelite logical-track bridge.
@@ -549,8 +585,9 @@ can be called production-quality across every Dart target.
    the release.
 3. Add a focused stress pass for the new drift reactive adapter, including
    larger stream counts and generated-app-style table metadata.
-4. Retune or resize `point-select` and `keyed-pk-subscriptions` until they can
-   join the ceiling-capped release gate without raising the 50% threshold
-   ceiling.
+4. Promote the retuned `point-select` and `keyed-pk-subscriptions` lanes into
+   the downstream resqlite wrapper policy only after a pin bump carries this
+   production-profile sizing and the release decision uses the calibrated
+   repetition recommendation.
 5. Stabilize or redesign `feed-paging`, `large-working-set`, and `sync-burst`
    before promoting them from diagnostic to blocking release scenarios.

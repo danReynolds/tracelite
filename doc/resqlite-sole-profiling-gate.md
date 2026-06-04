@@ -87,7 +87,11 @@ trace-health and diagnostic coverage, but diagnostics are not a strict
 elapsed-time blocker yet. `narrow-batch-insert`, `point-select`,
 `feed-paging`, `sync-burst`, `chat-sim`, `large-working-set`, and
 `keyed-pk-subscriptions` remain diagnostic or experiment workloads unless an
-operator explicitly requests them with scenario overrides.
+operator explicitly requests them with scenario overrides. A later Tracelite
+retune made `point-select` and `keyed-pk-subscriptions` calibrate under the
+50% release ceiling in local 5-run history, but they are not blocking resqlite
+release-policy scenarios until the downstream wrapper pin and policy scope are
+intentionally updated.
 
 Calibration now uses a robust within-run noise policy: p75 within-run CV,
 run-mean CV, Tukey outer-fence outlier accounting, a 10% total outlier ceiling,
