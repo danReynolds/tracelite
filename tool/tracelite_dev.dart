@@ -3556,7 +3556,7 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
           _SuiteScenario(
             name: pointSelectScenario,
-            rows: 1000,
+            rows: 10000,
             repetitions: 7,
           ),
           _SuiteScenario(
@@ -3582,7 +3582,7 @@ _SuiteProfile _suiteProfile(String profileName) {
           _SuiteScenario(
             name: keyedPkSubscriptionsScenario,
             rows: 20,
-            repetitions: 7,
+            repetitions: 11,
           ),
           _SuiteScenario(
             name: highCardinalityFanoutScenario,

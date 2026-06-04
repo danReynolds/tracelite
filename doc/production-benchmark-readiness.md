@@ -415,6 +415,68 @@ these lanes are promoted into a release decision; the current evidence proves
 the lanes can fit under the 50% ceiling, not that the downstream resqlite
 wrapper already includes them as blocking release-policy scenarios.
 
+### Hosted-runner release-lane retune, 2026-06-04
+
+After the manual production-evidence workflow started preserving failed
+artifacts, run `26969359663` completed all five production suite-history runs on
+both hosted macOS arm64 and Linux x64. The workflow still failed its final
+readiness verdict because hosted `point-select` remained too noisy on both
+platforms, and hosted Linux also crossed the strict keyed-PK outlier ceiling.
+
+The local fast loop retuned those two release lanes without waiting on another
+remote run:
+
+```bash
+dart run bin/tracelite.dart suite-history \
+  --profile=production \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --scenarios=point-select \
+  --policy-scenarios=point-select \
+  --policy-peers=resqlite \
+  --metrics=measured_elapsed_ns \
+  --runs=3 \
+  --min-repetitions=1 \
+  --runner=auto \
+  --suite-run-timeout-seconds=300 \
+  --threshold-ceiling-percent=50 \
+  --guardrail-ceiling-percent=50 \
+  --noise-gate-ceiling-percent=50 \
+  --strict=false \
+  --out-dir=build/local-production-point-select-10000
+```
+
+The production preset now uses 10,000-row `point-select` samples. The local
+three-run history completed 3/3 runs with `ok` status, graph-data export and
+validation passed, and policy calibration reported `ready` with 10.91% observed
+noise, 20 recommended repetitions, a 22% primary threshold, and 16.5% max CV.
+
+```bash
+dart run bin/tracelite.dart suite-history \
+  --profile=production \
+  --interfaces=sqlite3,drift,sqlite_async,resqlite \
+  --scenarios=keyed-pk-subscriptions \
+  --policy-scenarios=keyed-pk-subscriptions \
+  --policy-peers=resqlite \
+  --metrics=measured_elapsed_ns \
+  --runs=3 \
+  --min-repetitions=1 \
+  --runner=auto \
+  --suite-run-timeout-seconds=300 \
+  --threshold-ceiling-percent=50 \
+  --guardrail-ceiling-percent=50 \
+  --noise-gate-ceiling-percent=50 \
+  --strict=false \
+  --out-dir=build/local-production-keyed-pk-11
+```
+
+The production preset now keeps keyed-PK at 20 rows but raises repetitions from
+7 to 11. The local three-run history completed 3/3 runs with `ok` status,
+graph-data export and validation passed, and policy calibration reported
+`ready` with 9.47% observed noise, 6.06% outliers, 15 recommended repetitions,
+a 19% primary threshold, and 14.5% max CV. The next hosted production-evidence
+run should be confirmation only; local scenario-sized histories are the faster
+iteration gate for release-lane sizing.
+
 The pre-retune probe over the same two scenarios completed all five runs but
 reported `not_ready`: both groups were `too_noisy` under the 50% ceiling, with
 about 17-18% observed noise and estimated repetition counts above the default
