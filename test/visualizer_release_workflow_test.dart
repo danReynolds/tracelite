@@ -22,7 +22,8 @@ void main() {
     expect(workflow, contains('actions/upload-artifact@v7.0.1'));
   });
 
-  test('visualizer release workflow audits package evidence before publish', () {
+  test('visualizer release workflow audits package evidence before publish',
+      () {
     final workflow =
         File('.github/workflows/visualizer-release.yml').readAsStringSync();
 
@@ -55,6 +56,8 @@ void main() {
       expect(workflow, contains(secret));
     }
     expect(workflow, contains('xcrun notarytool store-credentials'));
+    expect(workflow, contains('name: Preflight macOS release credentials'));
+    expect(workflow, contains('--preflight-only=true'));
     expect(workflow, contains('--macos-sign-identity='));
     expect(workflow, contains('--macos-notary-profile=tracelite-notary'));
   });

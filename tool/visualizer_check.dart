@@ -65,6 +65,16 @@ Future<void> main(List<String> args) async {
     _requireCleanSource(sourceOverride);
   }
 
+  await _preflightMacosSigning(
+    root: root.path,
+    macosSignIdentity: options.macosSignIdentity,
+    macosNotaryProfile: options.macosNotaryProfile,
+  );
+  if (options.preflightOnly) {
+    stdout.writeln('Visualizer check preflight passed.');
+    return;
+  }
+
   await _runStep(
     label: 'Flutter version',
     executable: flutter,
@@ -135,6 +145,7 @@ _Options _parseOptions(List<String> args) {
   String? macosSignIdentity;
   String? macosNotaryProfile;
   var requireCleanSource = false;
+  var preflightOnly = false;
   var skipHeavyVisualizerTests = false;
   var skipNativeVisualizerTests = false;
   var help = false;
@@ -190,6 +201,18 @@ _Options _parseOptions(List<String> args) {
         stderr.writeln('--require-clean-source must be true or false');
         _usage();
       }
+    } else if (arg == '--preflight-only') {
+      preflightOnly = true;
+    } else if (arg.startsWith('--preflight-only=')) {
+      final value = arg.substring('--preflight-only='.length);
+      if (value == 'true') {
+        preflightOnly = true;
+      } else if (value == 'false') {
+        preflightOnly = false;
+      } else {
+        stderr.writeln('--preflight-only must be true or false');
+        _usage();
+      }
     } else if (arg == '--skip-heavy-visualizer-tests') {
       skipHeavyVisualizerTests = true;
     } else if (arg.startsWith('--skip-heavy-visualizer-tests=')) {
@@ -240,6 +263,7 @@ _Options _parseOptions(List<String> args) {
     macosSignIdentity: macosSignIdentity,
     macosNotaryProfile: macosNotaryProfile,
     requireCleanSource: requireCleanSource,
+    preflightOnly: preflightOnly,
     skipHeavyVisualizerTests: skipHeavyVisualizerTests,
     skipNativeVisualizerTests: skipNativeVisualizerTests,
     help: help,
@@ -281,6 +305,97 @@ Future<void> _runStep({
     exit(66);
   }
   stdout.writeln();
+}
+
+Future<void> _preflightMacosSigning({
+  required String root,
+  required String? macosSignIdentity,
+  required String? macosNotaryProfile,
+}) async {
+  if (macosSignIdentity == null) return;
+  if (!Platform.isMacOS) return;
+
+  await _requireXcrunTool('codesign', root);
+  final identities = await _runCapture(
+    'security',
+    const ['find-identity', '-v', '-p', 'codesigning'],
+    workingDirectory: root,
+    trimOutput: false,
+  );
+  if (identities == null) {
+    _failMacosSigningPreflight(
+      'could not inspect macOS code-signing identities',
+      action: 'Install the Developer ID certificate in an accessible keychain.',
+      exitCode: 66,
+    );
+  }
+  final identityLine = _matchingSigningIdentityLine(
+    identities,
+    macosSignIdentity,
+  );
+  if (identityLine == null) {
+    _failMacosSigningPreflight(
+      'macOS signing identity was not found: $macosSignIdentity',
+      action: 'Install the Developer ID certificate or correct '
+          'MACOS_SIGN_IDENTITY before starting the visualizer release build.',
+    );
+  }
+  if (!identityLine.contains('Developer ID Application:')) {
+    _failMacosSigningPreflight(
+      'macOS signing identity is not a Developer ID Application identity: '
+      '$macosSignIdentity',
+      action: 'Install a Developer ID Application certificate before starting '
+          'the visualizer release build.',
+    );
+  }
+  stdout.writeln('macOS signing identity: $macosSignIdentity');
+
+  if (macosNotaryProfile != null) {
+    await _requireXcrunTool('notarytool', root);
+    await _requireXcrunTool('stapler', root);
+    stdout.writeln(
+      'macOS notary profile: $macosNotaryProfile (tooling present)',
+    );
+  }
+  stdout.writeln();
+}
+
+Future<String> _requireXcrunTool(String tool, String root) async {
+  final path = await _runCapture(
+    'xcrun',
+    ['-find', tool],
+    workingDirectory: root,
+  );
+  if (path == null || path.isEmpty) {
+    _failMacosSigningPreflight(
+      'macOS release tool was not found: $tool',
+      action: 'Install Xcode command-line tools before starting the '
+          'visualizer release build.',
+      exitCode: 66,
+    );
+  }
+  return path;
+}
+
+String? _matchingSigningIdentityLine(String identities, String expected) {
+  final trimmed = expected.trim();
+  if (trimmed.isEmpty) return null;
+  for (final line
+      in identities.split('\n').where((line) => line.trim().isNotEmpty)) {
+    if (line.contains(trimmed)) return line;
+  }
+  return null;
+}
+
+Never _failMacosSigningPreflight(
+  String message, {
+  required String action,
+  int exitCode = 65,
+}) {
+  stderr
+    ..writeln(message)
+    ..writeln(action);
+  exit(exitCode);
 }
 
 bool _isFlutterExecutable(String executable) {
@@ -667,6 +782,7 @@ Never _usage({int exitCode = 64}) {
     '[--flutter=/path/to/flutter] [--build=none|host] '
     '[--package=none|host] [--out-dir=build/visualizer-release] '
     '[--require-clean-source=true] '
+    '[--preflight-only=true] '
     '[--skip-heavy-visualizer-tests=true] '
     '[--skip-native-visualizer-tests=true] '
     '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
@@ -676,6 +792,7 @@ Never _usage({int exitCode = 64}) {
     '[--flutter=/path/to/flutter] [--build=none|host] '
     '[--package=none|host] [--out-dir=build/visualizer-release] '
     '[--require-clean-source=true] '
+    '[--preflight-only=true] '
     '[--skip-heavy-visualizer-tests=true] '
     '[--skip-native-visualizer-tests=true] '
     '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]',
@@ -698,6 +815,10 @@ Never _usage({int exitCode = 64}) {
     'On macOS, signing and notarization are optional credential-backed steps.',
   );
   stderr.writeln(
+    'Use --preflight-only to validate arguments, clean source, and macOS '
+    'release credentials before Flutter build/test work.',
+  );
+  stderr.writeln(
     'In a source checkout, the direct tool script is the visualizer-only path '
     'and avoids rebuilding root peer native assets.',
   );
@@ -713,6 +834,7 @@ final class _Options {
     required this.macosSignIdentity,
     required this.macosNotaryProfile,
     required this.requireCleanSource,
+    required this.preflightOnly,
     required this.skipHeavyVisualizerTests,
     required this.skipNativeVisualizerTests,
     required this.help,
@@ -725,6 +847,7 @@ final class _Options {
   final String? macosSignIdentity;
   final String? macosNotaryProfile;
   final bool requireCleanSource;
+  final bool preflightOnly;
   final bool skipHeavyVisualizerTests;
   final bool skipNativeVisualizerTests;
   final bool help;

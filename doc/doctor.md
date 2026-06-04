@@ -67,6 +67,10 @@ dart run bin/tracelite.dart visualizer-check --build=host
 That command resolves the visualizer app dependencies, runs `flutter analyze`,
 runs `flutter test`, builds the current host release bundle, and verifies that
 the bundle was produced.
+For credentialed macOS release work, add `--preflight-only=true` with
+`--package=host`, `--macos-sign-identity=...`, and
+`--macos-notary-profile=...` to validate the signing identity and local
+release tooling before the expensive Flutter build/test path.
 
 For distributable visualizer archives, run the `Visualizer Release` GitHub
 workflow. It packages macOS, Linux, and Windows host builds with the same
@@ -75,9 +79,10 @@ archive/manifest evidence, runs doctor over the downloaded artifacts, and can
 publish the artifacts to a draft GitHub release. The workflow requires
 macOS/Linux/Windows manifest coverage in that audit and turns on
 `--require-signed-macos-release=true` when the manual `sign_macos` input is
-true. The workflow skips only the tagged heavyweight dense-trace widget stress
-test; run `flutter test` locally for full visualizer stress coverage. macOS
-signing and notarization require the workflow's release secrets.
+true. Signed workflow runs preflight the configured macOS release credentials
+before the host package build. The workflow skips only the tagged heavyweight dense-trace widget stress test; run `flutter test` locally for full visualizer
+stress coverage. macOS signing and notarization require the workflow's release
+secrets.
 After downloading the workflow artifacts, run doctor with
 `--visualizer-release=<downloaded-directory>` to prove the archives still match
 their manifests.

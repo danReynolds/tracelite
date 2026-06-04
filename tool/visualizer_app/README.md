@@ -94,6 +94,8 @@ dart tool/visualizer_check.dart \
 
 That path signs the app, verifies the signature, submits the archive to Apple
 notarytool, staples the ticket, then creates the final distributable archive.
+To validate the signing identity and local release tooling before starting
+Flutter build/test work, run the same command with `--preflight-only=true`.
 Linux and Windows signing remain release-system responsibilities and are
 recorded as external in the manifest.
 
@@ -106,4 +108,5 @@ skips only the tagged heavyweight dense-trace widget stress test; run
 after configuring
 `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`,
 `MACOS_SIGN_IDENTITY`, `MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_TEAM_ID`, and
-`MACOS_NOTARY_PASSWORD` repository secrets.
+`MACOS_NOTARY_PASSWORD` repository secrets; signed workflow runs preflight those
+credentials before the host package build.

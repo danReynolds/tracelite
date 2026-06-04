@@ -228,6 +228,8 @@ size, SHA-256 checksum, and signing/notarization status. Add
 `--require-clean-source=true` for attachable release evidence. On macOS, pass
 `--macos-sign-identity` and `--macos-notary-profile` to run the credentialed
 Developer ID signing, notarytool submission, stapling, and final archive path.
+Use `--preflight-only=true` with those macOS options to validate the signing
+identity and local release tooling before starting Flutter build/test work.
 Linux and Windows signing remain release-system responsibilities and are
 recorded as external in the manifest.
 The `Visualizer Release` GitHub workflow runs this package path on macOS,
@@ -237,7 +239,8 @@ publish, the workflow downloads the uploaded package artifacts and runs doctor
 with required macOS/Linux/Windows coverage, archive size/SHA validation, clean
 source validation, and signed macOS validation when `sign_macos=true`. macOS
 signing/notarization is optional and requires the release secrets documented in
-the workflow. Hosted release packaging skips only the tagged heavyweight
+the workflow; signed workflow runs preflight those credentials before the host
+package build. Hosted release packaging skips only the tagged heavyweight
 dense-trace widget stress test; run the direct visualizer check or `flutter test`
 locally for full visualizer stress coverage.
 After downloading release artifacts, `tracelite doctor --visualizer-release=...`

@@ -143,6 +143,22 @@ jobs:
             --team-id "$MACOS_NOTARY_TEAM_ID" \
             --password "$MACOS_NOTARY_PASSWORD"
 
+      - name: Preflight macOS release credentials
+        if: >-
+          runner.os == 'macOS' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.sign_macos
+        shell: bash
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          dart tool/visualizer_check.dart \
+            --package=host \
+            --preflight-only=true \
+            --macos-sign-identity="$MACOS_SIGN_IDENTITY" \
+            --macos-notary-profile=tracelite-notary
+
       - name: Build audited visualizer package
         shell: bash
         env:
