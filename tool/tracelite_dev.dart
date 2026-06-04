@@ -3546,7 +3546,7 @@ _SuiteProfile _suiteProfile(String profileName) {
           ),
           _SuiteScenario(
             name: pointSelectScenario,
-            rows: 200,
+            rows: 1000,
             repetitions: 7,
           ),
           _SuiteScenario(

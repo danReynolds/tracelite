@@ -104,6 +104,9 @@ the suite artifacts, but they should not silently widen the release gate.
 `suite-history` exposes the same separation as `--policy-peers` and
 `--policy-scenarios` so the suite can collect broad evidence while calibrating a
 specific release policy.
+When a ready policy recommends more repetitions than the suite profile default,
+use the policy recommendation for baseline/candidate decision runs instead of
+treating the calibration history's lower sample count as the final gate size.
 `decision` and `diff` reject a non-ready policy artifact by default; pass
 `--allow-unready-policy=true` only for exploratory analysis. Explicit threshold
 flags still override policy values for one-off checks.

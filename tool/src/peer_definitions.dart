@@ -253,7 +253,7 @@ int largeWorkingSetRangeLimit(int rows) => math.min(25, math.max(1, rows));
 
 int reactiveStreamCount(int rows) => math.min(50, math.max(1, rows));
 
-int reactiveWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
+int reactiveWriteCount(int rows) => math.min(1000, math.max(10, rows * 10));
 
 int reactiveRowCount(int rows) =>
     math.max(reactiveStreamCount(rows) * 4, rows * 100);

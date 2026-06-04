@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import '../tool/src/peer_definitions.dart' show reactiveWriteCount;
+
 void main() {
   test('suite writes a CI manifest and per-scenario artifacts', () async {
     final tempDir = await Directory.systemTemp.createTemp(
@@ -163,6 +165,56 @@ void main() {
     expect(run['rows'], 100);
     expect(run['repetitions'], 5);
     expect(run['status'], 'ok');
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
+  test('production profile sizes formerly noisy release lanes', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tracelite-suite-production-noisy-lanes-test-',
+    );
+    addTearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'run',
+        'bin/tracelite.dart',
+        'suite',
+        '--profile=production',
+        '--interfaces=sqlite3',
+        '--scenarios=point-select,keyed-pk-subscriptions',
+        '--out-dir=${tempDir.path}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'suite failed.\nstdout:\n${result.stdout}\n'
+          'stderr:\n${result.stderr}',
+    );
+
+    final manifest = jsonDecode(
+      File('${tempDir.path}/manifest.json').readAsStringSync(),
+    ) as Map<String, Object?>;
+    expect(manifest['profile'], 'production');
+    final runs =
+        (manifest['runs']! as List<Object?>).cast<Map<String, Object?>>();
+    expect(
+      runs.singleWhere((run) => run['scenario'] == 'point-select'),
+      containsPair('rows', 1000),
+    );
+    expect(
+      runs.singleWhere(
+        (run) => run['scenario'] == 'keyed-pk-subscriptions',
+      ),
+      containsPair('rows', 20),
+    );
+    expect(reactiveWriteCount(20), 200);
   }, timeout: const Timeout(Duration(minutes: 3)));
 
   test('suite-history writes repeated runs and calibration artifacts',
