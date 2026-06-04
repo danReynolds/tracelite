@@ -29,7 +29,7 @@ void main() {
     expect(workflow, contains('tool/build_sqlite_shim.dart'));
     expect(workflow, contains('tool/sqlite_shim_smoke.dart'));
     expect(workflow, contains('tool/generate.dart --check'));
-    expect(workflow, contains('suite-history'));
+    expect(workflow, contains('dart run bin/tracelite.dart suite-history'));
     expect(workflow, contains('--profile=production'));
     expect(
       workflow,
@@ -41,7 +41,18 @@ void main() {
     expect(workflow, contains('--strict=false'));
     expect(workflow, contains('export-graph-data'));
     expect(workflow, contains('validate-graph-data'));
-    expect(workflow, isNot(contains('dart run bin/tracelite.dart')));
+    expect(
+      workflow,
+      isNot(contains('dart run bin/tracelite.dart export-graph-data')),
+    );
+    expect(
+      workflow,
+      isNot(contains('dart run bin/tracelite.dart validate-graph-data')),
+    );
+    expect(
+      workflow,
+      isNot(contains('dart run bin/tracelite.dart explain')),
+    );
     expect(workflow, isNot(contains('dart run tool/generate.dart')));
     expect(workflow, contains(r'explain "$out_dir/history.json"'));
     expect(workflow, contains('if: always()'));

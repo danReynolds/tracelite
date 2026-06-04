@@ -177,7 +177,7 @@ jobs:
           set -euo pipefail
           out_dir="build/production-evidence/${{ matrix.label }}"
           mkdir -p "$out_dir"
-          dart --packages=.dart_tool/package_config.json tool/tracelite_dev.dart suite-history \
+          dart run bin/tracelite.dart suite-history \
             --profile=production \
             --interfaces=sqlite3,drift,sqlite_async,resqlite \
             --scenarios="${{ inputs.scenarios }}" \
