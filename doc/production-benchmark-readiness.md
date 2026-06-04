@@ -403,6 +403,37 @@ reported `not_ready`: both groups were `too_noisy` under the 50% ceiling, with
 about 17-18% observed noise and estimated repetition counts above the default
 30-repetition cap.
 
+### Diagnostic workload release-lane probe, 2026-06-04
+
+Command:
+
+```bash
+dart run bin/tracelite.dart suite-history \
+  --profile=production \
+  --interfaces=resqlite \
+  --scenarios=feed-paging,large-working-set,sync-burst \
+  --policy-peers=resqlite \
+  --policy-scenarios=feed-paging,large-working-set,sync-burst \
+  --metrics=measured_elapsed_ns \
+  --threshold-ceiling-percent=50 \
+  --guardrail-ceiling-percent=50 \
+  --noise-gate-ceiling-percent=50 \
+  --runs=5 \
+  --out-dir=build/tracelite-diagnostic-lane-probe-2026-06-04
+```
+
+Result: all five selected production-suite runs completed with `ok` status and
+strict policy calibration reported `ready` for all three covered groups. The
+ready policy reported 6.26% observed noise for `feed-paging`, with a 13%
+primary threshold and 9.5% max CV; 5.47% observed noise for
+`large-working-set`, with an 11% primary threshold and 8.5% max CV; and 4.35%
+observed noise for `sync-burst`, with a 9% primary threshold and 7% max CV. The
+aggregate policy recommends 7 repetitions, matching the current production
+profile default for these scenarios. This proves the elapsed-time diagnostic
+lanes can fit under the 50% release ceiling on local macOS/resqlite evidence;
+downstream promotion still needs an intentional resqlite wrapper policy update
+and non-macOS production-history evidence.
+
 The resqlite runs above use the current local `../resqlite` override. The
 fuller Dart-level resqlite span/counter vocabulary depends on the PR that adds
 the tracelite logical-track bridge.
@@ -596,5 +627,6 @@ can be called production-quality across every Dart target.
    the downstream resqlite wrapper policy only after a pin bump carries this
    production-profile sizing and the release decision uses the calibrated
    repetition recommendation.
-5. Stabilize or redesign `feed-paging`, `large-working-set`, and `sync-burst`
-   before promoting them from diagnostic to blocking release scenarios.
+5. Promote `feed-paging`, `large-working-set`, and `sync-burst` into the
+   downstream resqlite wrapper policy only after a pin bump carries this
+   production-history evidence and non-macOS production history is collected.

@@ -91,7 +91,10 @@ operator explicitly requests them with scenario overrides. A later Tracelite
 retune made `point-select` and `keyed-pk-subscriptions` calibrate under the
 50% release ceiling in local 5-run history, but they are not blocking resqlite
 release-policy scenarios until the downstream wrapper pin and policy scope are
-intentionally updated.
+intentionally updated. A follow-up Tracelite probe also calibrated
+`feed-paging`, `large-working-set`, and `sync-burst` under the same ceiling for
+`measured_elapsed_ns`; they remain outside the downstream blocking policy until
+that broader gate is intentionally adopted.
 
 Calibration now uses a robust within-run noise policy: p75 within-run CV,
 run-mean CV, Tukey outer-fence outlier accounting, a 10% total outlier ceiling,
