@@ -3,14 +3,11 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:tracelite/tracelite.dart';
 
+import 'src/test_producer.dart';
+
 void main() {
   test('tracelite report prints markdown for a runtime region', () async {
-    final producer = File('build/test_producer');
-    if (!producer.existsSync()) {
-      fail('build/test_producer not built; run:\n'
-          '  cc -std=c11 -O2 -Inative native/tracelite_runtime.c '
-          'native/test_producer.c -o build/test_producer');
-    }
+    final producer = await ensureTestProducerBuilt();
 
     final regionPath =
         '${Directory.systemTemp.path}/tracelite-cli-$pid.tlt-region';
