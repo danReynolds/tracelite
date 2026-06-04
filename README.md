@@ -174,9 +174,10 @@ The manual `Production Benchmark Evidence` GitHub workflow runs the same
 source-checkout `suite-history --profile=production` path on macOS and Linux,
 pins a trace-enabled resqlite sibling checkout, requires clean Tracelite source,
 exports graph data, writes `tracelite explain` output, and uploads the full
-history/policy/graph bundle for operator review. It is intentionally
-`workflow_dispatch` only because production history is too expensive for normal
-pull-request CI.
+history/policy/graph bundle for operator review before the final readiness
+verdict fails the job on incomplete runs or `not_ready` calibration. It is
+intentionally `workflow_dispatch` only because production history is too
+expensive for normal pull-request CI.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the
