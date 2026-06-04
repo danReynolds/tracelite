@@ -41,8 +41,8 @@ macOS and Linux CI pin and verify a merged trace-enabled resqlite checkout
 before peer tests, so this repo's gate cannot accidentally benchmark the pub
 package or an obsolete integration snapshot. The source pin is now the
 Windows traced-hook build fix merge
-`e6aa59fab37080722681063acb977f3c40e9e1cc`, which includes the downstream r12
-policy merge plus Windows path and C11 hook fixes. Linux
+`4e9f0fbd658fc320a9847547af318cb9428e1f15`, which includes the downstream r12
+policy merge plus Windows path and platform C-standard hook fixes. Linux
 has a focused package:sqlite3 shim smoke lane and a pinned four-peer `ci` suite
 in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
 repeatable way to collect macOS, Linux, and Windows
