@@ -19,6 +19,7 @@ void main() {
     expect(result.stderr.toString(),
         contains('--out-dir=build/visualizer-release'));
     expect(result.stderr.toString(), contains('--require-clean-source=true'));
+    expect(result.stderr.toString(), contains('--preflight-only=true'));
     expect(result.stderr.toString(),
         contains('--skip-heavy-visualizer-tests=true'));
     expect(result.stderr.toString(),
@@ -39,6 +40,87 @@ void main() {
     expect(result.exitCode, 66);
     expect(result.stderr.toString(), contains('Install Flutter'));
     expect(result.stderr.toString(), contains('--flutter=/path/to/flutter'));
+  });
+
+  test('visualizer preflight does not require Flutter', () async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--preflight-only=true',
+        '--flutter=/definitely/missing/flutter',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(
+      result.exitCode,
+      0,
+      reason: 'preflight failed.\nstdout:\n${result.stdout}\n'
+          'stderr:\n${result.stderr}',
+    );
+    expect(
+      result.stdout.toString(),
+      contains('Visualizer check preflight passed.'),
+    );
+    expect(result.stderr.toString(), isNot(contains('Install Flutter')));
+  });
+
+  test('macOS signing preflight reports missing identity before Flutter',
+      () async {
+    if (!Platform.isMacOS) return;
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--package=host',
+        '--preflight-only=true',
+        '--flutter=/definitely/missing/flutter',
+        '--macos-sign-identity=Definitely Missing Developer ID',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(
+      result.stderr.toString(),
+      contains('macOS signing identity was not found'),
+    );
+    expect(result.stderr.toString(), contains('MACOS_SIGN_IDENTITY'));
+    expect(result.stderr.toString(), isNot(contains('Install Flutter')));
+  });
+
+  test('macOS signing preflight rejects development identities', () async {
+    if (!Platform.isMacOS) return;
+    final identities = await Process.run(
+      'security',
+      const ['find-identity', '-v', '-p', 'codesigning'],
+      workingDirectory: Directory.current.path,
+    );
+    if (identities.exitCode != 0) return;
+    final match = RegExp(
+      r'"([^"]*Apple Development[^"]*)"',
+    ).firstMatch(identities.stdout.toString());
+    if (match == null) return;
+
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--package=host',
+        '--preflight-only=true',
+        '--flutter=/definitely/missing/flutter',
+        '--macos-sign-identity=${match.group(1)!}',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 65);
+    expect(
+      result.stderr.toString(),
+      contains('Developer ID Application identity'),
+    );
+    expect(result.stderr.toString(), isNot(contains('Install Flutter')));
   });
 
   test('visualizer check uses the Windows Flutter batch launcher', () {
@@ -110,6 +192,23 @@ void main() {
     expect(
       result.stderr.toString(),
       contains('--require-clean-source must be true or false'),
+    );
+  });
+
+  test('visualizer check rejects invalid preflight-only value', () async {
+    final result = await Process.run(
+      Platform.resolvedExecutable,
+      [
+        'tool/visualizer_check.dart',
+        '--preflight-only=maybe',
+      ],
+      workingDirectory: Directory.current.path,
+    );
+
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr.toString(),
+      contains('--preflight-only must be true or false'),
     );
   });
 

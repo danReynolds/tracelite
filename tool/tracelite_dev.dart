@@ -3853,8 +3853,10 @@ Never _usage({int exitCode = 64}) {
       '[--flutter=/path/to/flutter] [--build=none|host] '
       '[--package=none|host] [--out-dir=build/visualizer-release] '
       '[--require-clean-source=true] '
+      '[--preflight-only=true] '
       '[--skip-heavy-visualizer-tests=true] '
-      '[--skip-native-visualizer-tests=true]');
+      '[--skip-native-visualizer-tests=true] '
+      '[--macos-sign-identity=IDENTITY] [--macos-notary-profile=PROFILE]');
   output.writeln('  dart run bin/tracelite.dart calibrate '
       '[--iterations=10000] [--repetitions=5] '
       '[--require-clean-source=true] [--out-json=calibration.json]');

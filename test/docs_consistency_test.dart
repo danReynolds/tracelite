@@ -83,6 +83,7 @@ void main() {
       expect(text, contains('--package=host'));
       expect(text, contains('--require-clean-source=true'));
       expect(text, contains('Visualizer Release'));
+      expect(text, contains('--preflight-only=true'));
       expect(text, contains('heavyweight'));
       expect(text, contains('dense-trace'));
     }
@@ -99,6 +100,7 @@ void main() {
     expect(doctor, contains('heavyweight dense-trace'));
     expect(devCli, contains('--package=none|host'));
     expect(devCli, contains('--require-clean-source=true'));
+    expect(devCli, contains('--preflight-only=true'));
     expect(devCli, contains('--visualizer-release=manifest-or-dir'));
     expect(devCli, contains('--sqlite-amalgamation=/path/to/sqlite3.c'));
     expect(devCli, contains('--require-signed-macos-release=true'));
