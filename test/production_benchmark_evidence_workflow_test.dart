@@ -20,12 +20,15 @@ void main() {
     expect(workflow, contains('Download Windows SQLite amalgamation'));
     expect(workflow, contains('Build Windows embedded SQLite shim'));
     expect(workflow, contains('TRACELITE_SQLITE_AMALGAMATION'));
+    expect(workflow, contains('Prepare production evidence directory'));
+    expect(workflow, contains('setup.txt'));
     expect(workflow, contains('cat > pubspec_overrides.yaml'));
     expect(workflow, contains('python_cmd=python3'));
     expect(workflow, contains('tool/verify_resqlite_source.dart'));
     expect(workflow, contains('tool/native_runtime_smoke.dart'));
     expect(workflow, contains('tool/build_sqlite_shim.dart'));
     expect(workflow, contains('tool/sqlite_shim_smoke.dart'));
+    expect(workflow, contains('tool/generate.dart --check'));
     expect(workflow, contains('suite-history'));
     expect(workflow, contains('--profile=production'));
     expect(
@@ -38,6 +41,8 @@ void main() {
     expect(workflow, contains('--strict=false'));
     expect(workflow, contains('export-graph-data'));
     expect(workflow, contains('validate-graph-data'));
+    expect(workflow, isNot(contains('dart run bin/tracelite.dart')));
+    expect(workflow, isNot(contains('dart run tool/generate.dart')));
     expect(workflow, contains(r'explain "$out_dir/history.json"'));
     expect(workflow, contains('if: always()'));
     expect(workflow, contains('actions/upload-artifact@v7.0.1'));
