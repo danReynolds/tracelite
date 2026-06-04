@@ -253,6 +253,11 @@ void main() {
       reason: 'suite-history failed.\nstdout:\n${result.stdout}\n'
           'stderr:\n${result.stderr}',
     );
+    expect(result.stderr.toString(), contains('# tracelite suite'));
+    expect(
+      result.stderr.toString(),
+      contains('| `narrow-batch-insert` |'),
+    );
 
     final history = jsonDecode(
       File('${tempDir.path}/history.json').readAsStringSync(),
