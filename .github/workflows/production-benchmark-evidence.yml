@@ -16,7 +16,7 @@ on:
       policy_scenarios:
         description: Comma-separated scenarios used for strict calibration.
         required: true
-        default: high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions
+        default: high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions
         type: string
       min_repetitions:
         description: Minimum repetitions forwarded into each suite run.
