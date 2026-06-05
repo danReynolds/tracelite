@@ -31,18 +31,9 @@ void main() {
     expect(workflow, contains('tool/generate.dart --check'));
     expect(workflow, contains('dart run bin/tracelite.dart suite-history'));
     expect(workflow, contains('--profile=production'));
-    expect(
-      workflow,
-      contains(
-        'default: high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions',
-      ),
-    );
-    expect(
-      workflow,
-      contains(
-        'default: high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions',
-      ),
-    );
+    const stablePolicyLanes =
+        'default: high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions';
+    expect(stablePolicyLanes.allMatches(workflow), hasLength(2));
     expect(
       workflow,
       contains('--interfaces=sqlite3,drift,sqlite_async,resqlite'),

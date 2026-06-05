@@ -11,7 +11,7 @@ on:
       scenarios:
         description: Comma-separated production scenarios to execute.
         required: true
-        default: high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions
+        default: high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions
         type: string
       policy_scenarios:
         description: Comma-separated scenarios used for strict calibration.

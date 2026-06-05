@@ -12,12 +12,13 @@ capture, graph-data export for the dashboard, build-hook smoke coverage for the
 native SQLite shim path, and Tracelite insight artifacts for operator review.
 Merged resqlite PR #109 established the source-pinned wrapper path, and the
 later r12 downstream pin keeps the Tracelite smoke lane green while promoting
-the hosted-stable reactive lanes into the strict resqlite policy. The workflow
-still collects `point-select` evidence, but hosted macOS data showed that lane
-is not stable enough to block releases until its workload is redesigned. The
-old direct resqlite profile runner is retained as a legacy compatibility/parity
-harness because `run_tracelite_profile.dart` still uses it to emit the old
-`profile.json` shape alongside trace-backed artifacts.
+the hosted-stable reactive lanes into the strict resqlite policy. Hosted macOS
+data showed `point-select` is not stable enough to block releases until its
+workload is redesigned, so it remains an explicit diagnostic collection lane
+rather than part of the default hosted evidence run. The old direct resqlite
+profile runner is retained as a legacy compatibility/parity harness because
+`run_tracelite_profile.dart` still uses it to emit the old `profile.json` shape
+alongside trace-backed artifacts.
 
 The core direction held up: one trace format can capture sqlite3, drift,
 sqlite_async, and trace-enabled resqlite under the same SQLite call model, and
@@ -51,12 +52,12 @@ in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
 repeatable way to collect macOS, Linux, and Windows
 `suite-history --profile=production` artifacts, policy calibration, graph data,
 and `tracelite explain` output from a clean Tracelite checkout and the same
-source-audited resqlite sibling pin. Its default strict policy gates the
+source-audited resqlite sibling pin. Its default run and strict policy gate the
 hosted-stable `high-cardinality-fanout`, `many-streams-writer-throughput`, and
-`keyed-pk-subscriptions` lanes while still collecting `point-select` as
-non-blocking evidence. It uploads the evidence bundle even when the final
-policy verdict is not ready, so hosted-runner failures can be inspected instead
-of losing the per-scenario logs.
+`keyed-pk-subscriptions` lanes; `point-select` can still be requested
+explicitly as non-blocking diagnostic evidence. It uploads the evidence bundle
+even when the final policy verdict is not ready, so hosted-runner failures can
+be inspected instead of losing the per-scenario logs.
 Windows validates the platform-independent Dart artifact surface, native runtime
 attach, core CLI surface, and embedded package:sqlite3 shim smoke in CI. The
 Windows shim lane downloads a pinned SQLite amalgamation, builds
@@ -524,8 +525,8 @@ dart run bin/tracelite.dart calibrate-policy \
 Result: `ready`, 15 sources, and 3/3 groups ready. The recommended policy uses
 5 repetitions, a 9.5% primary threshold, a 7.5% guardrail threshold, and 7.5%
 max CV. The manual production-evidence workflow therefore still executes
-`point-select` for trend visibility and graph data, but its default strict
-policy scope is now `high-cardinality-fanout`,
+`point-select` for trend visibility and graph data when requested explicitly,
+but its default strict policy scope is now `high-cardinality-fanout`,
 `many-streams-writer-throughput`, and `keyed-pk-subscriptions` until
 `point-select` has a stable hosted-runner workload.
 
