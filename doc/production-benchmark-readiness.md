@@ -12,17 +12,19 @@ capture, graph-data export for the dashboard, build-hook smoke coverage for the
 native SQLite shim path, and Tracelite insight artifacts for operator review.
 Merged resqlite PR #109 established the source-pinned wrapper path, and the
 later r12 downstream pin keeps the Tracelite smoke lane green while promoting
-the retuned `point-select` and `keyed-pk-subscriptions` lanes into the strict
-resqlite policy. The old direct resqlite profile runner is retained as a legacy
-compatibility/parity harness because `run_tracelite_profile.dart` still uses it
-to emit the old `profile.json` shape alongside trace-backed artifacts.
+the hosted-stable reactive lanes into the strict resqlite policy. The workflow
+still collects `point-select` evidence, but hosted macOS data showed that lane
+is not stable enough to block releases until its workload is redesigned. The
+old direct resqlite profile runner is retained as a legacy compatibility/parity
+harness because `run_tracelite_profile.dart` still uses it to emit the old
+`profile.json` shape alongside trace-backed artifacts.
 
 The core direction held up: one trace format can capture sqlite3, drift,
 sqlite_async, and trace-enabled resqlite under the same SQLite call model, and
 the recorder overhead is small enough for profile-mode instrumentation. The
 remaining gap before using tracelite as resqlite's regular workflow is no
 longer basic production-gate viability, source reproducibility, PR CI, or
-downstream point/keyed policy promotion. Tracelite now has a
+downstream reactive policy promotion. Tracelite now has a
 manual/tagged `Visualizer Release` workflow for macOS, Linux, and Windows
 archive/manifest evidence, optional macOS signing/notarization, and release
 asset publishing. `tracelite doctor --visualizer-release=...` can now audit
@@ -49,9 +51,12 @@ in CI. The manual `Production Benchmark Evidence` workflow now gives operators a
 repeatable way to collect macOS, Linux, and Windows
 `suite-history --profile=production` artifacts, policy calibration, graph data,
 and `tracelite explain` output from a clean Tracelite checkout and the same
-source-audited resqlite sibling pin. It uploads the evidence bundle even when
-the final policy verdict is not ready, so hosted-runner failures can be
-inspected instead of losing the per-scenario logs.
+source-audited resqlite sibling pin. Its default strict policy gates the
+hosted-stable `high-cardinality-fanout`, `many-streams-writer-throughput`, and
+`keyed-pk-subscriptions` lanes while still collecting `point-select` as
+non-blocking evidence. It uploads the evidence bundle even when the final
+policy verdict is not ready, so hosted-runner failures can be inspected instead
+of losing the per-scenario logs.
 Windows validates the platform-independent Dart artifact surface, native runtime
 attach, core CLI surface, and embedded package:sqlite3 shim smoke in CI. The
 Windows shim lane downloads a pinned SQLite amalgamation, builds
@@ -487,6 +492,42 @@ The pre-retune probe over the same two scenarios completed all five runs but
 reported `not_ready`: both groups were `too_noisy` under the 50% ceiling, with
 about 17-18% observed noise and estimated repetition counts above the default
 30-repetition cap.
+
+### Hosted production policy scope, 2026-06-05
+
+The hosted production-evidence run on Tracelite
+`b88ef4b9b222715d20386091194a436664f47bc5` and resqlite
+`4e9f0fbd658fc320a9847547af318cb9428e1f15` completed all five macOS and Linux
+production suite-history runs. Linux calibrated ready for the four requested
+strict lanes, but macOS reported `not_ready` because `point-select` had 31.74%
+run-to-run noise, required an estimated 162 repetitions, and would have needed
+a 63.5% primary threshold. That is too loose to defend as a release blocker.
+
+Recalibrating the preserved macOS compare artifacts with `point-select`
+excluded from strict calibration produced a ready hosted policy:
+
+```bash
+dart run bin/tracelite.dart calibrate-policy \
+  --history=/tmp/tracelite-production-run-26978099966/macos/run-*/high-cardinality-fanout.json \
+  --history=/tmp/tracelite-production-run-26978099966/macos/run-*/many-streams-writer-throughput.json \
+  --history=/tmp/tracelite-production-run-26978099966/macos/run-*/keyed-pk-subscriptions.json \
+  --metrics=measured_elapsed_ns \
+  --peers=resqlite \
+  --scenarios=high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions \
+  --min-repetitions=5 \
+  --threshold-ceiling-percent=50 \
+  --guardrail-ceiling-percent=50 \
+  --noise-gate-ceiling-percent=50 \
+  --strict=true
+```
+
+Result: `ready`, 15 sources, and 3/3 groups ready. The recommended policy uses
+5 repetitions, a 9.5% primary threshold, a 7.5% guardrail threshold, and 7.5%
+max CV. The manual production-evidence workflow therefore still executes
+`point-select` for trend visibility and graph data, but its default strict
+policy scope is now `high-cardinality-fanout`,
+`many-streams-writer-throughput`, and `keyed-pk-subscriptions` until
+`point-select` has a stable hosted-runner workload.
 
 ### Diagnostic workload release-lane probe, 2026-06-04
 

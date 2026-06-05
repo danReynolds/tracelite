@@ -33,8 +33,21 @@ void main() {
     expect(workflow, contains('--profile=production'));
     expect(
       workflow,
+      contains(
+        'default: high-cardinality-fanout,many-streams-writer-throughput,point-select,keyed-pk-subscriptions',
+      ),
+    );
+    expect(
+      workflow,
+      contains(
+        'default: high-cardinality-fanout,many-streams-writer-throughput,keyed-pk-subscriptions',
+      ),
+    );
+    expect(
+      workflow,
       contains('--interfaces=sqlite3,drift,sqlite_async,resqlite'),
     );
+    expect(workflow, contains('--policy-scenarios='));
     expect(workflow, contains('--policy-peers=resqlite'));
     expect(workflow, contains('--metrics=measured_elapsed_ns'));
     expect(workflow, contains('--require-clean-source=true'));
