@@ -55,9 +55,12 @@ and `tracelite explain` output from a clean Tracelite checkout and the same
 source-audited resqlite sibling pin. Its default run and strict policy gate the
 hosted-stable `high-cardinality-fanout`, `many-streams-writer-throughput`, and
 `keyed-pk-subscriptions` lanes; `point-select` can still be requested
-explicitly as non-blocking diagnostic evidence. It uploads the evidence bundle
-even when the final policy verdict is not ready, so hosted-runner failures can
-be inspected instead of losing the per-scenario logs.
+explicitly as non-blocking diagnostic evidence. Hosted stable-lane calibration
+uses a 15% aggregate repetition-outlier ceiling and the existing 20% per-run
+outlier ceiling, so recurring hosted-runner tails stay visible without
+rejecting otherwise low-noise evidence. It uploads the evidence bundle even
+when the final policy verdict is not ready, so hosted-runner failures can be
+inspected instead of losing the per-scenario logs.
 Windows validates the platform-independent Dart artifact surface, native runtime
 attach, core CLI surface, and embedded package:sqlite3 shim smoke in CI. The
 Windows shim lane downloads a pinned SQLite amalgamation, builds
@@ -159,7 +162,9 @@ The explicit resqlite merge gate is documented in
   allowing resqlite's pre-publish gate to publish a complete repeated-suite
   graph-data bundle from a single history manifest.
 - `tracelite suite-history` and `calibrate-policy` now support a robust p75
-  within-run noise policy plus total and per-run outlier ceilings.
+  within-run noise policy plus total and per-run outlier ceilings; the hosted
+  production-evidence workflow sets those ceilings to 15% aggregate and 20%
+  per-run for the stable release lanes.
 - Source-checkout `compare`, `suite`, `suite-history`, and `calibrate`
   artifacts now record `tracelite_source` with the git revision and dirty
   state, and production/release commands can pass `--require-clean-source=true`
@@ -524,11 +529,18 @@ dart run bin/tracelite.dart calibrate-policy \
 
 Result: `ready`, 15 sources, and 3/3 groups ready. The recommended policy uses
 5 repetitions, a 9.5% primary threshold, a 7.5% guardrail threshold, and 7.5%
-max CV. The manual production-evidence workflow therefore still executes
-`point-select` for trend visibility and graph data when requested explicitly,
-but its default strict policy scope is now `high-cardinality-fanout`,
-`many-streams-writer-throughput`, and `keyed-pk-subscriptions` until
-`point-select` has a stable hosted-runner workload.
+max CV. Later hosted macOS and Linux stable-lane artifacts on Tracelite
+`3b03854da5d5803b156bef2660f515959803b197` showed the same pattern more
+clearly: `keyed-pk-subscriptions` has low run-to-run noise but repeated hosted
+tail samples, so the workflow's default hosted policy now uses a 15% aggregate
+outlier ceiling while keeping the 20% per-run ceiling. Recalibrating those
+artifacts with that hosted policy produced `ready` for all three stable lanes
+on macOS and Linux. The manual production-evidence workflow therefore still
+executes `point-select` for trend visibility and graph data when requested
+explicitly, but its default strict policy scope is now
+`high-cardinality-fanout`, `many-streams-writer-throughput`, and
+`keyed-pk-subscriptions` until `point-select` has a stable hosted-runner
+workload.
 
 ### Diagnostic workload release-lane probe, 2026-06-04
 

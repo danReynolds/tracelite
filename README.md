@@ -178,10 +178,12 @@ uploads the full history/policy/graph bundle for operator review before the
 final readiness verdict fails the job on incomplete runs or `not_ready`
 calibration. Its default scenario list matches the stable policy lanes;
 diagnostic lanes such as `point-select` can be requested explicitly when the
-operator wants trend evidence. On Windows, it downloads a pinned SQLite
-amalgamation and uses the embedded `sqlite_traced.dll` shim path already covered
-by CI smoke tests. It is intentionally `workflow_dispatch` only because
-production history is too expensive for normal pull-request CI.
+operator wants trend evidence. The hosted calibration uses a 15% aggregate
+repetition-outlier ceiling and a 20% per-run ceiling for those stable lanes. On
+Windows, it downloads a pinned SQLite amalgamation and uses the embedded
+`sqlite_traced.dll` shim path already covered by CI smoke tests. It is
+intentionally `workflow_dispatch` only because production history is too
+expensive for normal pull-request CI.
 
 For publish or release evidence, add `--require-clean-source=true` to
 `compare`, `suite`, `suite-history`, or `calibrate`. The command fails if the

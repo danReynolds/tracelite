@@ -23,6 +23,16 @@ on:
         required: true
         default: 5
         type: number
+      max_outlier_percent:
+        description: Maximum aggregate repetition outlier percentage allowed by strict calibration.
+        required: true
+        default: 15
+        type: number
+      max_run_outlier_percent:
+        description: Maximum per-run repetition outlier percentage allowed by strict calibration.
+        required: true
+        default: 20
+        type: number
       suite_timeout_seconds:
         description: Timeout for each whole suite run.
         required: true
@@ -191,6 +201,8 @@ jobs:
             --threshold-ceiling-percent=50 \
             --guardrail-ceiling-percent=50 \
             --noise-gate-ceiling-percent=50 \
+            --max-outlier-percent=${{ inputs.max_outlier_percent }} \
+            --max-run-outlier-percent=${{ inputs.max_run_outlier_percent }} \
             --require-clean-source=true \
             --strict=false \
             --out-dir="$out_dir"
