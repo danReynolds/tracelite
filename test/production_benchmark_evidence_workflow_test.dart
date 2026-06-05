@@ -41,6 +41,12 @@ void main() {
     expect(workflow, contains('--policy-scenarios='));
     expect(workflow, contains('--policy-peers=resqlite'));
     expect(workflow, contains('--metrics=measured_elapsed_ns'));
+    expect(workflow, contains('max_outlier_percent:'));
+    expect(workflow, contains('default: 15'));
+    expect(workflow, contains('--max-outlier-percent='));
+    expect(workflow, contains('max_run_outlier_percent:'));
+    expect(workflow, contains('default: 20'));
+    expect(workflow, contains('--max-run-outlier-percent='));
     expect(workflow, contains('--require-clean-source=true'));
     expect(workflow, contains('--strict=false'));
     expect(workflow, contains('export-graph-data'));
