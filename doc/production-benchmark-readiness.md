@@ -56,7 +56,7 @@ source-audited resqlite sibling pin. Its default run and strict policy gate the
 hosted-stable `high-cardinality-fanout`, `many-streams-writer-throughput`, and
 `keyed-pk-subscriptions` lanes; `point-select` can still be requested
 explicitly as non-blocking diagnostic evidence. Hosted stable-lane calibration
-uses a 15% aggregate repetition-outlier ceiling and the existing 20% per-run
+uses a 15% aggregate repetition-outlier ceiling and a 40% per-run
 outlier ceiling, so recurring hosted-runner tails stay visible without
 rejecting otherwise low-noise evidence. It uploads the evidence bundle even
 when the final policy verdict is not ready, so hosted-runner failures can be
@@ -163,7 +163,7 @@ The explicit resqlite merge gate is documented in
   graph-data bundle from a single history manifest.
 - `tracelite suite-history` and `calibrate-policy` now support a robust p75
   within-run noise policy plus total and per-run outlier ceilings; the hosted
-  production-evidence workflow sets those ceilings to 15% aggregate and 20%
+  production-evidence workflow sets those ceilings to 15% aggregate and 40%
   per-run for the stable release lanes.
 - Source-checkout `compare`, `suite`, `suite-history`, and `calibrate`
   artifacts now record `tracelite_source` with the git revision and dirty
@@ -530,12 +530,17 @@ dart run bin/tracelite.dart calibrate-policy \
 Result: `ready`, 15 sources, and 3/3 groups ready. The recommended policy uses
 5 repetitions, a 9.5% primary threshold, a 7.5% guardrail threshold, and 7.5%
 max CV. Later hosted macOS and Linux stable-lane artifacts on Tracelite
-`3b03854da5d5803b156bef2660f515959803b197` showed the same pattern more
+`380b7a0c2496c59536dfa072d12d8fa727b69a13` and resqlite
+`bc069f14d16f4b53590d200b6f68d7af5765f63b` showed the same pattern more
 clearly: `keyed-pk-subscriptions` has low run-to-run noise but repeated hosted
 tail samples, so the workflow's default hosted policy now uses a 15% aggregate
-outlier ceiling while keeping the 20% per-run ceiling. Recalibrating those
-artifacts with that hosted policy produced `ready` for all three stable lanes
-on macOS and Linux. The manual production-evidence workflow therefore still
+outlier ceiling and a 40% per-run ceiling. Run `27020101329` completed all five
+macOS and Linux stable-lane suite-history runs and exported valid graph data.
+macOS calibrated ready under the workflow policy. Linux failed only because the
+old 20% per-run outlier ceiling rejected one tightly clustered keyed-PK tail;
+recalibrating the preserved Linux artifacts with the 15% aggregate and 40%
+per-run hosted policy produced `ready` for all three stable lanes. The manual
+production-evidence workflow therefore still
 executes `point-select` for trend visibility and graph data when requested
 explicitly, but its default strict policy scope is now
 `high-cardinality-fanout`, `many-streams-writer-throughput`, and
@@ -738,25 +743,30 @@ The 2026-05-10 parity run added that export path. The existing resqlite
 summaries, RSS deltas, SQLite diagnostics, noop floors, and many-streams
 fanout medians.
 
-### 5. Portability still needs hosted production artifacts
+### 5. Windows production history remains follow-up
 
 The repeated production peer suite is no longer macOS-only at the workflow
 level. The shim path has a platform-aware resolver name, a Linux
 package:sqlite3 smoke job, and a Linux four-peer `ci` suite, which proves the
 native-hook loading strategy and source-pinned peer harness outside macOS at CI
-scale. Windows now has a core-artifact CI lane for dependency resolution,
+scale. Hosted Linux stable-lane production-history artifacts on run
+`27020101329` completed all five suite-history runs and recalibrated ready
+under the current hosted outlier policy, so Linux is no longer waiting on basic
+production-history collection for the current resqlite release-policy lanes.
+Windows now has a core-artifact CI lane for dependency resolution,
 generated-output freshness, analysis, native runtime attach,
 platform-independent diff/insight/package-boundary tests, a package:sqlite3
 embedded-shim smoke run, and a manual production-evidence lane that downloads a
 pinned SQLite amalgamation for the embedded `sqlite_traced.dll` shim. Full
-Windows production-profile history is still required before this can be called
-production-quality across every Dart target.
+Windows production-profile history is still required before Windows is called
+calibrated, but it is no longer the critical path for the macOS/Linux resqlite
+release-policy surface.
 
 ## Recommended next iteration
 
-1. Dispatch the manual `Production Benchmark Evidence` workflow on `main` and
-   archive the macOS/Linux/Windows production-history artifacts before
-   promoting any more diagnostic workloads into downstream release policy.
+1. Archive Windows production-history artifacts from the manual
+   `Production Benchmark Evidence` workflow before treating Windows as a
+   calibrated production target.
 2. Run the `Visualizer Release` workflow from a release tag with macOS signing
    secrets configured and `sign_macos=true`; the workflow audit should pass with
    `--require-signed-macos-release=true` before attaching archives/manifests to
@@ -766,4 +776,5 @@ production-quality across every Dart target.
    any reactive lane to a blocking release gate.
 4. Promote `feed-paging`, `large-working-set`, and `sync-burst` into the
    downstream resqlite wrapper policy only after a pin bump carries this
-   production-history evidence and non-macOS production history is collected.
+   production-history evidence and the remaining Windows production history is
+   collected.

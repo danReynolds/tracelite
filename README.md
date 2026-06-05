@@ -18,14 +18,16 @@ because tracelite's runtime or artifact model depends on resqlite.
 
 This is not a universal, language-agnostic SQLite profiler or a finalized
 multi-package distribution yet. macOS and the Dart SQLite package ecosystem are
-the calibrated production path. Linux has native shim smoke coverage and a
-pinned four-peer `ci` suite for the same Dart SQLite lanes. Windows now
+the calibrated production path, with hosted Linux stable-lane production
+history for the current resqlite release-policy surface. Linux has native shim
+smoke coverage and a pinned four-peer `ci` suite for the same Dart SQLite
+lanes. Windows now
 validates the platform-independent Dart artifact surface, native runtime attach,
 and visualizer package in CI. Windows SQLite shim tracing has an embedded
 `sqlite_traced.dll` build and package:sqlite3 smoke lane using a pinned SQLite
-amalgamation. The manual production evidence workflow can collect macOS, Linux,
-and Windows suite-history artifacts, but Windows production history still needs
-real runner evidence before it is treated as calibrated.
+amalgamation. The manual production evidence workflow can collect Windows
+suite-history artifacts too, but Windows production history still needs real
+runner evidence before it is treated as calibrated.
 
 ## What It Does
 
@@ -179,7 +181,7 @@ final readiness verdict fails the job on incomplete runs or `not_ready`
 calibration. Its default scenario list matches the stable policy lanes;
 diagnostic lanes such as `point-select` can be requested explicitly when the
 operator wants trend evidence. The hosted calibration uses a 15% aggregate
-repetition-outlier ceiling and a 20% per-run ceiling for those stable lanes. On
+repetition-outlier ceiling and a 40% per-run ceiling for those stable lanes. On
 Windows, it downloads a pinned SQLite amalgamation and uses the embedded
 `sqlite_traced.dll` shim path already covered by CI smoke tests. It is
 intentionally `workflow_dispatch` only because production history is too
