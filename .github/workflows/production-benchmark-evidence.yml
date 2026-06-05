@@ -40,12 +40,12 @@ on:
       resqlite_revision:
         description: Trace-enabled resqlite revision to use as the sibling checkout.
         required: true
-        default: b2a6c1905be7f3446bad57cfd70e698bc19b347f
+        default: bc069f14d16f4b53590d200b6f68d7af5765f63b
         type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  RESQLITE_TRACE_REVISION: b2a6c1905be7f3446bad57cfd70e698bc19b347f
+  RESQLITE_TRACE_REVISION: bc069f14d16f4b53590d200b6f68d7af5765f63b
   SQLITE_AMALGAMATION_VERSION: '3530100'
 
 jobs:
