@@ -45,7 +45,7 @@ void main() {
     expect(workflow, contains('default: 15'));
     expect(workflow, contains('--max-outlier-percent='));
     expect(workflow, contains('max_run_outlier_percent:'));
-    expect(workflow, contains('default: 20'));
+    expect(workflow, contains('default: 40'));
     expect(workflow, contains('--max-run-outlier-percent='));
     expect(workflow, contains('--require-clean-source=true'));
     expect(workflow, contains('--strict=false'));

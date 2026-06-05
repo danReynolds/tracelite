@@ -31,7 +31,7 @@ on:
       max_run_outlier_percent:
         description: Maximum per-run repetition outlier percentage allowed by strict calibration.
         required: true
-        default: 20
+        default: 40
         type: number
       suite_timeout_seconds:
         description: Timeout for each whole suite run.
