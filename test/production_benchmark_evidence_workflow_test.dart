@@ -11,7 +11,7 @@ void main() {
     expect(workflow, contains('name: Production Benchmark Evidence'));
     expect(workflow, contains('workflow_dispatch:'));
     expect(workflow, contains('resqlite_revision:'));
-    expect(workflow, contains('b2a6c1905be7f3446bad57cfd70e698bc19b347f'));
+    expect(workflow, contains('bc069f14d16f4b53590d200b6f68d7af5765f63b'));
     expect(workflow, contains('default: auto'));
     expect(workflow, contains('os: macos-14'));
     expect(workflow, contains('os: ubuntu-24.04'));
