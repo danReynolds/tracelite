@@ -47,6 +47,10 @@ void main() {
               'status': 'regressed',
               'gate_effect': 'reject',
               'change_percent': 18.5,
+              'max_cv_percent': 22.75,
+              'nonparametric_p_value': 0.519,
+              'delta_ci95_low': -42600000,
+              'delta_ci95_high': 38500000,
             },
           ],
         },
@@ -64,6 +68,56 @@ void main() {
       insights.map((insight) => insight.id),
       contains('decision_primary.regressed'),
     );
+    final primary = insights.singleWhere(
+      (insight) => insight.id == 'decision_primary.regressed',
+    );
+    expect(primary.body, contains('max CV 22.8%'));
+    expect(primary.body, contains('p=0.519'));
+    expect(primary.body, contains('95% delta CI -42.6ms..38.5ms'));
+  });
+
+  test('decision noise guidance uses calibrated policy gate', () {
+    final artifact = {
+      'schema': 'tracelite.decision.v1',
+      'decision': 'inconclusive',
+      'policy': const {
+        'expectation': 'improvement',
+        'primary_peer': 'resqlite',
+        'primary_metric': 'measured_elapsed_ns',
+        'max_cv_percent': 24.0,
+      },
+      'gates': {
+        'trace_health': const {
+          'status': 'passed',
+          'issues': <Object?>[],
+        },
+        'primary': {
+          'status': 'inconclusive',
+          'comparisons': [
+            {
+              'scenario': 'narrow-batch-insert',
+              'peer': 'resqlite',
+              'metric': 'measured_elapsed_ns',
+              'status': 'too_noisy',
+              'gate_effect': 'inconclusive',
+              'change_percent': 27.7,
+              'max_cv_percent': 33.0,
+            },
+          ],
+        },
+        'guardrails': const {
+          'status': 'passed',
+          'comparisons': <Object?>[],
+        },
+      },
+    };
+
+    final insights = benchmarkArtifactInsights(artifact);
+    final noise = insights.singleWhere(
+      (insight) => insight.id == 'decision_noise_next_step',
+    );
+    expect(noise.body, contains('24.0% CV gate'));
+    expect(noise.body, isNot(contains('15.0%')));
   });
 
   test('compare insights warn when runner overhead dominates tiny workloads',
@@ -82,6 +136,22 @@ void main() {
     );
     expect(overhead.severity, 'warning');
     expect(overhead.body, contains('Child-process wall time'));
+  });
+
+  test('compare insights flag top traced span outside sqlite3_step', () {
+    final artifact = _compareArtifact(
+      measured: [1000000, 1010000, 990000],
+      sqliteStepTotal: [100000, 101000, 99000],
+      nonStepSpanName: 'sqlite3_open_v2',
+      nonStepTotal: [700000, 707000, 693000],
+    );
+
+    final insights = benchmarkArtifactInsights(artifact);
+    final topSpan = insights.singleWhere(
+      (insight) => insight.id == 'top_non_step_span_dominates',
+    );
+    expect(topSpan.body, contains('sqlite3_open_v2'));
+    expect(topSpan.body, contains('not sqlite3_step'));
   });
 
   test('insight markdown renders an actionable table', () {
@@ -116,15 +186,102 @@ void main() {
     expect(suiteStatus.body, contains('linked compare artifacts'));
     expect(suiteStatus.body, isNot(contains('0 unsupported')));
   });
+
+  test('workload summary insights are generic and field-driven', () {
+    final insights = benchmarkArtifactInsights({
+      'schema': 'tracelite.workload_summary.v1',
+      'trace': {
+        'diagnostics': {
+          'dropped_events': 0,
+          'unmatched_begin_events': 0,
+          'unmatched_end_events': 0,
+        },
+      },
+      'noop_floors': {
+        'reader_us': 12,
+        'writer_us': 16,
+      },
+      'workloads': {
+        'point_query': {
+          'summary': {
+            'select': {
+              'count': 50000,
+              'median_us': 11,
+              'p99_us': 78,
+              'max_us': 2048,
+              'work_us_median': 0,
+              'dispatch_floor_us': 12,
+            },
+          },
+          'memory': {
+            'rss_delta_mb': 18.297,
+            'allocation_delta': {
+              'rows_decoded': 50000,
+              'cells_decoded': 300000,
+            },
+            'diagnostics_delta': {
+              'wal_bytes_delta': 0,
+            },
+          },
+        },
+        'merge_rounds': {
+          'summary': {
+            'executeBatch': {
+              'count': 1000,
+              'median_us': 93,
+              'p99_us': 890,
+              'max_us': 4136,
+              'work_us_median': 77,
+              'dispatch_floor_us': 16,
+            },
+          },
+          'memory': {
+            'rss_delta_mb': 0.485,
+            'diagnostics_delta': {
+              'wal_bytes_delta': 8240,
+            },
+          },
+        },
+      },
+    });
+
+    final ids = insights.map((insight) => insight.id);
+    expect(ids, contains('workload_dispatch_floors'));
+    expect(ids, contains('workload_dispatch_bound'));
+    expect(ids, contains('workload_work_bound'));
+    expect(ids, contains('workload_tail_spread'));
+    expect(ids, contains('workload_rss_signal'));
+    expect(ids, contains('workload_allocation_signal'));
+    expect(ids, contains('workload_wal_signal'));
+
+    expect(
+      insights
+          .singleWhere((insight) => insight.id == 'workload_dispatch_bound')
+          .body,
+      contains('point_query/select'),
+    );
+    expect(
+      insights
+          .singleWhere((insight) => insight.id == 'workload_work_bound')
+          .body,
+      contains('merge_rounds/executeBatch'),
+    );
+  });
 }
 
 Map<String, Object?> _compareArtifact({
   required List<int> measured,
   required List<int> sqliteStepTotal,
   List<int>? childElapsed,
+  String? nonStepSpanName,
+  List<int>? nonStepTotal,
   int droppedEvents = 0,
 }) {
   final childElapsedValues = childElapsed ?? measured;
+  final traceSpanTotal = [
+    for (var i = 0; i < sqliteStepTotal.length; i++)
+      sqliteStepTotal[i] + (nonStepTotal?[i] ?? 0),
+  ];
   return {
     'schema': 'tracelite.compare.v1',
     'scenario': 'point-select',
@@ -143,7 +300,7 @@ Map<String, Object?> _compareArtifact({
           'elapsed_ns': _stats(measured),
           'sqlite3_step_total_ns': _stats(sqliteStepTotal),
           'sqlite3_step_count': _stats(List.filled(measured.length, 3)),
-          'trace_span_total_ns': _stats(sqliteStepTotal),
+          'trace_span_total_ns': _stats(traceSpanTotal),
           'dropped_events': _stats(List.filled(measured.length, droppedEvents)),
           'unmatched_begin_events': _stats(List.filled(measured.length, 0)),
           'unmatched_end_events': _stats(List.filled(measured.length, 0)),
@@ -170,6 +327,15 @@ Map<String, Object?> _compareArtifact({
                   'p90_ns': sqliteStepTotal[i] ~/ 2,
                   'p99_ns': sqliteStepTotal[i],
                 },
+                if (nonStepSpanName != null && nonStepTotal != null)
+                  {
+                    'span_name': nonStepSpanName,
+                    'count': 1,
+                    'total_ns': nonStepTotal[i],
+                    'p50_ns': nonStepTotal[i],
+                    'p90_ns': nonStepTotal[i],
+                    'p99_ns': nonStepTotal[i],
+                  },
               ],
             },
         ],

@@ -50,12 +50,15 @@ Inputs are optional but at least one input must be present:
   compare artifacts.
 - `--suite=manifest.json`, repeated `--suite` flags, or comma-separated suite
   manifests.
+- `--suite-history=history.json`, repeated `--suite-history` flags, or
+  comma-separated suite-history manifests.
 - `--decision=decision.json`, repeated `--decision` flags, or comma-separated
   decision artifacts.
 - `--workload-summary=summary.json`, repeated `--workload-summary` flags, or
   comma-separated workload summaries.
 
-Suite manifests are expanded into their referenced compare artifacts.
+Suite manifests and suite-history manifests are expanded into their referenced
+compare artifacts.
 
 ## Output
 
@@ -98,7 +101,7 @@ schemas.
 | `peer_summary` | One row per scenario and peer, with common benchmark columns including measured elapsed time, scenario elapsed time, SQLite step count/time, event volume, and trace health. |
 | `decision_summary` | One row per decision artifact, including policy and gate statuses. |
 | `decision_comparisons` | Primary, guardrail, and trace-health rows for badges/tables. |
-| `workload_summary` | One row per resqlite workload in a workload-summary artifact. |
+| `workload_summary` | One row per semantic workload in a workload-summary artifact. |
 | `workload_operations` | Long-form workload operation metrics such as `median_us`, `p99_us`, and `work_us_median`. |
 | `workload_memory` | Flattened RSS, diagnostic, and profile-counter memory rows. |
 | `workload_fanout` | Long-form many-streams fanout metric/statistic/value rows. |

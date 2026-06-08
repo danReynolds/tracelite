@@ -256,6 +256,8 @@ List<BenchmarkInsight> _peerBottleneckInsights({
   final nonStepShare =
       (math.max(0, tracedMean - sqliteMean) / measuredMeanNs) * 100;
   final topSpan = _topSpanGroup(peerArtifact);
+  final topSpanShare =
+      topSpan == null ? 0.0 : (topSpan.totalMeanNs / measuredMeanNs) * 100;
 
   final detail = [
     'measured ${formatDurationNs(measuredMeanNs.round())}',
@@ -263,9 +265,29 @@ List<BenchmarkInsight> _peerBottleneckInsights({
     if (topSpan != null)
       'top span `${topSpan.name}` ${formatDurationNs(topSpan.totalMeanNs.round())}',
   ].join(', ');
+  final insights = <BenchmarkInsight>[];
+
+  if (topSpan != null &&
+      topSpan.name != 'sqlite3_step' &&
+      topSpanShare >= options.bottleneckSharePercent) {
+    insights.add(BenchmarkInsight(
+      severity: 'info',
+      id: 'top_non_step_span_dominates',
+      title: '$peer top span is not sqlite3_step',
+      body:
+          'Top traced span `${topSpan.name}` is ${_formatPercent(topSpanShare)}% of measured elapsed for `$scenario`, not sqlite3_step; inspect setup, open, or wrapper work before attributing this run to row stepping.',
+      evidence: {
+        'peer': peer,
+        'scenario': scenario,
+        'span_name': topSpan.name,
+        'top_span_share_percent': topSpanShare,
+      },
+    ));
+  }
 
   if (sqliteShare >= options.bottleneckSharePercent) {
     return [
+      ...insights,
       BenchmarkInsight(
         severity: 'info',
         id: 'sqlite_dominated',
@@ -283,6 +305,7 @@ List<BenchmarkInsight> _peerBottleneckInsights({
 
   if (tracedShare < options.traceCoverageFloorPercent) {
     return [
+      ...insights,
       BenchmarkInsight(
         severity: 'warning',
         id: 'low_trace_coverage',
@@ -300,6 +323,7 @@ List<BenchmarkInsight> _peerBottleneckInsights({
 
   if (nonStepShare >= options.bottleneckSharePercent) {
     return [
+      ...insights,
       BenchmarkInsight(
         severity: 'info',
         id: 'non_step_trace_dominated',
@@ -318,6 +342,7 @@ List<BenchmarkInsight> _peerBottleneckInsights({
   }
 
   return [
+    ...insights,
     BenchmarkInsight(
       severity: 'info',
       id: 'mixed_cost_profile',
@@ -339,6 +364,9 @@ List<BenchmarkInsight> _decisionInsights(
   BenchmarkInsightOptions options,
 ) {
   final decision = _string(artifact['decision']) ?? 'unknown';
+  final policy = _map(artifact['policy']);
+  final maxCvPercent =
+      _number(policy['max_cv_percent']) ?? options.maxCvPercent;
   final gates = _map(artifact['gates']);
   final traceHealth = _map(gates['trace_health']);
   final primary = _map(gates['primary']);
@@ -434,7 +462,7 @@ List<BenchmarkInsight> _decisionInsights(
       id: 'decision_noise_next_step',
       title: 'Noise is the next action',
       body:
-          'At least one primary comparison is too noisy under the ${_formatPercent(options.maxCvPercent)}% default CV gate; use the experiment or production profile with more repetitions.',
+          'At least one primary comparison is too noisy under the ${_formatPercent(maxCvPercent)}% CV gate; use the experiment or production profile with more repetitions.',
     ));
   }
   return insights;
@@ -565,6 +593,166 @@ List<BenchmarkInsight> _workloadInsights(Map<String, Object?> artifact) {
       title: 'Workload summaries loaded',
       body: '${workloads.length} workload(s) are available for inspection.',
     ));
+    insights.addAll(_workloadSummaryMetricInsights(artifact, workloads));
+  }
+  return insights;
+}
+
+List<BenchmarkInsight> _workloadSummaryMetricInsights(
+  Map<String, Object?> artifact,
+  Map<String, Object?> workloads,
+) {
+  final insights = <BenchmarkInsight>[];
+  final floors = _map(artifact['noop_floors']);
+  if (floors.isNotEmpty) {
+    final parts = [
+      if (_number(floors['reader_us']) case final reader?)
+        'reader ${_formatUs(reader)}',
+      if (_number(floors['writer_us']) case final writer?)
+        'writer ${_formatUs(writer)}',
+    ];
+    if (parts.isNotEmpty) {
+      insights.add(BenchmarkInsight(
+        severity: 'good',
+        id: 'workload_dispatch_floors',
+        title: 'Dispatch floors available',
+        body: 'Noop floors are available for floor-subtracted work: '
+            '${parts.join(', ')}.',
+      ));
+    }
+  }
+
+  final dispatchBound = <String>[];
+  final workBound = <String>[];
+  final tailSpread = <_RankedDetail>[];
+  final rssSignals = <_RankedDetail>[];
+  final allocationSignals = <_RankedDetail>[];
+  final walSignals = <_RankedDetail>[];
+
+  for (final workloadEntry in workloads.entries) {
+    final workloadName = workloadEntry.key;
+    final workload = _map(workloadEntry.value);
+    final summary = _map(workload['summary']);
+    for (final opEntry in summary.entries) {
+      final opName = opEntry.key;
+      final metrics = _map(opEntry.value);
+      final median = _number(metrics['median_us']);
+      final p99 = _number(metrics['p99_us']);
+      final max = _number(metrics['max_us']);
+      final work = _number(metrics['work_us_median']);
+      final floor = _number(metrics['dispatch_floor_us']);
+      final count = _number(metrics['count']);
+
+      if (median != null && median > 0 && work != null && floor != null) {
+        final workShare = work / median * 100;
+        final label = '`$workloadName/$opName` ${_formatUs(work)} work over '
+            '${_formatUs(median)} median';
+        if (work <= 1 || workShare <= 10) {
+          dispatchBound.add(label);
+        } else if (work >= 10 && workShare >= 50) {
+          workBound.add('$label (${_formatPercent(workShare)}% of median)');
+        }
+      }
+
+      if (median != null &&
+          median > 0 &&
+          p99 != null &&
+          max != null &&
+          count != null &&
+          count >= 100) {
+        final p99Ratio = p99 / median;
+        final maxRatio = max / median;
+        if (p99Ratio >= 5 || maxRatio >= 25) {
+          tailSpread.add(_RankedDetail(
+            math.max(p99Ratio, maxRatio),
+            '`$workloadName/$opName` p50 ${_formatUs(median)}, '
+            'p99 ${_formatUs(p99)}, max ${_formatUs(max)}',
+          ));
+        }
+      }
+    }
+
+    final memory = _map(workload['memory']);
+    final rssDelta = _number(memory['rss_delta_mb']);
+    if (rssDelta != null && rssDelta.abs() >= 5) {
+      rssSignals.add(_RankedDetail(
+        rssDelta.abs(),
+        '`$workloadName` RSS ${_formatSignedMb(rssDelta)}',
+      ));
+    }
+
+    final allocation = _map(memory['allocation_delta']);
+    final rows = _number(allocation['rows_decoded']);
+    final cells = _number(allocation['cells_decoded']);
+    if ((rows != null && rows > 0) || (cells != null && cells > 0)) {
+      allocationSignals.add(_RankedDetail(
+        cells ?? rows ?? 0,
+        '`$workloadName` decoded ${_formatWhole(rows ?? 0)} rows / '
+        '${_formatWhole(cells ?? 0)} cells',
+      ));
+    }
+
+    final diagnosticsDelta = _map(memory['diagnostics_delta']);
+    final walDelta = _number(diagnosticsDelta['wal_bytes_delta']);
+    if (walDelta != null && walDelta != 0) {
+      walSignals.add(_RankedDetail(
+        walDelta.abs(),
+        '`$workloadName` WAL ${_formatSignedBytes(walDelta)}',
+      ));
+    }
+  }
+
+  if (dispatchBound.isNotEmpty) {
+    insights.add(BenchmarkInsight(
+      severity: 'info',
+      id: 'workload_dispatch_bound',
+      title: 'Dispatch-bound workload operations',
+      body: 'Floor-subtracted work is near zero for '
+          '${_joinDetails(dispatchBound)}.',
+    ));
+  }
+  if (workBound.isNotEmpty) {
+    insights.add(BenchmarkInsight(
+      severity: 'info',
+      id: 'workload_work_bound',
+      title: 'Work-bound workload operations',
+      body: 'Floor-subtracted work dominates '
+          '${_joinDetails(workBound)}.',
+    ));
+  }
+  if (tailSpread.isNotEmpty) {
+    insights.add(BenchmarkInsight(
+      severity: 'warning',
+      id: 'workload_tail_spread',
+      title: 'Wide tail spread observed',
+      body: 'Single-run tails are much wider than medians for '
+          '${_joinRankedDetails(tailSpread)}.',
+    ));
+  }
+  if (rssSignals.isNotEmpty) {
+    insights.add(BenchmarkInsight(
+      severity: 'info',
+      id: 'workload_rss_signal',
+      title: 'RSS movement recorded',
+      body: 'Workload RSS deltas include ${_joinRankedDetails(rssSignals)}.',
+    ));
+  }
+  if (allocationSignals.isNotEmpty) {
+    insights.add(BenchmarkInsight(
+      severity: 'info',
+      id: 'workload_allocation_signal',
+      title: 'Decode allocation counters recorded',
+      body: 'Allocation counters include '
+          '${_joinRankedDetails(allocationSignals)}.',
+    ));
+  }
+  if (walSignals.isNotEmpty) {
+    insights.add(BenchmarkInsight(
+      severity: 'info',
+      id: 'workload_wal_signal',
+      title: 'WAL growth recorded',
+      body: 'SQLite WAL deltas include ${_joinRankedDetails(walSignals)}.',
+    ));
   }
   return insights;
 }
@@ -617,19 +805,49 @@ BenchmarkInsight _comparisonInsight(
   final metric = comparison['metric'];
   final scenario = comparison['scenario'];
   final status = comparison[statusKey];
+  final details = _comparisonDetails(comparison);
+  final detailSuffix =
+      details.isEmpty ? '' : ' Evidence: ${details.join(', ')}.';
   return BenchmarkInsight(
     severity: defaultSeverity,
     id: '$idPrefix.$status',
     title: title,
     body:
-        '`${peer ?? 'unknown'}` `${metric ?? 'metric'}` on `${scenario ?? 'scenario'}` changed by ${_formatPercent(comparison['change_percent'])}% with status `$status`.',
+        '`${peer ?? 'unknown'}` `${metric ?? 'metric'}` on `${scenario ?? 'scenario'}` changed by ${_formatPercent(comparison['change_percent'])}% with status `$status`.$detailSuffix',
     evidence: {
       if (peer != null) 'peer': peer,
       if (metric != null) 'metric': metric,
       if (scenario != null) 'scenario': scenario,
       if (status != null) 'status': status,
+      if (_number(comparison['max_cv_percent']) case final maxCv?)
+        'max_cv_percent': maxCv,
+      if (_number(comparison['nonparametric_p_value']) case final pValue?)
+        'nonparametric_p_value': pValue,
+      if (_number(comparison['delta_ci95_low']) case final low?)
+        'delta_ci95_low': low,
+      if (_number(comparison['delta_ci95_high']) case final high?)
+        'delta_ci95_high': high,
     },
   );
+}
+
+List<String> _comparisonDetails(Map<String, Object?> comparison) {
+  final details = <String>[];
+  if (_number(comparison['max_cv_percent']) case final maxCv?) {
+    details.add('max CV ${_formatPercent(maxCv)}%');
+  }
+  if (_number(comparison['nonparametric_p_value']) case final pValue?) {
+    details.add('p=${_formatProbability(pValue)}');
+  }
+  final metric = _string(comparison['metric']);
+  final low = _number(comparison['delta_ci95_low']);
+  final high = _number(comparison['delta_ci95_high']);
+  if (low != null && high != null) {
+    details.add(
+      '95% delta CI ${_formatMetricDelta(metric, low)}..${_formatMetricDelta(metric, high)}',
+    );
+  }
+  return details;
 }
 
 int _compareInsightPriority(BenchmarkInsight a, BenchmarkInsight b) {
@@ -782,6 +1000,13 @@ final class _SpanGroupTotal {
   double get totalMeanNs => totalNs / sampleCount;
 }
 
+final class _RankedDetail {
+  const _RankedDetail(this.rank, this.detail);
+
+  final double rank;
+  final String detail;
+}
+
 Map<String, Object?> _map(Object? value) {
   if (value is Map) return Map<String, Object?>.from(value);
   return const {};
@@ -800,6 +1025,54 @@ List<Map<String, Object?>> _listOfMaps(Object? value) {
 }
 
 String? _string(Object? value) => value is String ? value : null;
+
+double? _number(Object? value) {
+  if (value is! num || !value.isFinite) return null;
+  return value.toDouble();
+}
+
+String _joinDetails(List<String> details, {int limit = 3}) {
+  final visible = details.take(limit).join('; ');
+  final remaining = details.length - limit;
+  if (remaining <= 0) return visible;
+  return '$visible; and $remaining more';
+}
+
+String _joinRankedDetails(List<_RankedDetail> details, {int limit = 3}) {
+  final sorted = [...details]..sort((a, b) => b.rank.compareTo(a.rank));
+  return _joinDetails([for (final detail in sorted) detail.detail],
+      limit: limit);
+}
+
+String _formatUs(double value) => '${_formatWhole(value)}us';
+
+String _formatSignedMb(double value) {
+  final sign = value >= 0 ? '+' : '-';
+  final abs = value.abs();
+  final formatted = abs >= 10 ? abs.toStringAsFixed(1) : abs.toStringAsFixed(3);
+  return '$sign$formatted MB';
+}
+
+String _formatSignedBytes(double value) {
+  final sign = value >= 0 ? '+' : '-';
+  return '$sign${_formatWhole(value.abs())} B';
+}
+
+String _formatWhole(double value) => value.round().toString();
+
+String _formatMetricDelta(String? metric, double value) {
+  final sign = value >= 0 ? '' : '-';
+  final abs = value.abs();
+  if (metric != null && metric.endsWith('_ns')) {
+    return '$sign${formatDurationNs(abs.round())}';
+  }
+  return '$sign${_formatWhole(abs)}';
+}
+
+String _formatProbability(double value) {
+  if (value >= 0.001) return value.toStringAsFixed(3);
+  return value.toStringAsExponential(2);
+}
 
 String _formatPercent(Object? value) {
   if (value is! num || !value.isFinite) return '-';

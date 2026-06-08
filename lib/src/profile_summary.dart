@@ -216,9 +216,9 @@ Map<String, Object?> _memoryArtifact(Trace trace, TraceWorkload workload) {
   final byName = _counterValuesByName(trace, workload);
   final memory = <String, Object?>{};
 
-  final rssBefore = _first(byName['resqlite.rss_before_bytes']);
-  final rssAfter = _first(byName['resqlite.rss_after_bytes']);
-  final rssPeak = _first(byName['resqlite.rss_peak_bytes']);
+  final rssBefore = _first(_counterValuesForSuffix(byName, 'rss_before_bytes'));
+  final rssAfter = _first(_counterValuesForSuffix(byName, 'rss_after_bytes'));
+  final rssPeak = _first(_counterValuesForSuffix(byName, 'rss_peak_bytes'));
   if (rssBefore != null && rssAfter != null && rssPeak != null) {
     final beforeMb = _mb(rssBefore);
     final afterMb = _mb(rssAfter);
@@ -231,8 +231,8 @@ Map<String, Object?> _memoryArtifact(Trace trace, TraceWorkload workload) {
   final diagnosticsBefore = <String, int>{};
   final diagnosticsAfter = <String, int>{};
   final diagnosticsDelta = <String, int>{};
-  for (final metric in _diagnosticMetrics.entries) {
-    final values = byName[metric.key];
+  for (final metric in _diagnosticMetricSuffixes.entries) {
+    final values = _counterValuesForSuffix(byName, metric.key);
     if (values == null || values.isEmpty) continue;
     diagnosticsBefore[metric.value] = values.first;
     diagnosticsAfter[metric.value] = values.last;
@@ -245,8 +245,8 @@ Map<String, Object?> _memoryArtifact(Trace trace, TraceWorkload workload) {
   }
 
   final profileDelta = <String, int>{};
-  for (final metric in _profileCounterMetrics.entries) {
-    final values = byName[metric.key];
+  for (final metric in _profileCounterMetricSuffixes.entries) {
+    final values = _counterValuesForSuffix(byName, metric.key);
     if (values == null || values.length < 2) continue;
     profileDelta[metric.value] = values.last - values.first;
   }
@@ -266,8 +266,8 @@ Map<String, Object?> _memoryArtifact(Trace trace, TraceWorkload workload) {
 Map<String, Object?> _fanoutArtifact(Trace trace, TraceWorkload workload) {
   final byName = _counterValuesByName(trace, workload);
   final result = <String, Object?>{};
-  for (final metric in _fanoutMetrics.entries) {
-    final values = byName[metric.key];
+  for (final metric in _fanoutMetricSuffixes.entries) {
+    final values = _counterValuesForSuffix(byName, metric.key);
     if (values == null || values.isEmpty) continue;
     result[metric.value] = _summarizeValues(values);
   }
@@ -285,6 +285,19 @@ Map<String, List<int>> _counterValuesByName(
     byName.putIfAbsent(name, () => <int>[]).add(event.args.first);
   }
   return byName;
+}
+
+List<int>? _counterValuesForSuffix(
+  Map<String, List<int>> byName,
+  String suffix,
+) {
+  final values = <int>[];
+  for (final entry in byName.entries) {
+    if (entry.key == suffix || entry.key.endsWith('.$suffix')) {
+      values.addAll(entry.value);
+    }
+  }
+  return values.isEmpty ? null : values;
 }
 
 Map<String, Object?> _summarizeValues(List<int> values) {
@@ -318,33 +331,33 @@ String _markdownCell(String value) => value.replaceAll('|', '\\|');
 String _truncateSql(String sql) =>
     sql.length > 80 ? '${sql.substring(0, 77)}...' : sql;
 
-const _diagnosticMetrics = {
-  'resqlite.sqlite_page_cache_bytes': 'sqlite_page_cache_bytes',
-  'resqlite.sqlite_schema_bytes': 'sqlite_schema_bytes',
-  'resqlite.sqlite_stmt_bytes': 'sqlite_stmt_bytes',
-  'resqlite.wal_bytes': 'wal_bytes',
-  'resqlite.stream_count': 'stream_count',
-  'resqlite.reader_busy': 'reader_busy',
+const _diagnosticMetricSuffixes = {
+  'sqlite_page_cache_bytes': 'sqlite_page_cache_bytes',
+  'sqlite_schema_bytes': 'sqlite_schema_bytes',
+  'sqlite_stmt_bytes': 'sqlite_stmt_bytes',
+  'wal_bytes': 'wal_bytes',
+  'stream_count': 'stream_count',
+  'reader_busy': 'reader_busy',
 };
 
-const _profileCounterMetrics = {
-  'resqlite.profile.rows_decoded': 'rows_decoded',
-  'resqlite.profile.cells_decoded': 'cells_decoded',
-  'resqlite.profile.invalidate_us': 'invalidate_us',
-  'resqlite.profile.invalidate_count': 'invalidate_count',
-  'resqlite.profile.intersection_us': 'intersection_us',
-  'resqlite.profile.intersection_entries': 'intersection_entries',
-  'resqlite.profile.dispatcher_parked_total': 'dispatcher_parked_total',
-  'resqlite.profile.dispatcher_wake_retry_total': 'dispatcher_wake_retry_total',
-  'resqlite.profile.dispatcher_max_parked_concurrent':
+const _profileCounterMetricSuffixes = {
+  'profile.rows_decoded': 'rows_decoded',
+  'profile.cells_decoded': 'cells_decoded',
+  'profile.invalidate_us': 'invalidate_us',
+  'profile.invalidate_count': 'invalidate_count',
+  'profile.intersection_us': 'intersection_us',
+  'profile.intersection_entries': 'intersection_entries',
+  'profile.dispatcher_parked_total': 'dispatcher_parked_total',
+  'profile.dispatcher_wake_retry_total': 'dispatcher_wake_retry_total',
+  'profile.dispatcher_max_parked_concurrent':
       'dispatcher_max_parked_concurrent',
 };
 
-const _fanoutMetrics = {
-  'resqlite.fanout.writer_us': 'writer_us',
-  'resqlite.fanout.yield_us': 'yield_us',
-  'resqlite.fanout.total_us': 'total_us',
-  'resqlite.fanout.invalidate_us': 'invalidate_us',
-  'resqlite.fanout.intersection_us': 'intersection_us',
-  'resqlite.fanout.intersection_entries': 'intersection_entries',
+const _fanoutMetricSuffixes = {
+  'fanout.writer_us': 'writer_us',
+  'fanout.yield_us': 'yield_us',
+  'fanout.total_us': 'total_us',
+  'fanout.invalidate_us': 'invalidate_us',
+  'fanout.intersection_us': 'intersection_us',
+  'fanout.intersection_entries': 'intersection_entries',
 };
