@@ -804,11 +804,14 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
       valueBase: 200000,
     );
     aggregateWriteLoop.stop();
+    final aggregateWriteLoopEmissions = aggregateEmissions;
     final aggregateSettle = Stopwatch()..start();
     await _waitForQuietReactiveWindow(() => aggregateEmissions);
     aggregateSettle.stop();
     aggregate.stop();
     final aggregateMeasuredEmissions = aggregateEmissions;
+    final aggregateSettleEmissions =
+        aggregateMeasuredEmissions - aggregateWriteLoopEmissions;
     final aggregateElapsedNs = _elapsedNs(aggregate);
     final aggregateWriteLoopElapsedNs = _elapsedNs(aggregateWriteLoop);
     final aggregateSettleElapsedNs = _elapsedNs(aggregateSettle);
@@ -857,6 +860,7 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
         valueBase: 300000,
       );
       keyedWriteLoop.stop();
+      final keyedWriteLoopEmissions = keyedEmitCounts.fold<int>(0, _sum);
       final keyedSettle = Stopwatch()..start();
       await _waitForQuietReactiveWindow(
         () => keyedEmitCounts.fold<int>(0, _sum),
@@ -864,6 +868,8 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
       keyedSettle.stop();
       keyed.stop();
       final keyedMeasuredEmissions = keyedEmitCounts.fold<int>(0, _sum);
+      final keyedSettleEmissions =
+          keyedMeasuredEmissions - keyedWriteLoopEmissions;
       final keyedElapsedNs = _elapsedNs(keyed);
       final keyedWriteLoopElapsedNs = _elapsedNs(keyedWriteLoop);
       final keyedSettleElapsedNs = _elapsedNs(keyedSettle);
@@ -888,7 +894,11 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
           'keyed_streams_write_loop_elapsed_ns': keyedWriteLoopElapsedNs,
           'keyed_streams_settle_elapsed_ns': keyedSettleElapsedNs,
           'aggregate_emissions': aggregateMeasuredEmissions,
+          'aggregate_stream_write_loop_emissions': aggregateWriteLoopEmissions,
+          'aggregate_stream_settle_emissions': aggregateSettleEmissions,
           'keyed_emissions': keyedMeasuredEmissions,
+          'keyed_streams_write_loop_emissions': keyedWriteLoopEmissions,
+          'keyed_streams_settle_emissions': keyedSettleEmissions,
           'observed_watched_pk_hits': watchedHits,
         },
       );

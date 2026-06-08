@@ -175,6 +175,23 @@ void main() {
         );
         expect(measurements['aggregate_emissions'], isA<int>());
         expect(measurements['keyed_emissions'], isA<int>());
+        expect(
+          measurements['aggregate_stream_write_loop_emissions'],
+          isA<int>(),
+        );
+        expect(measurements['aggregate_stream_settle_emissions'], isA<int>());
+        expect(measurements['keyed_streams_write_loop_emissions'], isA<int>());
+        expect(measurements['keyed_streams_settle_emissions'], isA<int>());
+        expect(
+          measurements['aggregate_emissions'],
+          (measurements['aggregate_stream_write_loop_emissions'] as int) +
+              (measurements['aggregate_stream_settle_emissions'] as int),
+        );
+        expect(
+          measurements['keyed_emissions'],
+          (measurements['keyed_streams_write_loop_emissions'] as int) +
+              (measurements['keyed_streams_settle_emissions'] as int),
+        );
       } else if (scenario == 'many-streams-writer-throughput') {
         expect(measurements['write_count'], workload['write_count']);
         expect(measurements['disjoint_emissions'], isA<int>());
