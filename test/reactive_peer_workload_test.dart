@@ -14,11 +14,18 @@ void main() {
       'tracelite_keyed_items': ['id', 'body', 'updated_at'],
       'tracelite_fanout_items': ['id', 'owner_id', 'value'],
       'tracelite_wide_items': ['id', 'partition_id', 'a', 'b', 'c'],
+      'tracelite_writer_pressure': [
+        'id',
+        'producer_id',
+        'value',
+        'payload',
+      ],
     });
     expect(driftReactiveTablePrimaryKeysForTesting(), {
       'tracelite_keyed_items': ['id'],
       'tracelite_fanout_items': ['id'],
       'tracelite_wide_items': ['id'],
+      'tracelite_writer_pressure': ['id'],
     });
   });
 
@@ -26,6 +33,7 @@ void main() {
     'keyed-pk-subscriptions',
     'high-cardinality-fanout',
     'many-streams-writer-throughput',
+    'sustained-writer-pressure',
   ]) {
     test('compare reports capability-aware results for $scenario', () async {
       final result = await Process.run(
@@ -75,6 +83,7 @@ void main() {
     'keyed-pk-subscriptions',
     'high-cardinality-fanout',
     'many-streams-writer-throughput',
+    'sustained-writer-pressure',
   ]) {
     test('drift handles larger generated-table reactive stress for $scenario',
         () async {
@@ -114,7 +123,10 @@ void main() {
       final workload = artifact['workload']! as Map<String, Object?>;
       expect(workload['required_capabilities'], ['sql', 'reactive']);
       expect(workload['stream_count'] as int, greaterThan(4));
-      expect(workload['write_count'] as int, greaterThan(10));
+      final workloadWriteCount = scenario == 'sustained-writer-pressure'
+          ? workload['total_writes'] as int
+          : workload['write_count'] as int;
+      expect(workloadWriteCount, greaterThan(10));
 
       final peers = artifact['peers']! as List<Object?>;
       final drift = _peerByName(peers, 'drift');
@@ -133,11 +145,19 @@ void main() {
 
       final measurements = sample['measurements']! as Map<String, Object?>;
       expect(measurements['stream_count'], workload['stream_count']);
-      expect(measurements['write_count'], workload['write_count']);
-      if (scenario == 'many-streams-writer-throughput') {
+      if (scenario == 'sustained-writer-pressure') {
+        expect(
+          measurements['total_writes_per_phase'],
+          workload['total_writes'],
+        );
+        expect(measurements['aggregate_emissions'], isA<int>());
+        expect(measurements['keyed_emissions'], isA<int>());
+      } else if (scenario == 'many-streams-writer-throughput') {
+        expect(measurements['write_count'], workload['write_count']);
         expect(measurements['disjoint_emissions'], isA<int>());
         expect(measurements['overlap_emissions'], isA<int>());
       } else {
+        expect(measurements['write_count'], workload['write_count']);
         expect(measurements['post_baseline_emissions'], isA<int>());
       }
     }, timeout: const Timeout(Duration(minutes: 5)));

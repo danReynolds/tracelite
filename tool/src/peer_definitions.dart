@@ -10,6 +10,7 @@ const String keyedPkSubscriptionsScenario = 'keyed-pk-subscriptions';
 const String highCardinalityFanoutScenario = 'high-cardinality-fanout';
 const String manyStreamsWriterThroughputScenario =
     'many-streams-writer-throughput';
+const String sustainedWriterPressureScenario = 'sustained-writer-pressure';
 const String sqliteDiagnosticsScenario = 'sqlite-diagnostics';
 
 const List<String> defaultScenarioNames = [
@@ -22,6 +23,7 @@ const List<String> defaultScenarioNames = [
   keyedPkSubscriptionsScenario,
   highCardinalityFanoutScenario,
   manyStreamsWriterThroughputScenario,
+  sustainedWriterPressureScenario,
   sqliteDiagnosticsScenario,
 ];
 
@@ -95,6 +97,7 @@ const int largeWorkingSetSeed = 0xB16B00B5;
 const int largeWorkingSetPayloadLength = 128;
 const int reactiveSeed = 0xBEEF;
 const int fanoutSeed = 0xCAFEF0;
+const int writerPressureSeed = 0x51A17E;
 
 List<String> peerCapabilities(String peerName) {
   final capabilities = <String>['sql', 'batch'];
@@ -220,6 +223,20 @@ Map<String, Object?> peerScenarioParameters(
           'overlap_updates_with_streams',
         ],
       },
+    sustainedWriterPressureScenario => {
+        'rows': sustainedWriterPressureRowCount(rows),
+        'producer_count': sustainedWriterPressureProducerCount(rows),
+        'writes_per_producer': sustainedWriterPressureWritesPerProducer(rows),
+        'total_writes': sustainedWriterPressureTotalWrites(rows),
+        'stream_count': sustainedWriterPressureStreamCount(rows),
+        'seed': writerPressureSeed,
+        'required_capabilities': ['sql', 'reactive'],
+        'measured_operations': [
+          'concurrent_updates_no_streams',
+          'concurrent_updates_with_aggregate_stream',
+          'concurrent_updates_with_keyed_streams',
+        ],
+      },
     sqliteDiagnosticsScenario => {
         'rows': rows,
         'required_capabilities': ['sql', 'diagnostics'],
@@ -271,3 +288,21 @@ int writerWriteCount(int rows) => math.min(100, math.max(10, rows * 4));
 
 int writerRowCount(int rows) =>
     math.max(writerStreamCount(rows) * 10, rows * 100);
+
+int sustainedWriterPressureProducerCount(int rows) =>
+    math.min(8, math.max(2, rows ~/ 5));
+
+int sustainedWriterPressureWritesPerProducer(int rows) =>
+    math.min(80, math.max(20, rows));
+
+int sustainedWriterPressureTotalWrites(int rows) =>
+    sustainedWriterPressureProducerCount(rows) *
+    sustainedWriterPressureWritesPerProducer(rows);
+
+int sustainedWriterPressureStreamCount(int rows) =>
+    math.min(24, math.max(4, rows ~/ 2));
+
+int sustainedWriterPressureRowCount(int rows) => math.max(
+      sustainedWriterPressureStreamCount(rows) * 20,
+      sustainedWriterPressureTotalWrites(rows) * 2,
+    );

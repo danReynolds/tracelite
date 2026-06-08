@@ -3548,6 +3548,11 @@ _SuiteProfile _suiteProfile(String profileName) {
             repetitions: 5,
           ),
           _SuiteScenario(
+            name: sustainedWriterPressureScenario,
+            rows: 20,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
             name: sqliteDiagnosticsScenario,
             rows: 50,
             repetitions: 5,
