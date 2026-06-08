@@ -70,6 +70,8 @@ Future<PeerScenarioResult> runPeerScenario({
         return await _runHighCardinalityFanout(peer, rows: rows);
       case manyStreamsWriterThroughputScenario:
         return await _runManyStreamsWriterThroughput(peer, rows: rows);
+      case sustainedWriterPressureScenario:
+        return await _runSustainedWriterPressure(peer, rows: rows);
       case sqliteDiagnosticsScenario:
         return await _runSqliteDiagnostics(
           peer,
@@ -729,6 +731,155 @@ Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
   }
 }
 
+Future<PeerScenarioResult> _runSustainedWriterPressure(
+  SqlitePeer peer, {
+  required int rows,
+}) async {
+  final reactive = _requireReactivePeer(peer);
+  final rowCount = sustainedWriterPressureRowCount(rows);
+  final producerCount = sustainedWriterPressureProducerCount(rows);
+  final writesPerProducer = sustainedWriterPressureWritesPerProducer(rows);
+  final streamCount = sustainedWriterPressureStreamCount(rows);
+  final totalWrites = sustainedWriterPressureTotalWrites(rows);
+
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_writer_pressure');
+  await peer.execute(
+    'CREATE TABLE tracelite_writer_pressure('
+    'id INTEGER PRIMARY KEY, '
+    'producer_id INTEGER NOT NULL, '
+    'value INTEGER NOT NULL, '
+    'payload TEXT NOT NULL)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_writer_pressure('
+    'id, producer_id, value, payload'
+    ') VALUES (?, ?, ?, ?)',
+    [
+      for (var i = 1; i <= rowCount; i++)
+        [i, i % producerCount, 0, 'payload_$i'],
+    ],
+  );
+  setup.stop();
+
+  var warmupElapsedNs = 0;
+
+  final noStreams = Stopwatch()..start();
+  await _runConcurrentWriterUpdates(
+    peer,
+    phaseSeed: writerPressureSeed,
+    producerCount: producerCount,
+    writesPerProducer: writesPerProducer,
+    rowCount: rowCount,
+    valueBase: 100000,
+  );
+  noStreams.stop();
+
+  var aggregateEmissions = 0;
+  final aggregateSub = reactive.watch(
+    'SELECT COUNT(*) AS c, SUM(value) AS total '
+    'FROM tracelite_writer_pressure',
+    readsFrom: const {'tracelite_writer_pressure'},
+  ).listen((_) => aggregateEmissions++);
+  try {
+    final aggregateWarmup = Stopwatch()..start();
+    await _waitUntil(
+      () => aggregateEmissions > 0,
+      timeout: const Duration(seconds: 10),
+      description: '${peer.name} writer pressure aggregate initial emission',
+    );
+    aggregateWarmup.stop();
+    warmupElapsedNs += _elapsedNs(aggregateWarmup);
+    aggregateEmissions = 0;
+
+    final aggregate = Stopwatch()..start();
+    await _runConcurrentWriterUpdates(
+      peer,
+      phaseSeed: writerPressureSeed ^ 0xA66,
+      producerCount: producerCount,
+      writesPerProducer: writesPerProducer,
+      rowCount: rowCount,
+      valueBase: 200000,
+    );
+    await _waitForQuietReactiveWindow(() => aggregateEmissions);
+    aggregate.stop();
+    final aggregateMeasuredEmissions = aggregateEmissions;
+
+    final keyedEmitCounts = List<int>.filled(streamCount, 0);
+    final keyedSubs = <StreamSubscription<List<Map<String, Object?>>>>[];
+    for (var id = 1; id <= streamCount; id++) {
+      final index = id - 1;
+      keyedSubs.add(
+        reactive.watch(
+          'SELECT id, value FROM tracelite_writer_pressure WHERE id = ?',
+          parameters: [id],
+          readsFrom: const {'tracelite_writer_pressure'},
+        ).listen((_) => keyedEmitCounts[index]++),
+      );
+    }
+    try {
+      final keyedWarmup = Stopwatch()..start();
+      await _waitUntil(
+        () => keyedEmitCounts.every((count) => count > 0),
+        timeout: const Duration(seconds: 10),
+        description: '${peer.name} writer pressure keyed initial emissions',
+      );
+      keyedWarmup.stop();
+      warmupElapsedNs += _elapsedNs(keyedWarmup);
+      for (var i = 0; i < keyedEmitCounts.length; i++) {
+        keyedEmitCounts[i] = 0;
+      }
+
+      final watchedHits = _writerPressureWatchedHits(
+        phaseSeed: writerPressureSeed ^ 0xC0DE,
+        producerCount: producerCount,
+        writesPerProducer: writesPerProducer,
+        rowCount: rowCount,
+        watchedRows: streamCount,
+      );
+
+      final keyed = Stopwatch()..start();
+      await _runConcurrentWriterUpdates(
+        peer,
+        phaseSeed: writerPressureSeed ^ 0xC0DE,
+        producerCount: producerCount,
+        writesPerProducer: writesPerProducer,
+        rowCount: rowCount,
+        valueBase: 300000,
+      );
+      await _waitForQuietReactiveWindow(
+        () => keyedEmitCounts.fold<int>(0, _sum),
+      );
+      keyed.stop();
+      final keyedMeasuredEmissions = keyedEmitCounts.fold<int>(0, _sum);
+
+      return PeerScenarioResult(
+        setupElapsedNs: _elapsedNs(setup),
+        warmupElapsedNs: warmupElapsedNs,
+        measuredElapsedNs:
+            _elapsedNs(noStreams) + _elapsedNs(aggregate) + _elapsedNs(keyed),
+        measurements: {
+          'row_count': rowCount,
+          'producer_count': producerCount,
+          'writes_per_producer': writesPerProducer,
+          'total_writes_per_phase': totalWrites,
+          'stream_count': streamCount,
+          'no_streams_elapsed_ns': _elapsedNs(noStreams),
+          'aggregate_stream_elapsed_ns': _elapsedNs(aggregate),
+          'keyed_streams_elapsed_ns': _elapsedNs(keyed),
+          'aggregate_emissions': aggregateMeasuredEmissions,
+          'keyed_emissions': keyedMeasuredEmissions,
+          'observed_watched_pk_hits': watchedHits,
+        },
+      );
+    } finally {
+      await Future.wait([for (final sub in keyedSubs) sub.cancel()]);
+    }
+  } finally {
+    await aggregateSub.cancel();
+  }
+}
+
 Future<PeerScenarioResult> _runSqliteDiagnostics(
   SqlitePeer peer, {
   required int rows,
@@ -927,6 +1078,71 @@ Future<void> _executeChatOp(SqlitePeer peer, _ChatOp op) async {
       }
       _consumeRows(result);
   }
+}
+
+Future<void> _runConcurrentWriterUpdates(
+  SqlitePeer peer, {
+  required int phaseSeed,
+  required int producerCount,
+  required int writesPerProducer,
+  required int rowCount,
+  required int valueBase,
+}) async {
+  await Future.wait([
+    for (var producer = 0; producer < producerCount; producer++)
+      () async {
+        for (var i = 0; i < writesPerProducer; i++) {
+          final id = _writerPressureTargetId(
+            phaseSeed: phaseSeed,
+            producer: producer,
+            index: i,
+            rowCount: rowCount,
+          );
+          await peer.execute(
+            'UPDATE tracelite_writer_pressure '
+            'SET value = ?, payload = ? WHERE id = ?',
+            [
+              valueBase + producer * writesPerProducer + i,
+              'p${producer}_$i',
+              id,
+            ],
+          );
+        }
+      }(),
+  ]);
+}
+
+int _writerPressureWatchedHits({
+  required int phaseSeed,
+  required int producerCount,
+  required int writesPerProducer,
+  required int rowCount,
+  required int watchedRows,
+}) {
+  var hits = 0;
+  for (var producer = 0; producer < producerCount; producer++) {
+    for (var i = 0; i < writesPerProducer; i++) {
+      final id = _writerPressureTargetId(
+        phaseSeed: phaseSeed,
+        producer: producer,
+        index: i,
+        rowCount: rowCount,
+      );
+      if (id <= watchedRows) hits++;
+    }
+  }
+  return hits;
+}
+
+int _writerPressureTargetId({
+  required int phaseSeed,
+  required int producer,
+  required int index,
+  required int rowCount,
+}) {
+  final value =
+      phaseSeed + producer * 131 + index * 17 + (producer ^ index) * 7;
+  return (value.remainder(rowCount)) + 1;
 }
 
 void _consumeRows(List<Map<String, Object?>> rows) {

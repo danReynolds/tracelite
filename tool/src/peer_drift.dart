@@ -233,6 +233,19 @@ const _traceliteDriftTableSchemas = [
       _TraceliteDriftColumnSpec.text('c'),
     ],
   ),
+  _TraceliteDriftTableSchema(
+    'tracelite_writer_pressure',
+    [
+      _TraceliteDriftColumnSpec.integer(
+        'id',
+        primaryKey: true,
+        requiredDuringInsert: false,
+      ),
+      _TraceliteDriftColumnSpec.integer('producer_id'),
+      _TraceliteDriftColumnSpec.integer('value'),
+      _TraceliteDriftColumnSpec.text('payload'),
+    ],
+  ),
 ];
 
 /// Exposes internal Drift registry metadata to tests without opening private
