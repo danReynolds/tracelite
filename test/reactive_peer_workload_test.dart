@@ -150,6 +150,29 @@ void main() {
           measurements['total_writes_per_phase'],
           workload['total_writes'],
         );
+        expect(measurements['no_streams_write_loop_elapsed_ns'], isA<int>());
+        expect(
+          measurements['aggregate_stream_write_loop_elapsed_ns'],
+          isA<int>(),
+        );
+        expect(measurements['aggregate_stream_settle_elapsed_ns'], isA<int>());
+        expect(
+          measurements['keyed_streams_write_loop_elapsed_ns'],
+          isA<int>(),
+        );
+        expect(measurements['keyed_streams_settle_elapsed_ns'], isA<int>());
+        expect(
+          measurements['aggregate_stream_elapsed_ns'] as int,
+          greaterThanOrEqualTo(
+            measurements['aggregate_stream_write_loop_elapsed_ns'] as int,
+          ),
+        );
+        expect(
+          measurements['keyed_streams_elapsed_ns'] as int,
+          greaterThanOrEqualTo(
+            measurements['keyed_streams_write_loop_elapsed_ns'] as int,
+          ),
+        );
         expect(measurements['aggregate_emissions'], isA<int>());
         expect(measurements['keyed_emissions'], isA<int>());
       } else if (scenario == 'many-streams-writer-throughput') {
