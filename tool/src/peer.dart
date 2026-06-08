@@ -774,6 +774,7 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
     valueBase: 100000,
   );
   noStreams.stop();
+  final noStreamsWriteLoopElapsedNs = _elapsedNs(noStreams);
 
   var aggregateEmissions = 0;
   final aggregateSub = reactive.watch(
@@ -793,6 +794,7 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
     aggregateEmissions = 0;
 
     final aggregate = Stopwatch()..start();
+    final aggregateWriteLoop = Stopwatch()..start();
     await _runConcurrentWriterUpdates(
       peer,
       phaseSeed: writerPressureSeed ^ 0xA66,
@@ -801,9 +803,15 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
       rowCount: rowCount,
       valueBase: 200000,
     );
+    aggregateWriteLoop.stop();
+    final aggregateSettle = Stopwatch()..start();
     await _waitForQuietReactiveWindow(() => aggregateEmissions);
+    aggregateSettle.stop();
     aggregate.stop();
     final aggregateMeasuredEmissions = aggregateEmissions;
+    final aggregateElapsedNs = _elapsedNs(aggregate);
+    final aggregateWriteLoopElapsedNs = _elapsedNs(aggregateWriteLoop);
+    final aggregateSettleElapsedNs = _elapsedNs(aggregateSettle);
 
     final keyedEmitCounts = List<int>.filled(streamCount, 0);
     final keyedSubs = <StreamSubscription<List<Map<String, Object?>>>>[];
@@ -839,6 +847,7 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
       );
 
       final keyed = Stopwatch()..start();
+      final keyedWriteLoop = Stopwatch()..start();
       await _runConcurrentWriterUpdates(
         peer,
         phaseSeed: writerPressureSeed ^ 0xC0DE,
@@ -847,26 +856,37 @@ Future<PeerScenarioResult> _runSustainedWriterPressure(
         rowCount: rowCount,
         valueBase: 300000,
       );
+      keyedWriteLoop.stop();
+      final keyedSettle = Stopwatch()..start();
       await _waitForQuietReactiveWindow(
         () => keyedEmitCounts.fold<int>(0, _sum),
       );
+      keyedSettle.stop();
       keyed.stop();
       final keyedMeasuredEmissions = keyedEmitCounts.fold<int>(0, _sum);
+      final keyedElapsedNs = _elapsedNs(keyed);
+      final keyedWriteLoopElapsedNs = _elapsedNs(keyedWriteLoop);
+      final keyedSettleElapsedNs = _elapsedNs(keyedSettle);
 
       return PeerScenarioResult(
         setupElapsedNs: _elapsedNs(setup),
         warmupElapsedNs: warmupElapsedNs,
         measuredElapsedNs:
-            _elapsedNs(noStreams) + _elapsedNs(aggregate) + _elapsedNs(keyed),
+            noStreamsWriteLoopElapsedNs + aggregateElapsedNs + keyedElapsedNs,
         measurements: {
           'row_count': rowCount,
           'producer_count': producerCount,
           'writes_per_producer': writesPerProducer,
           'total_writes_per_phase': totalWrites,
           'stream_count': streamCount,
-          'no_streams_elapsed_ns': _elapsedNs(noStreams),
-          'aggregate_stream_elapsed_ns': _elapsedNs(aggregate),
-          'keyed_streams_elapsed_ns': _elapsedNs(keyed),
+          'no_streams_elapsed_ns': noStreamsWriteLoopElapsedNs,
+          'no_streams_write_loop_elapsed_ns': noStreamsWriteLoopElapsedNs,
+          'aggregate_stream_elapsed_ns': aggregateElapsedNs,
+          'aggregate_stream_write_loop_elapsed_ns': aggregateWriteLoopElapsedNs,
+          'aggregate_stream_settle_elapsed_ns': aggregateSettleElapsedNs,
+          'keyed_streams_elapsed_ns': keyedElapsedNs,
+          'keyed_streams_write_loop_elapsed_ns': keyedWriteLoopElapsedNs,
+          'keyed_streams_settle_elapsed_ns': keyedSettleElapsedNs,
           'aggregate_emissions': aggregateMeasuredEmissions,
           'keyed_emissions': keyedMeasuredEmissions,
           'observed_watched_pk_hits': watchedHits,

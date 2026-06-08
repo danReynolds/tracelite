@@ -232,9 +232,11 @@ Map<String, Object?> peerScenarioParameters(
         'seed': writerPressureSeed,
         'required_capabilities': ['sql', 'reactive'],
         'measured_operations': [
-          'concurrent_updates_no_streams',
-          'concurrent_updates_with_aggregate_stream',
-          'concurrent_updates_with_keyed_streams',
+          'no_streams_write_loop',
+          'aggregate_stream_write_loop',
+          'aggregate_stream_settle',
+          'keyed_streams_write_loop',
+          'keyed_streams_settle',
         ],
       },
     sqliteDiagnosticsScenario => {
