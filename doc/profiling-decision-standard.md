@@ -1,18 +1,18 @@
 # tracelite profiling decision standard
 
-Status: implementation-backed standard, updated 2026-05-31
+Status: implementation-backed standard, updated 2026-06-08
 
 This document defines how tracelite artifacts should be used to accept,
 reject, or mark performance experiments as inconclusive. The standard applies
 to resqlite and to peer-library benchmark work where tracelite can produce
-compare or suite artifacts.
+compare, suite, or suite-history artifacts.
 
 ## Required artifact set
 
 Every production-quality experiment should preserve:
 
-- The baseline compare artifact or suite manifest.
-- The candidate compare artifact or suite manifest.
+- The baseline compare artifact, suite manifest, or suite-history manifest.
+- The candidate compare artifact, suite manifest, or suite-history manifest.
 - The `tracelite decision` JSON artifact.
 - The `tracelite calibrate-policy` artifact or the named policy values used for
   thresholds, repetitions, and noise gates.
@@ -34,12 +34,26 @@ Console output is not enough. The durable artifact is the evidence.
 
 ## Command
 
-For an experiment expected to improve resqlite:
+For an experiment expected to improve a primary peer, with resqlite shown here:
 
 ```bash
 dart run bin/tracelite.dart decision \
   --baseline=build/baseline/manifest.json \
   --candidate=build/candidate/manifest.json \
+  --expect=improvement \
+  --primary-peer=resqlite \
+  --primary-metric=measured_elapsed_ns \
+  --policy=build/policy-calibration.json \
+  --out-json=build/decision.json \
+  > build/decision.md
+```
+
+For repeated experiment histories, pass the suite-history manifests directly:
+
+```bash
+dart run bin/tracelite.dart decision \
+  --baseline=build/baseline-history/history.json \
+  --candidate=build/candidate-history/history.json \
   --expect=improvement \
   --primary-peer=resqlite \
   --primary-metric=measured_elapsed_ns \
@@ -61,9 +75,26 @@ dart run bin/tracelite.dart decision \
   --policy=build/policy-calibration.json
 ```
 
-The command accepts either single `tracelite.compare.v1` artifacts or
-`tracelite.suite.v1` manifests. It exits `0` only for an accepted decision.
-Rejected and inconclusive decisions exit non-zero.
+The command accepts single `tracelite.compare.v1` artifacts,
+`tracelite.suite.v1` manifests, or `tracelite.suite_history.v1` manifests.
+For suite-history inputs, Tracelite expands successful history runs, reads their
+linked suite manifests, merges compare artifacts by scenario, and treats the
+samples across history runs as the repeated evidence for each scenario/peer.
+Merged samples keep `history_run` and `history_repetition` fields for audit.
+The command exits `0` only for an accepted decision. Rejected and inconclusive
+decisions exit non-zero.
+
+Run `explain` on the decision artifact when preserving the operator-facing
+interpretation:
+
+```bash
+dart run bin/tracelite.dart explain build/decision.json \
+  > build/decision-insights.md
+```
+
+Decision insights report the outcome, noisy gates, calibrated CV threshold,
+observed max CV, Mann-Whitney p-value, and 95% mean-delta confidence interval
+where those fields are available in the decision artifact.
 
 Before promoting a new production benchmark lane, calibrate the policy from
 artifact history:

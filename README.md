@@ -37,7 +37,8 @@ runner evidence before it is treated as calibrated.
 - SQL query-shape fingerprints by default; raw SQL capture is explicit opt-in.
 - Calibrated thresholds, CV gates, outlier policy, and decisions.
 - Artifact interpretation through `explain` and visualizer insight panels:
-  trace health, noise, bottlenecks, peer spread, and harness overhead.
+  trace health, noise, bottlenecks, peer spread, harness overhead, and
+  generic workload-summary fields.
 - Decision Review in the desktop visualizer for verdicts, policy thresholds,
   gate status, primary comparisons, and guardrail findings.
 - Schema-validated graph data for dashboards and the visualizer.
@@ -103,6 +104,12 @@ dart run bin/tracelite.dart decision \
   --candidate=build/candidate/manifest.json \
   --policy=build/policy-calibration.json
 
+# Published/core command: decide from repeated suite-history artifacts.
+dart run bin/tracelite.dart decision \
+  --baseline=build/baseline-history/history.json \
+  --candidate=build/candidate-history/history.json \
+  --policy=build/policy-calibration.json
+
 # Published/core command: inspect benchmark deltas without peer libraries.
 dart run bin/tracelite.dart diff \
   --baseline=build/baseline/compare.json \
@@ -151,20 +158,23 @@ compare artifacts, so a run can move from quick signal to audited decision
 without changing artifact shape. `suite-history` repeats whole suite runs for
 noise calibration; each run is bounded by a profile-aware timeout (`ci`: 3
 minutes, `experiment`: 10 minutes, `production`: 20 minutes, override with
-`--suite-run-timeout-seconds`). Repeated source-checkout compares use an
-app-JIT child runner when the selected peers can safely share a prepared
-snapshot, so artifacts still have isolated repetitions without paying
-`dart run` startup for every sample. Native-asset peers such as `resqlite`
-stay on the direct script runner in `auto` mode because prepared snapshots do
-not preserve the native-assets metadata they need. For repeated native-assets
-runs, pass `--runner=worker`: it keeps one child process alive, retargets each
-sample to a fresh trace region, and records startup in `runner.build_elapsed_ns`
-instead of hiding it in repetition timings. For reactive native-asset peers that
-can finish Dart work before every native producer has fully gone quiet, the
-worker leaves the runtime inactive briefly after reset before attaching the next
-sample. Worker startup also runs a tiny preflight trace in that same long-lived
-process; if the selected peer cannot emit shim events, the command fails before
-any benchmark sample is trusted.
+`--suite-run-timeout-seconds`). `decision` can consume compare artifacts, suite
+manifests, or suite-history manifests. With suite history inputs, it expands the
+successful runs and aggregates repeated samples per scenario/peer before
+applying the same threshold, CV, p-value, and confidence-interval gates. Repeated
+source-checkout compares use an app-JIT child runner when the selected peers can
+safely share a prepared snapshot, so artifacts still have isolated repetitions
+without paying `dart run` startup for every sample. Native-asset peers such as
+`resqlite` stay on the direct script runner in `auto` mode because prepared
+snapshots do not preserve the native-assets metadata they need. For repeated
+native-assets runs, pass `--runner=worker`: it keeps one child process alive,
+retargets each sample to a fresh trace region, and records startup in
+`runner.build_elapsed_ns` instead of hiding it in repetition timings. For
+reactive native-asset peers that can finish Dart work before every native
+producer has fully gone quiet, the worker leaves the runtime inactive briefly
+after reset before attaching the next sample. Worker startup also runs a tiny
+preflight trace in that same long-lived process; if the selected peer cannot
+emit shim events, the command fails before any benchmark sample is trusted.
 Worker artifacts record both `runner.preflight` and the filtered
 `runner.native_assets` binding used for the selected peers, so shim path problems
 are auditable from the artifact instead of local `.dart_tool` state.
@@ -217,6 +227,12 @@ resqlite's benchmark source audit, records both Tracelite and resqlite source
 states in every wrapper manifest, and validates repeated production runs,
 policy calibration, no-regression acceptance, injected-regression rejection,
 graph-data export, insight artifacts, and clean-clone publish dry-run behavior.
+
+Core workload-summary and `explain` logic consumes schema fields and semantic
+counter suffixes such as `.profile.rows_decoded`, `.rss_before_bytes`, and
+`.sqlite_page_cache_bytes`. The `resqlite.*` vocabulary is one producer of those
+fields, not a required prefix; library-specific conclusions should live with the
+library-specific vocabulary or wrapper.
 
 For release hygiene, run `dart run tool/publish_check.dart` from a clean
 repository checkout. It validates a clean git archive, so ignored local

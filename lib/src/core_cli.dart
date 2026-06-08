@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:tracelite/tracelite.dart';
 
@@ -517,8 +518,13 @@ List<Map<String, Object?>> _readComparableArtifacts(String path) {
   return switch (root['schema']) {
     'tracelite.compare.v1' => [root],
     'tracelite.suite.v1' => _readSuiteCompareArtifacts(path, root),
+    'tracelite.suite_history.v1' => _readSuiteHistoryCompareArtifacts(
+        path,
+        root,
+      ),
     _ => throw FormatException(
-        '$path is not a tracelite compare artifact or suite manifest',
+        '$path is not a tracelite compare artifact, suite manifest, '
+        'or suite history manifest',
       ),
   };
 }
@@ -651,6 +657,211 @@ List<Map<String, Object?>> _readSuiteCompareArtifacts(
       )),
   ];
 }
+
+List<Map<String, Object?>> _readSuiteHistoryCompareArtifacts(
+  String historyPath,
+  Map<String, Object?> history,
+) {
+  final runs = history['runs'];
+  if (runs is! List<Object?>) {
+    throw FormatException('$historyPath has no runs list');
+  }
+  final artifacts = <Map<String, Object?>>[];
+  for (final run in runs.cast<Map<String, Object?>>()) {
+    if (run['status'] != 'ok') continue;
+    final manifest = run['manifest'];
+    if (manifest is! String || manifest.isEmpty) continue;
+    final manifestPath = _resolveManifestArtifactPath(historyPath, manifest);
+    artifacts.addAll(
+      _readSuiteCompareArtifacts(manifestPath, _readJsonMap(manifestPath)),
+    );
+  }
+  return _mergeHistoryCompareArtifacts(artifacts);
+}
+
+List<Map<String, Object?>> _mergeHistoryCompareArtifacts(
+  List<Map<String, Object?>> artifacts,
+) {
+  final byScenario = <String, List<Map<String, Object?>>>{};
+  final passthrough = <Map<String, Object?>>[];
+  for (final artifact in artifacts) {
+    final scenario = artifact['scenario'];
+    if (scenario is String) {
+      byScenario.putIfAbsent(scenario, () => []).add(artifact);
+    } else {
+      passthrough.add(artifact);
+    }
+  }
+  return [
+    for (final group in byScenario.values)
+      if (group.length == 1) group.single else _mergeScenarioArtifacts(group),
+    ...passthrough,
+  ];
+}
+
+Map<String, Object?> _mergeScenarioArtifacts(
+  List<Map<String, Object?>> artifacts,
+) {
+  final first = artifacts.first;
+  final peersByName = <String, List<Map<String, Object?>>>{};
+  for (final artifact in artifacts) {
+    for (final peer in _jsonMapList(artifact['peers'])) {
+      final name = peer['peer'];
+      if (name is String) peersByName.putIfAbsent(name, () => []).add(peer);
+    }
+  }
+
+  final merged = Map<String, Object?>.from(first);
+  merged['history_run_count'] = artifacts.length;
+  merged['repetitions'] = artifacts.fold<int>(
+    0,
+    (sum, artifact) => sum + ((artifact['repetitions'] as num?)?.round() ?? 0),
+  );
+  merged['peers'] = [
+    for (final peers in peersByName.values) _mergeHistoryPeer(peers),
+  ];
+  return merged;
+}
+
+Map<String, Object?> _mergeHistoryPeer(
+  List<Map<String, Object?>> peers,
+) {
+  final first = peers.first;
+  final samples = <Map<String, Object?>>[];
+  var failed = 0;
+  var unsupported = 0;
+  final capabilities = <String>{};
+  for (var source = 0; source < peers.length; source++) {
+    final peer = peers[source];
+    failed += (peer['failed_repetitions'] as num?)?.round() ?? 0;
+    unsupported += (peer['unsupported_repetitions'] as num?)?.round() ?? 0;
+    for (final capability in _jsonList(peer['capabilities'])) {
+      if (capability is String) capabilities.add(capability);
+    }
+    for (final sample in _jsonMapList(peer['samples'])) {
+      samples.add({
+        ...sample,
+        'history_run': source + 1,
+        'history_repetition': sample['repetition'],
+        'repetition': samples.length + 1,
+      });
+    }
+  }
+  final okSamples = samples
+      .where((sample) => sample['status'] == null || sample['status'] == 'ok')
+      .length;
+  final status = peers.every((peer) => peer['status'] == 'ok')
+      ? 'ok'
+      : peers.map((peer) => peer['status']).firstWhere(
+            (status) => status != 'ok',
+            orElse: () => peers.last['status'],
+          );
+  return {
+    ...first,
+    'status': status,
+    'successful_repetitions': okSamples,
+    'failed_repetitions': failed,
+    'unsupported_repetitions': unsupported,
+    if (capabilities.isNotEmpty) 'capabilities': capabilities.toList()..sort(),
+    'samples': samples,
+    'summary': _summarizeSamples(samples),
+  };
+}
+
+Map<String, Object?> _summarizeSamples(List<Map<String, Object?>> samples) {
+  final values = <String, List<num>>{};
+  for (final sample in samples) {
+    if (sample['status'] != null && sample['status'] != 'ok') continue;
+    for (final entry in sample.entries) {
+      if (entry.key == 'repetition' ||
+          entry.key == 'history_run' ||
+          entry.key == 'history_repetition') {
+        continue;
+      }
+      if (entry.value is num) {
+        _addMetricValue(values, entry.key, entry.value! as num);
+      }
+    }
+    for (final entry in _jsonMap(sample['diagnostics']).entries) {
+      if (entry.value is num) {
+        _addMetricValue(values, entry.key, entry.value! as num);
+      }
+    }
+
+    var traceSpanTotal = 0;
+    var hasTraceSpan = false;
+    for (final span in _jsonMapList(sample['span_groups'])) {
+      final total = span['total_ns'];
+      if (total is num) {
+        traceSpanTotal += total.round();
+        hasTraceSpan = true;
+      }
+      if (span['span_name'] == 'sqlite3_step') {
+        final count = span['count'];
+        if (count is num) _addMetricValue(values, 'sqlite3_step_count', count);
+        if (total is num) {
+          _addMetricValue(values, 'sqlite3_step_total_ns', total);
+        }
+      }
+    }
+    if (hasTraceSpan) {
+      _addMetricValue(values, 'trace_span_total_ns', traceSpanTotal);
+    }
+  }
+
+  return {
+    for (final entry in values.entries) entry.key: _stats(entry.value),
+  };
+}
+
+void _addMetricValue(
+  Map<String, List<num>> values,
+  String metric,
+  num value,
+) {
+  if (!value.isFinite) return;
+  values.putIfAbsent(metric, () => []).add(value);
+}
+
+Map<String, Object?> _stats(List<num> values) {
+  final sorted = [...values]..sort();
+  final total = values.fold<double>(0, (sum, value) => sum + value);
+  final mean = total / values.length;
+  final variance = values.length < 2
+      ? 0.0
+      : values
+              .map((value) => math.pow(value - mean, 2).toDouble())
+              .fold<double>(0, (sum, value) => sum + value) /
+          (values.length - 1);
+  final p90Index =
+      (values.length * 0.9).floor().clamp(0, sorted.length - 1).toInt();
+  return {
+    'count': values.length,
+    'total': total,
+    'min': sorted.first,
+    'max': sorted.last,
+    'mean': mean,
+    'median': sorted[sorted.length ~/ 2],
+    'p90': sorted[p90Index],
+    'p99': sorted.last,
+    'stddev': math.sqrt(variance),
+  };
+}
+
+Map<String, Object?> _jsonMap(Object? value) {
+  if (value is Map) return Map<String, Object?>.from(value);
+  return const {};
+}
+
+List<Object?> _jsonList(Object? value) {
+  if (value is List) return List<Object?>.from(value);
+  return const [];
+}
+
+List<Map<String, Object?>> _jsonMapList(Object? value) => [
+      for (final item in _jsonList(value))
+        if (item is Map) Map<String, Object?>.from(item),
+    ];
 
 Map<String, Object?>? _readPolicyOption(Map<String, String> options) {
   final path = options['policy'];
