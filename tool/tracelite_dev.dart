@@ -2561,6 +2561,14 @@ int _ringWordsForScenario(String scenario, int rows) {
         _intParameter(parameters, 'stream_count') * 2000 +
         _intParameter(parameters, 'write_count') * 1000 +
         32768,
+    streamInitialDrainTextScenario ||
+    streamInitialDrainRowidScenario ||
+    streamInitialDrainIndexedIntScenario =>
+      _intParameter(parameters, 'rows') * 120 +
+          _intParameter(parameters, 'stream_count') *
+              _intParameter(parameters, 'repeat_count') *
+              1200 +
+          32768,
     manyStreamsWriterThroughputScenario =>
       _intParameter(parameters, 'rows') * 500 +
           _intParameter(parameters, 'stream_count') * 2000 +
@@ -3543,6 +3551,21 @@ _SuiteProfile _suiteProfile(String profileName) {
             repetitions: 5,
           ),
           _SuiteScenario(
+            name: streamInitialDrainTextScenario,
+            rows: 30,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: streamInitialDrainRowidScenario,
+            rows: 30,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: streamInitialDrainIndexedIntScenario,
+            rows: 30,
+            repetitions: 5,
+          ),
+          _SuiteScenario(
             name: manyStreamsWriterThroughputScenario,
             rows: 12,
             repetitions: 5,
@@ -3602,6 +3625,21 @@ _SuiteProfile _suiteProfile(String profileName) {
             name: highCardinalityFanoutScenario,
             rows: 20,
             repetitions: 5,
+          ),
+          _SuiteScenario(
+            name: streamInitialDrainTextScenario,
+            rows: 50,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: streamInitialDrainRowidScenario,
+            rows: 50,
+            repetitions: 7,
+          ),
+          _SuiteScenario(
+            name: streamInitialDrainIndexedIntScenario,
+            rows: 50,
+            repetitions: 7,
           ),
           _SuiteScenario(
             name: manyStreamsWriterThroughputScenario,

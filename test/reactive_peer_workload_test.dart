@@ -8,11 +8,31 @@ import '../tool/src/peer_drift.dart'
         driftReactiveTableColumnsForTesting,
         driftReactiveTablePrimaryKeysForTesting;
 
+const _reactiveScenarios = [
+  'keyed-pk-subscriptions',
+  'high-cardinality-fanout',
+  'many-streams-writer-throughput',
+  'sustained-writer-pressure',
+];
+
+const _streamInitialDrainScenarios = [
+  'stream-initial-drain-text',
+  'stream-initial-drain-rowid',
+  'stream-initial-drain-indexed-int',
+];
+
 void main() {
   test('drift reactive table metadata matches workload schemas', () {
     expect(driftReactiveTableColumnsForTesting(), {
       'tracelite_keyed_items': ['id', 'body', 'updated_at'],
       'tracelite_fanout_items': ['id', 'owner_id', 'value'],
+      'tracelite_stream_initial_items': [
+        'id',
+        'owner_id',
+        'lookup_key',
+        'body',
+        'updated_at',
+      ],
       'tracelite_wide_items': ['id', 'partition_id', 'a', 'b', 'c'],
       'tracelite_writer_pressure': [
         'id',
@@ -24,17 +44,13 @@ void main() {
     expect(driftReactiveTablePrimaryKeysForTesting(), {
       'tracelite_keyed_items': ['id'],
       'tracelite_fanout_items': ['id'],
+      'tracelite_stream_initial_items': ['id'],
       'tracelite_wide_items': ['id'],
       'tracelite_writer_pressure': ['id'],
     });
   });
 
-  for (final scenario in [
-    'keyed-pk-subscriptions',
-    'high-cardinality-fanout',
-    'many-streams-writer-throughput',
-    'sustained-writer-pressure',
-  ]) {
+  for (final scenario in _reactiveScenarios) {
     test('compare reports capability-aware results for $scenario', () async {
       final result = await Process.run(
         Platform.resolvedExecutable,
@@ -79,12 +95,62 @@ void main() {
     }, timeout: const Timeout(Duration(minutes: 3)));
   }
 
-  for (final scenario in [
-    'keyed-pk-subscriptions',
-    'high-cardinality-fanout',
-    'many-streams-writer-throughput',
-    'sustained-writer-pressure',
-  ]) {
+  for (final scenario in _streamInitialDrainScenarios) {
+    test('resqlite reports stream initial-drain diagnostics for $scenario',
+        () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'tracelite-stream-initial-drain-test-',
+      );
+      addTearDown(() {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      });
+      final artifactPath = '${tempDir.path}/$scenario.json';
+
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        [
+          'run',
+          'bin/tracelite.dart',
+          'compare',
+          '--scenario=$scenario',
+          '--interfaces=resqlite',
+          '--rows=12',
+          '--repetitions=1',
+          '--out-json=$artifactPath',
+        ],
+        workingDirectory: Directory.current.path,
+      );
+
+      expect(
+        result.exitCode,
+        0,
+        reason: 'compare exited non-zero.\nstdout:\n${result.stdout}\n'
+            'stderr:\n${result.stderr}',
+      );
+
+      final artifact = jsonDecode(File(artifactPath).readAsStringSync())
+          as Map<String, Object?>;
+      final workload = artifact['workload']! as Map<String, Object?>;
+      expect(workload['required_capabilities'], ['sql', 'reactive']);
+      expect(workload['repeat_count'], isA<int>());
+      expect(workload['stream_count'], isA<int>());
+      expect(workload['rows_per_stream'], isA<int>());
+
+      final peers = artifact['peers']! as List<Object?>;
+      final resqlite = _peerByName(peers, 'resqlite');
+      expect(resqlite['status'], 'ok');
+      final samples = resqlite['samples']! as List<Object?>;
+      final sample = samples.single as Map<String, Object?>;
+      final measurements = sample['measurements']! as Map<String, Object?>;
+      expect(measurements['repeat_count'], workload['repeat_count']);
+      expect(measurements['stream_count'], workload['stream_count']);
+      expect(measurements['rows_per_stream'], isA<int>());
+    }, timeout: const Timeout(Duration(minutes: 2)));
+  }
+
+  for (final scenario in _reactiveScenarios) {
     test('drift handles larger generated-table reactive stress for $scenario',
         () async {
       final tempDir = await Directory.systemTemp.createTemp(
