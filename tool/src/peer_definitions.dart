@@ -8,6 +8,10 @@ const String chatSimScenario = 'chat-sim';
 const String largeWorkingSetScenario = 'large-working-set';
 const String keyedPkSubscriptionsScenario = 'keyed-pk-subscriptions';
 const String highCardinalityFanoutScenario = 'high-cardinality-fanout';
+const String streamInitialDrainTextScenario = 'stream-initial-drain-text';
+const String streamInitialDrainRowidScenario = 'stream-initial-drain-rowid';
+const String streamInitialDrainIndexedIntScenario =
+    'stream-initial-drain-indexed-int';
 const String manyStreamsWriterThroughputScenario =
     'many-streams-writer-throughput';
 const String sustainedWriterPressureScenario = 'sustained-writer-pressure';
@@ -22,6 +26,9 @@ const List<String> defaultScenarioNames = [
   largeWorkingSetScenario,
   keyedPkSubscriptionsScenario,
   highCardinalityFanoutScenario,
+  streamInitialDrainTextScenario,
+  streamInitialDrainRowidScenario,
+  streamInitialDrainIndexedIntScenario,
   manyStreamsWriterThroughputScenario,
   sustainedWriterPressureScenario,
   sqliteDiagnosticsScenario,
@@ -212,6 +219,21 @@ Map<String, Object?> peerScenarioParameters(
           'stream_settle',
         ],
       },
+    streamInitialDrainTextScenario => _streamInitialDrainParameters(
+        rows,
+        shape: 'text',
+        measuredOperation: 'text_lookup_stream_initial_drain',
+      ),
+    streamInitialDrainRowidScenario => _streamInitialDrainParameters(
+        rows,
+        shape: 'rowid',
+        measuredOperation: 'rowid_stream_initial_drain',
+      ),
+    streamInitialDrainIndexedIntScenario => _streamInitialDrainParameters(
+        rows,
+        shape: 'indexed_int',
+        measuredOperation: 'indexed_int_stream_initial_drain',
+      ),
     manyStreamsWriterThroughputScenario => {
         'rows': writerRowCount(rows),
         'stream_count': writerStreamCount(rows),
@@ -256,6 +278,24 @@ Map<String, Object?> peerScenarioParameters(
   };
 }
 
+Map<String, Object?> _streamInitialDrainParameters(
+  int rows, {
+  required String shape,
+  required String measuredOperation,
+}) {
+  final streamCount = streamInitialDrainStreamCount(rows);
+  final rowsPerStream = streamInitialDrainRowsPerStream(rows);
+  return {
+    'rows': streamCount * rowsPerStream,
+    'stream_count': streamCount,
+    'repeat_count': streamInitialDrainRepeatCount(rows),
+    'rows_per_stream': rowsPerStream,
+    'shape': shape,
+    'required_capabilities': ['sql', 'reactive'],
+    'measured_operations': [measuredOperation],
+  };
+}
+
 int chatUserCount(int rows) => math.max(10, rows * 2);
 
 int chatConversationCount(int rows) => math.max(4, rows);
@@ -283,6 +323,14 @@ int fanoutWriteCount(int rows) => math.min(200, math.max(10, rows * 5));
 
 int fanoutRowCount(int rows) =>
     math.max(fanoutStreamCount(rows) * 10, rows * 100);
+
+int streamInitialDrainStreamCount(int rows) => math.min(100, math.max(4, rows));
+
+int streamInitialDrainRepeatCount(int rows) =>
+    math.min(12, math.max(4, rows ~/ 3));
+
+int streamInitialDrainRowsPerStream(int rows) =>
+    math.min(10, math.max(1, rows ~/ 10));
 
 int writerStreamCount(int rows) => math.min(50, math.max(2, rows));
 

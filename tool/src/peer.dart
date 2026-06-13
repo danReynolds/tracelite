@@ -68,6 +68,24 @@ Future<PeerScenarioResult> runPeerScenario({
         return await _runKeyedPkSubscriptions(peer, rows: rows);
       case highCardinalityFanoutScenario:
         return await _runHighCardinalityFanout(peer, rows: rows);
+      case streamInitialDrainTextScenario:
+        return await _runStreamInitialDrain(
+          peer,
+          rows: rows,
+          shape: _StreamInitialDrainShape.text,
+        );
+      case streamInitialDrainRowidScenario:
+        return await _runStreamInitialDrain(
+          peer,
+          rows: rows,
+          shape: _StreamInitialDrainShape.rowid,
+        );
+      case streamInitialDrainIndexedIntScenario:
+        return await _runStreamInitialDrain(
+          peer,
+          rows: rows,
+          shape: _StreamInitialDrainShape.indexedInt,
+        );
       case manyStreamsWriterThroughputScenario:
         return await _runManyStreamsWriterThroughput(peer, rows: rows);
       case sustainedWriterPressureScenario:
@@ -613,6 +631,159 @@ Future<PeerScenarioResult> _runHighCardinalityFanout(
   } finally {
     await Future.wait([for (final sub in subscriptions) sub.cancel()]);
   }
+}
+
+Future<PeerScenarioResult> _runStreamInitialDrain(
+  SqlitePeer peer, {
+  required int rows,
+  required _StreamInitialDrainShape shape,
+}) async {
+  final reactive = _requireReactivePeer(peer);
+  final streamCount = streamInitialDrainStreamCount(rows);
+  final repeatCount = streamInitialDrainRepeatCount(rows);
+  final rowsPerStream = streamInitialDrainRowsPerStream(rows);
+  final rowCount = streamCount * rowsPerStream;
+
+  final setup = Stopwatch()..start();
+  await peer.execute('DROP TABLE IF EXISTS tracelite_stream_initial_items');
+  await peer.execute(
+    'CREATE TABLE tracelite_stream_initial_items('
+    'id INTEGER PRIMARY KEY, '
+    'owner_id INTEGER NOT NULL, '
+    'lookup_key TEXT NOT NULL UNIQUE, '
+    'body TEXT NOT NULL, '
+    'updated_at INTEGER NOT NULL)',
+  );
+  await peer.execute(
+    'CREATE INDEX tracelite_stream_initial_owner '
+    'ON tracelite_stream_initial_items(owner_id)',
+  );
+  await peer.executeBatch(
+    'INSERT INTO tracelite_stream_initial_items'
+    '(id, owner_id, lookup_key, body, updated_at) VALUES (?, ?, ?, ?, ?)',
+    [
+      for (var id = 1; id <= rowCount; id++)
+        [
+          id,
+          ((id - 1) ~/ rowsPerStream) + 1,
+          'item_$id',
+          'body_$id',
+          0,
+        ],
+    ],
+  );
+  setup.stop();
+
+  final warmup = Stopwatch()..start();
+  await _runStreamInitialDrainCycle(
+    reactive,
+    shape: shape,
+    streamCount: streamCount,
+    rowsPerStream: rowsPerStream,
+  );
+  warmup.stop();
+
+  final measured = Stopwatch()..start();
+  for (var i = 0; i < repeatCount; i++) {
+    await _runStreamInitialDrainCycle(
+      reactive,
+      shape: shape,
+      streamCount: streamCount,
+      rowsPerStream: rowsPerStream,
+    );
+  }
+  measured.stop();
+
+  return PeerScenarioResult(
+    setupElapsedNs: _elapsedNs(setup),
+    warmupElapsedNs: _elapsedNs(warmup),
+    measuredElapsedNs: _elapsedNs(measured),
+    measurements: {
+      'shape': shape.name,
+      'stream_count': streamCount,
+      'repeat_count': repeatCount,
+      'rows_per_stream':
+          shape == _StreamInitialDrainShape.indexedInt ? rowsPerStream : 1,
+    },
+  );
+}
+
+Future<void> _runStreamInitialDrainCycle(
+  ReactiveSqlitePeer reactive, {
+  required _StreamInitialDrainShape shape,
+  required int streamCount,
+  required int rowsPerStream,
+}) async {
+  final iterators = <StreamIterator<List<Map<String, Object?>>>>[];
+  try {
+    for (var i = 0; i < streamCount; i++) {
+      final query = _streamInitialDrainQuery(
+        shape,
+        index: i,
+        rowsPerStream: rowsPerStream,
+      );
+      iterators.add(
+        StreamIterator(
+          reactive.watch(
+            query.sql,
+            parameters: query.parameters,
+            readsFrom: const {'tracelite_stream_initial_items'},
+          ),
+        ),
+      );
+    }
+
+    final emitted = await Future.wait([
+      for (final iterator in iterators) iterator.moveNext(),
+    ]).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => throw TimeoutException(
+        'timed out waiting for ${shape.name} stream initial emissions',
+      ),
+    );
+    if (emitted.any((value) => !value)) {
+      throw StateError('${shape.name} stream closed before initial emission');
+    }
+
+    final expectedRows =
+        shape == _StreamInitialDrainShape.indexedInt ? rowsPerStream : 1;
+    for (final iterator in iterators) {
+      if (iterator.current.length != expectedRows) {
+        throw StateError(
+          '${shape.name} initial drain returned '
+          '${iterator.current.length} row(s), expected $expectedRows',
+        );
+      }
+      _consumeRows(iterator.current);
+    }
+  } finally {
+    await Future.wait([for (final iterator in iterators) iterator.cancel()]);
+  }
+}
+
+_StreamInitialDrainQuery _streamInitialDrainQuery(
+  _StreamInitialDrainShape shape, {
+  required int index,
+  required int rowsPerStream,
+}) {
+  final id = (index * rowsPerStream) + 1;
+  return switch (shape) {
+    _StreamInitialDrainShape.text => _StreamInitialDrainQuery(
+        'SELECT id, body, updated_at '
+        'FROM tracelite_stream_initial_items WHERE lookup_key = ?',
+        ['item_$id'],
+      ),
+    _StreamInitialDrainShape.rowid => _StreamInitialDrainQuery(
+        'SELECT id, body, updated_at '
+        'FROM tracelite_stream_initial_items WHERE id = ?',
+        [id],
+      ),
+    _StreamInitialDrainShape.indexedInt => _StreamInitialDrainQuery(
+        'SELECT id, body, updated_at '
+        'FROM tracelite_stream_initial_items WHERE owner_id = ? ORDER BY id',
+        [index + 1],
+      ),
+  };
 }
 
 Future<PeerScenarioResult> _runManyStreamsWriterThroughput(
@@ -1242,6 +1413,19 @@ Future<void> _runWideUpdates(
 }
 
 int _sum(int a, int b) => a + b;
+
+enum _StreamInitialDrainShape {
+  text,
+  rowid,
+  indexedInt,
+}
+
+final class _StreamInitialDrainQuery {
+  const _StreamInitialDrainQuery(this.sql, this.parameters);
+
+  final String sql;
+  final List<Object?> parameters;
+}
 
 enum _ChatOpKind {
   insertMessage,

@@ -220,6 +220,20 @@ const _traceliteDriftTableSchemas = [
     ],
   ),
   _TraceliteDriftTableSchema(
+    'tracelite_stream_initial_items',
+    [
+      _TraceliteDriftColumnSpec.integer(
+        'id',
+        primaryKey: true,
+        requiredDuringInsert: false,
+      ),
+      _TraceliteDriftColumnSpec.integer('owner_id'),
+      _TraceliteDriftColumnSpec.text('lookup_key'),
+      _TraceliteDriftColumnSpec.text('body'),
+      _TraceliteDriftColumnSpec.integer('updated_at'),
+    ],
+  ),
+  _TraceliteDriftTableSchema(
     'tracelite_wide_items',
     [
       _TraceliteDriftColumnSpec.integer(
